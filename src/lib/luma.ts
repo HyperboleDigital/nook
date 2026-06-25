@@ -1,4 +1,9 @@
-const LUMA_BASE = "https://webapp.engineeringlumalabs.com/api/v2";
+// Luma AI Agents API — used for Reels video generation (ray-3.2 model)
+// Docs: https://docs.agents.lumalabs.ai
+// The old 3D capture API (webapp.engineeringlumalabs.com) is deprecated.
+// 3D reconstruction is handled by the Modal + Nerfstudio pipeline (modal/worker.py).
+
+const LUMA_BASE = "https://agents.lumalabs.ai/v1";
 
 async function lumaFetch(path: string, init?: RequestInit) {
   const res = await fetch(`${LUMA_BASE}${path}`, {
@@ -16,22 +21,28 @@ async function lumaFetch(path: string, init?: RequestInit) {
   return res.json();
 }
 
-export async function createCapture(title: string) {
-  return lumaFetch("/capture", {
+export type LumaAspectRatio = "1:1" | "16:9" | "9:16" | "4:3" | "3:4" | "21:9";
+
+/** Generate a cinematic video from a property image using Luma ray-3.2. */
+export async function createReelVideo(params: {
+  prompt: string;
+  sourceImageUrl?: string;
+  aspectRatio?: LumaAspectRatio;
+}) {
+  return lumaFetch("/generations", {
     method: "POST",
-    body: JSON.stringify({ title, privacy: "private" }),
+    body: JSON.stringify({
+      prompt: params.prompt,
+      type: "video",
+      model: "ray-3.2",
+      aspect_ratio: params.aspectRatio ?? "9:16",
+      ...(params.sourceImageUrl
+        ? { source: { type: "image", url: params.sourceImageUrl } }
+        : {}),
+    }),
   });
 }
 
-export async function getCapture(slug: string) {
-  return lumaFetch(`/capture/${slug}`);
-}
-
-export async function uploadVideoToLuma(uploadUrl: string, videoBuffer: ArrayBuffer, contentType: string) {
-  const res = await fetch(uploadUrl, {
-    method: "PUT",
-    body: videoBuffer,
-    headers: { "Content-Type": contentType },
-  });
-  if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
+export async function getGeneration(id: string) {
+  return lumaFetch(`/generations/${id}`);
 }

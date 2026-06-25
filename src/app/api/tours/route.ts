@@ -1,47 +1,51 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
-import { createCapture, uploadVideoToLuma } from "@/lib/luma";
 import { supabaseAdmin } from "@/lib/supabase";
 import { nanoid } from "nanoid";
-
-export const runtime = "nodejs";
-export const maxDuration = 60;
 
 export async function POST(req: Request) {
   const { userId } = await auth();
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const formData = await req.formData();
-  const title = formData.get("title") as string;
-  const file = formData.get("file") as File;
+  const { title, storagePath } = await req.json();
 
-  if (!title || !file) {
-    return NextResponse.json({ error: "title and file are required" }, { status: 400 });
+  if (!title || !storagePath) {
+    return NextResponse.json({ error: "title and storagePath are required" }, { status: 400 });
   }
 
-  // Create capture in Luma
-  const capture = await createCapture(title);
+  const { data: publicUrlData } = supabaseAdmin.storage
+    .from("nook-uploads")
+    .getPublicUrl(storagePath);
+  const videoUrl = publicUrlData.publicUrl;
 
-  // Upload video to Luma's signed URL
-  const videoBuffer = await file.arrayBuffer();
-  await uploadVideoToLuma(capture.upload_url, videoBuffer, file.type || "video/mp4");
-
-  // Store in Supabase
-  const { data, error } = await supabaseAdmin
+  const { data: tour, error } = await supabaseAdmin
     .from("tours")
     .insert({
       user_id: userId,
       title,
-      luma_capture_id: capture.capture?.slug ?? capture.slug,
-      status: "processing",
+      status: "pending",
       public_slug: nanoid(10),
     })
     .select()
     .single();
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error || !tour) {
+    return NextResponse.json({ error: error?.message ?? "DB error" }, { status: 500 });
   }
 
-  return NextResponse.json({ id: data.id });
+  // Fire-and-forget: trigger Modal GPU worker
+  const callbackUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/webhooks/modal`;
+  const modalUrl = process.env.MODAL_WEBHOOK_URL;
+
+  if (modalUrl) {
+    fetch(modalUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ video_url: videoUrl, tour_id: tour.id, callback_url: callbackUrl }),
+    }).catch((err) => console.error("Failed to trigger Modal worker:", err));
+  } else {
+    console.warn("MODAL_WEBHOOK_URL not set — 3D processing will not start");
+  }
+
+  return NextResponse.json({ id: tour.id });
 }
