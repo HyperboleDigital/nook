@@ -37,6 +37,7 @@ image = (
         add_python="3.11",
     )
     .pip_install(
+        "fastapi[standard]==0.115.12",
         "supabase==2.10.0",
         "requests==2.32.3",
         "httpx==0.27.2",
@@ -128,7 +129,7 @@ def send_callback(callback_url: str, payload: dict) -> None:
     timeout=7200,  # 2 hours max
     secrets=[nook_secrets],
 )
-@modal.web_endpoint(method="POST")
+@modal.fastapi_endpoint(method="POST")
 def process_video(body: dict) -> dict:
     """
     Accepts: { video_url, tour_id, callback_url }
