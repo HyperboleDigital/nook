@@ -2,6 +2,7 @@
 
 import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { upload } from "@vercel/blob/client";
 
 type UploadStep = "idle" | "uploading" | "processing" | "done" | "error";
 
@@ -30,42 +31,36 @@ export default function NewTourPage() {
     setError(null);
 
     try {
-      // Step 1: Get a signed upload URL from our API
+      // Step 1: Upload video directly to Vercel Blob CDN (handles files up to 2 GB)
       setStep("uploading");
       setProgress(0);
-      const ext = file.name.split(".").pop() ?? "mp4";
-      const urlRes = await fetch(`/api/tours/upload-url?ext=${ext}`);
-      if (!urlRes.ok) throw new Error("Failed to get upload URL");
-      const { uploadUrl, storagePath } = await urlRes.json();
 
-      // Step 2: PUT the video directly to Supabase Storage (XHR for progress tracking)
-      await new Promise<void>((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open("PUT", uploadUrl);
-        xhr.setRequestHeader("Content-Type", file.type || "video/mp4");
-        xhr.upload.onprogress = (ev) => {
-          if (ev.lengthComputable) setProgress(Math.round((ev.loaded / ev.total) * 100));
-        };
-        xhr.onload = () => (xhr.status < 300 ? resolve() : reject(new Error(`Upload failed: ${xhr.status}`)));
-        xhr.onerror = () => reject(new Error("Upload network error"));
-        xhr.send(file);
-      });
+      const blob = await upload(
+        `tours/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`,
+        file,
+        {
+          access: "public",
+          handleUploadUrl: "/api/tours/upload-url",
+          onUploadProgress: ({ percentage }) => setProgress(Math.round(percentage)),
+        }
+      );
 
       setProgress(100);
 
-      // Step 3: Create tour record and trigger Modal GPU worker
+      // Step 2: Create tour record and trigger Modal GPU worker
       setStep("processing");
       const tourRes = await fetch("/api/tours", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, storagePath }),
+        body: JSON.stringify({ title, videoUrl: blob.url }),
       });
+
       if (!tourRes.ok) {
         const d = await tourRes.json();
         throw new Error(d.error ?? "Failed to create tour");
       }
-      const { id } = await tourRes.json();
 
+      const { id } = await tourRes.json();
       setStep("done");
       router.push(`/tours/${id}`);
     } catch (err) {

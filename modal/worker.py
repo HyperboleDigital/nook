@@ -12,8 +12,7 @@ On completion it POSTs back to callback_url with:
   { tour_id, ply_url, status: "complete" | "failed", error?: string }
 
 Environment variables (set via `modal secret create nook-secrets`):
-  SUPABASE_URL
-  SUPABASE_SERVICE_ROLE_KEY
+  BLOB_READ_WRITE_TOKEN  (Vercel Blob token for PLY file storage)
   NOOK_APP_URL  (e.g. https://nook-lime.vercel.app)
   MODAL_WEBHOOK_SECRET
 """
@@ -38,7 +37,6 @@ image = (
     )
     .pip_install(
         "fastapi[standard]==0.115.12",
-        "supabase==2.10.0",
         "requests==2.32.3",
         "httpx==0.27.2",
     )
@@ -75,21 +73,23 @@ def run(cmd: str, cwd: str | None = None) -> None:
 # ---------------------------------------------------------------------------
 # Helper: upload a local file to Supabase Storage, return public URL
 # ---------------------------------------------------------------------------
-def upload_to_supabase(local_path: str, storage_path: str) -> str:
-    from supabase import create_client
-
-    sb = create_client(
-        os.environ["SUPABASE_URL"],
-        os.environ["SUPABASE_SERVICE_ROLE_KEY"],
-    )
+def upload_to_blob(local_path: str, remote_filename: str) -> str:
+    """Upload a file to Vercel Blob storage, return the public URL."""
+    token = os.environ["BLOB_READ_WRITE_TOKEN"]
+    import requests as req_lib
     with open(local_path, "rb") as f:
-        sb.storage.from_("nook-uploads").upload(
-            path=storage_path,
-            file=f,
-            file_options={"content-type": "application/octet-stream", "upsert": "true"},
+        r = req_lib.put(
+            f"https://blob.vercel-storage.com/{remote_filename}",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "x-content-type": "model/vnd.ply",
+                "x-cache-control-max-age": "31536000",
+            },
+            data=f,
+            timeout=300,
         )
-    result = sb.storage.from_("nook-uploads").get_public_url(storage_path)
-    return result
+    r.raise_for_status()
+    return r.json()["url"]
 
 
 # ---------------------------------------------------------------------------
@@ -223,11 +223,11 @@ def process_video(body: dict) -> dict:
             print(f"PLY size: {ply_size_mb:.1f} MB")
 
             # ------------------------------------------------------------------
-            # 5. Upload PLY to Supabase Storage
+            # 5. Upload PLY to Vercel Blob
             # ------------------------------------------------------------------
-            storage_path = f"tours/{tour_id}/splat.ply"
-            print(f"Uploading PLY to Supabase Storage: {storage_path}")
-            ply_url = upload_to_supabase(ply_path, storage_path)
+            remote_filename = f"tours/{tour_id}/splat.ply"
+            print(f"Uploading PLY to Vercel Blob: {remote_filename}")
+            ply_url = upload_to_blob(ply_path, remote_filename)
             print(f"PLY URL: {ply_url}")
 
             # ------------------------------------------------------------------

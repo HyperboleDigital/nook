@@ -7,16 +7,11 @@ export async function POST(req: Request) {
   const { userId } = await auth();
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { title, storagePath } = await req.json();
+  const { title, videoUrl } = await req.json();
 
-  if (!title || !storagePath) {
-    return NextResponse.json({ error: "title and storagePath are required" }, { status: 400 });
+  if (!title || !videoUrl) {
+    return NextResponse.json({ error: "title and videoUrl are required" }, { status: 400 });
   }
-
-  const { data: publicUrlData } = supabaseAdmin.storage
-    .from("nook-uploads")
-    .getPublicUrl(storagePath);
-  const videoUrl = publicUrlData.publicUrl;
 
   const { data: tour, error } = await supabaseAdmin
     .from("tours")
