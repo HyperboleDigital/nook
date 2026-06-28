@@ -25,6 +25,7 @@ export default function RestyleWorkspace({ params }: { params: Promise<{ id: str
   const [restyle, setRestyle] = useState<Restyle | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [model, setModel] = useState<"flash" | "pro">("flash");
   // Before/after compare slider: % width of the "before" image shown from the left
   // (left of the handle = Before, right = After).
   const [compare, setCompare] = useState(50);
@@ -90,6 +91,7 @@ export default function RestyleWorkspace({ params }: { params: Promise<{ id: str
     try {
       const fd = new FormData();
       fd.append("restyleId", id);
+      fd.append("model", model);
       Object.entries(fields).forEach(([k, v]) => fd.append(k, v));
       if (refFile) fd.append("reference", refFile);
       const res = await fetch("/api/restyle", { method: "POST", body: fd });
@@ -160,8 +162,12 @@ export default function RestyleWorkspace({ params }: { params: Promise<{ id: str
     return <div className="max-w-4xl"><div className="h-8 w-40 bg-[var(--muted)] rounded animate-pulse" /></div>;
   }
 
-  const before = restyle.original_url;
+  // "After" is the current image; "Before" is the version we edited from (the one
+  // just before the current in history), falling back to the original upload.
   const after = restyle.current_url;
+  const versions = restyle.versions ?? [];
+  const curIdx = versions.findIndex((v) => v.image_url === after);
+  const before = curIdx > 0 ? versions[curIdx - 1].image_url : restyle.original_url;
   const objects = objectsCache[after] ?? null;
 
   return (
@@ -186,30 +192,23 @@ export default function RestyleWorkspace({ params }: { params: Promise<{ id: str
                 <>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={after} alt="Room" className="block w-full max-h-[65vh] object-contain mx-auto" />
+                  {/* Invisible tap targets — detection drives the chip list; boxes
+                      aren't drawn (imprecise boxes are more confusing than helpful). */}
                   {objects?.map((o, i) => {
                     const [ymin, xmin, ymax, xmax] = o.box_2d;
                     return (
                       <button
                         key={i}
                         type="button"
+                        aria-label={o.label}
                         onClick={() => { setSelected(i); setEditInstruction(""); }}
                         style={{
                           position: "absolute",
                           top: `${ymin / 10}%`, left: `${xmin / 10}%`,
                           width: `${(xmax - xmin) / 10}%`, height: `${(ymax - ymin) / 10}%`,
                         }}
-                        className={`group rounded-md border-2 transition-colors ${
-                          selected === i
-                            ? "border-emerald-400 bg-emerald-400/20"
-                            : "border-transparent hover:border-white/80 hover:bg-white/10"
-                        }`}
-                      >
-                        <span className={`absolute -top-2 left-0 -translate-y-full text-[10px] px-1.5 py-0.5 rounded bg-black/70 text-white whitespace-nowrap ${
-                          selected === i ? "opacity-100" : "opacity-0 group-hover:opacity-100"
-                        }`}>
-                          {o.label}
-                        </span>
-                      </button>
+                        className="cursor-pointer"
+                      />
                     );
                   })}
                 </>
@@ -286,6 +285,21 @@ export default function RestyleWorkspace({ params }: { params: Promise<{ id: str
 
         {/* Controls */}
         <div className="space-y-5">
+          {/* Image model selector */}
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-[var(--muted-foreground)]">Model</span>
+            <div className="flex rounded-lg border border-[var(--border)] overflow-hidden text-xs">
+              <button type="button" onClick={() => setModel("flash")}
+                className={`px-3 py-1.5 ${model === "flash" ? "bg-slate-900 text-white" : "hover:bg-[var(--muted)]"}`}>
+                Standard
+              </button>
+              <button type="button" onClick={() => setModel("pro")}
+                className={`px-3 py-1.5 ${model === "pro" ? "bg-slate-900 text-white" : "hover:bg-[var(--muted)]"}`}>
+                Pro
+              </button>
+            </div>
+          </div>
+
           {editMode ? (
             <div className="border border-[var(--border)] rounded-xl p-4 space-y-3">
               <div className="text-sm font-medium">Edit an item</div>

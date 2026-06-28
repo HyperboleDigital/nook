@@ -51,6 +51,10 @@ interface RestyleParams {
   targetLabel?: string;
   /** For mode "edit": optional reference image for the new item. */
   reference?: { base64: string; mimeType: string };
+  /** Supported aspect ratio string (e.g. "4:3") to coax the output ratio. */
+  aspectRatio?: string;
+  /** Explicit model choice. If omitted, reference edits use Pro, else Flash. */
+  model?: "flash" | "pro";
 }
 
 function buildPrompt(p: RestyleParams): string {
@@ -135,11 +139,23 @@ export async function restyleRoom(
         { inline_data: { mime_type: params.mimeType, data: params.imageBase64 } },
       ];
 
-  const body = { contents: [{ parts }], generationConfig: { responseModalities: ["IMAGE"] } };
+  const body = {
+    contents: [{ parts }],
+    generationConfig: {
+      responseModalities: ["IMAGE"],
+      // Pro honors this (esp. important for multi-image edits, which otherwise
+      // default to a 1:1 square). Flash ignores it but returns near-input anyway.
+      ...(params.aspectRatio ? { imageConfig: { aspectRatio: params.aspectRatio } } : {}),
+    },
+  };
 
-  // Reference-guided swaps use the stronger Pro model; everything else uses Flash.
-  // If Pro isn't available on this tier, fall back to Flash rather than failing.
-  const preferred = params.reference ? GEMINI_IMAGE_PRO_MODEL : GEMINI_IMAGE_MODEL;
+  // Explicit model choice wins; otherwise reference-guided swaps use Pro and the
+  // rest uses Flash. If Pro isn't available on this tier, fall back to Flash.
+  const preferred =
+    params.model === "pro" ? GEMINI_IMAGE_PRO_MODEL
+    : params.model === "flash" ? GEMINI_IMAGE_MODEL
+    : params.reference ? GEMINI_IMAGE_PRO_MODEL
+    : GEMINI_IMAGE_MODEL;
   let data: GeminiResponse;
   try {
     data = await geminiPost(preferred, body);
@@ -168,10 +184,13 @@ export async function detectObjects(params: {
   mimeType: string;
 }): Promise<DetectedObject[]> {
   const prompt =
-    "Detect the distinct, editable elements in this room — furniture, decor, rugs, lighting and " +
-    "fixtures, the walls, the floor, the ceiling, and windows. Return a JSON array; each item has " +
-    '"label" (a short human name like "sofa", "wall", "ceiling fan") and "box_2d" ' +
-    "([ymin, xmin, ymax, xmax] as integers 0–1000). No duplicates, at most 20 items.";
+    "Detect the major design-relevant elements in this room — the walls (e.g. \"left wall\", " +
+    "\"right wall\"), floor, ceiling, windows, doors, the ceiling fan and light fixtures, and any " +
+    "furniture, rugs, mirrors, or curtains. " +
+    "Do NOT include small utility fixtures: air vents, electrical outlets, light switches, " +
+    "baseboards, door handles, thermostats, or smoke detectors. " +
+    'Return a JSON array; each item has "label" (a short human name) and "box_2d" ' +
+    "([ymin, xmin, ymax, xmax] as integers 0–1000). No duplicates, at most 14 items.";
 
   const data = await geminiPost(GEMINI_VISION_MODEL, {
     contents: [

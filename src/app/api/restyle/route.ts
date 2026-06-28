@@ -9,6 +9,17 @@ import { supabaseAdmin } from "@/lib/supabase";
 // normalized to its dimensions) stays a reasonable file size while keeping aspect.
 const MAX_DIM = 1536;
 
+// Gemini's supported aspect ratios; we send the closest one so the model outputs
+// the room's shape (esp. Pro, which otherwise returns a 1:1 square for multi-image).
+const SUPPORTED: [string, number][] = [
+  ["1:1", 1], ["3:4", 0.75], ["4:3", 1.3333], ["2:3", 0.6667], ["3:2", 1.5],
+  ["4:5", 0.8], ["5:4", 1.25], ["9:16", 0.5625], ["16:9", 1.7778],
+];
+function closestAspect(w: number, h: number) {
+  const r = w / h;
+  return SUPPORTED.reduce((best, s) => (Math.abs(s[1] - r) < Math.abs(best[1] - r) ? s : best), SUPPORTED[0])[0];
+}
+
 async function fileToBuf(f: File) {
   return Buffer.from(await f.arrayBuffer());
 }
@@ -51,12 +62,17 @@ export async function POST(req: Request) {
     const customStyle = (form.get("customStyle") as string) || undefined;
     const instruction = (form.get("instruction") as string) || undefined;
     const targetLabel = (form.get("targetLabel") as string) || undefined;
+    const model = ((form.get("model") as string) || undefined) as "flash" | "pro" | undefined;
     const referenceFile = form.get("reference") as File | null;
     const photo = form.get("photo") as File | null;
 
     let srcBuf: Buffer;
     let srcMime: string;
     let originalUrl: string | null = null;
+    // Canonical dimensions for the whole project — every result is normalized to
+    // these (NOT the previous image), so one stray ratio can't pollute the chain.
+    let canonW: number | undefined;
+    let canonH: number | undefined;
 
     if (restyleId) {
       const { data: row } = await supabaseAdmin
@@ -64,20 +80,27 @@ export async function POST(req: Request) {
       if (!row) return NextResponse.json({ error: "Restyle not found" }, { status: 404 });
       srcBuf = await urlToBuf(row.current_url);
       srcMime = "image/png";
+      canonW = row.width ?? undefined;
+      canonH = row.height ?? undefined;
+      if (!canonW || !canonH) {
+        const m = await sharp(srcBuf).metadata();
+        canonW = m.width; canonH = m.height;
+      }
     } else {
       if (!photo) return NextResponse.json({ error: "A room photo is required" }, { status: 400 });
-      // Canonicalize the original: downscale to MAX_DIM (keeps aspect). Every
-      // result is then matched to these dimensions.
+      // Canonicalize the original: downscale to MAX_DIM (keeps aspect).
       srcBuf = await sharp(await fileToBuf(photo))
         .rotate() // honor EXIF orientation
         .resize({ width: MAX_DIM, height: MAX_DIM, fit: "inside", withoutEnlargement: true })
         .jpeg({ quality: 90 })
         .toBuffer();
       srcMime = "image/jpeg";
+      const m = await sharp(srcBuf).metadata();
+      canonW = m.width; canonH = m.height;
       originalUrl = await uploadBuf(userId, srcBuf, srcMime);
     }
 
-    const meta = await sharp(srcBuf).metadata();
+    const aspectRatio = canonW && canonH ? closestAspect(canonW, canonH) : undefined;
 
     // Persist the reference photo so history can show what was used.
     let referenceUrl: string | null = null;
@@ -94,13 +117,14 @@ export async function POST(req: Request) {
       mimeType: srcMime,
       mode,
       theme: theme as RestyleTheme | undefined,
-      customStyle, instruction, targetLabel, reference,
+      customStyle, instruction, targetLabel, reference, aspectRatio, model,
     });
 
-    // Force the result to the source's exact dimensions → perfect slider overlay.
+    // Normalize to the project's canonical dimensions → all versions share one
+    // exact ratio and the before/after slider overlays perfectly.
     let outBuf = Buffer.from(result.base64, "base64");
-    if (meta.width && meta.height) {
-      outBuf = Buffer.from(await sharp(outBuf).resize(meta.width, meta.height, { fit: "cover" }).png().toBuffer());
+    if (canonW && canonH) {
+      outBuf = Buffer.from(await sharp(outBuf).resize(canonW, canonH, { fit: "cover" }).png().toBuffer());
     }
     const resultUrl = await uploadBuf(userId, outBuf, "image/png");
     const label = labelFor(mode, { theme, customStyle, instruction, targetLabel });
@@ -113,7 +137,7 @@ export async function POST(req: Request) {
       );
       const { data: created, error } = await supabaseAdmin
         .from("restyles")
-        .insert({ user_id: userId, title: label, original_url: originalUrl!, current_url: resultUrl })
+        .insert({ user_id: userId, title: label, original_url: originalUrl!, current_url: resultUrl, width: canonW, height: canonH })
         .select().single();
       if (error || !created) return NextResponse.json({ error: error?.message ?? "DB error" }, { status: 500 });
       await supabaseAdmin.from("restyle_versions").insert({ restyle_id: created.id, image_url: resultUrl, label, reference_url: referenceUrl });

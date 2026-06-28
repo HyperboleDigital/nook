@@ -54,6 +54,8 @@ export interface Restyle {
   title: string | null;
   original_url: string;
   current_url: string;
+  width: number | null;
+  height: number | null;
   created_at: string;
   updated_at: string;
   versions?: RestyleVersion[];
