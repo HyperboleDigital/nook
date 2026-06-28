@@ -40,7 +40,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             Upload 3D Model
           </Link>
           <Link
-            href="/restyle/new"
+            href="/restyle"
             className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm hover:bg-[var(--accent)] transition-colors"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

@@ -30,6 +30,35 @@ export interface Reel {
   created_at: string;
 }
 
+export interface DetectedObject {
+  label: string;
+  /** [ymin, xmin, ymax, xmax], scaled 0–1000 relative to the image. */
+  box_2d: [number, number, number, number];
+}
+
+export interface RestyleVersion {
+  id: string;
+  restyle_id: string;
+  image_url: string;
+  label: string | null;
+  /** Reference photo used for this edit, if any. */
+  reference_url: string | null;
+  /** Cached object detection for this image (tap-to-select editing). */
+  objects: DetectedObject[] | null;
+  created_at: string;
+}
+
+export interface Restyle {
+  id: string;
+  user_id: string;
+  title: string | null;
+  original_url: string;
+  current_url: string;
+  created_at: string;
+  updated_at: string;
+  versions?: RestyleVersion[];
+}
+
 export interface UserProfile {
   id: string;
   clerk_id: string;
