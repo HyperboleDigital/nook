@@ -88,6 +88,7 @@ MODAL_WEBHOOK_URL                   https://hello-74996--nook-3dgs-process-video
 MODAL_WEBHOOK_SECRET                2bda05a9cc6a5ba9c64886fb0d07b0b817e2c7d6
 LUMA_API_KEY                        for future Reels use
 HIGGSFIELD_API_KEY
+GEMINI_API_KEY                      Google AI Studio — Room Restyle (Nano Banana image model)
 NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
 STRIPE_SECRET_KEY
 STRIPE_WEBHOOK_SECRET

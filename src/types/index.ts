@@ -2,12 +2,17 @@ export type PlanType = "free" | "starter" | "pro";
 
 export type JobStatus = "pending" | "processing" | "complete" | "failed";
 
+export type TourContentType = "splat" | "mesh";
+
 export interface Tour {
   id: string;
   user_id: string;
   status: JobStatus;
+  content_type: TourContentType;
   luma_capture_id: string | null;
   ply_url: string | null;
+  model_url: string | null;
+  video_url: string | null;
   thumbnail_url: string | null;
   title: string;
   public_slug: string;
