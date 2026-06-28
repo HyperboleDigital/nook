@@ -6,7 +6,10 @@ import { upload } from "@vercel/blob/client";
 
 type UploadStep = "idle" | "uploading" | "processing" | "done" | "error";
 
-export default function NewTourPage() {
+const isGlb = (f: File) =>
+  f.name.toLowerCase().endsWith(".glb") || f.type === "model/gltf-binary";
+
+export default function NewModelPage() {
   const router = useRouter();
   const [title, setTitle] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -21,7 +24,7 @@ export default function NewTourPage() {
     e.preventDefault();
     setIsDragging(false);
     const dropped = e.dataTransfer.files[0];
-    if (dropped && dropped.type.startsWith("video/")) setFile(dropped);
+    if (dropped && isGlb(dropped)) setFile(dropped);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -31,29 +34,31 @@ export default function NewTourPage() {
     setError(null);
 
     try {
-      // Upload video directly to Vercel Blob CDN (up to 2 GB)
+      // Upload the GLB directly to Vercel Blob CDN. Meshy/Rodin exports can be
+      // tens of MB, so use multipart (parallel chunks, no single-request cap).
       setStep("uploading");
       setProgress(0);
 
       const blob = await upload(
-        `tours/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`,
+        `models/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`,
         file,
         {
           access: "public",
           handleUploadUrl: "/api/tours/upload-url",
-          multipart: true, // split into parallel chunks — faster + no single-request size cap
+          multipart: true,
           onUploadProgress: ({ percentage }) => setProgress(Math.round(percentage)),
         }
       );
 
       setProgress(100);
 
-      // Create tour record and trigger Modal GPU worker
+      // Mesh tours need no GPU job — the GLB is already generated, so the tour
+      // is created complete immediately.
       setStep("processing");
       const tourRes = await fetch("/api/tours", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, videoUrl: blob.url }),
+        body: JSON.stringify({ title, modelUrl: blob.url, contentType: "mesh" }),
       });
 
       if (!tourRes.ok) {
@@ -71,35 +76,36 @@ export default function NewTourPage() {
   };
 
   const isLoading = step === "uploading" || step === "processing";
-  const fileMB = file ? (file.size / 1024 / 1024).toFixed(0) : null;
+  const fileMB = file ? (file.size / 1024 / 1024).toFixed(1) : null;
 
   return (
     <div className="max-w-xl">
       <div className="mb-8">
-        <h1 className="text-2xl font-bold mb-1">New 3D Tour</h1>
+        <h1 className="text-2xl font-bold mb-1">Upload 3D Model</h1>
         <p className="text-[var(--muted-foreground)] text-sm">
-          Upload a walkthrough video. We&apos;ll compress and generate a shareable 3D tour in 30–45 minutes.
+          Upload a GLB dollhouse model (e.g. a floor plan run through Meshy, Rodin, or Tripo).
+          It becomes an interactive, shareable 3D tour instantly — no processing wait.
         </p>
       </div>
 
-      {/* Capture Tips */}
+      {/* How-to */}
       <div className="mb-6 border border-[var(--border)] rounded-xl overflow-hidden">
         <button
           type="button"
           onClick={() => setTipsOpen(!tipsOpen)}
           className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium hover:bg-[var(--muted)] transition-colors"
         >
-          <span>📋 Tips for a great scan</span>
+          <span>📋 How to make a dollhouse GLB</span>
           <span className="text-[var(--muted-foreground)]">{tipsOpen ? "▲" : "▼"}</span>
         </button>
         {tipsOpen && (
           <div className="px-4 pb-4 text-sm text-[var(--muted-foreground)] space-y-2 border-t border-[var(--border)] pt-3">
-            <p><strong className="text-[var(--foreground)]">Walk as you film — don&apos;t stand and spin.</strong> Moving through the space is what creates real 3D depth. Step side to side and walk <em>around</em> furniture, not just past it.</p>
-            <p><strong className="text-[var(--foreground)]">Move slowly and smoothly.</strong> No fast pans or jerky motion — motion blur destroys the result.</p>
-            <p><strong className="text-[var(--foreground)]">Overlap heavily &amp; cover everything.</strong> Sweep slowly so each spot is seen from many angles; get floor, ceiling corners, and all sides of furniture. Pause briefly at corners.</p>
-            <p><strong className="text-[var(--foreground)]">Lots of even light.</strong> Turn on every light; avoid pointing the camera at bright windows.</p>
-            <p><strong className="text-[var(--foreground)]">Avoid mirrors, glass &amp; shiny surfaces</strong> — they confuse the reconstruction. Keep people and pets out of frame.</p>
-            <p><strong className="text-[var(--foreground)]">One room at a time</strong>, ~1–3 minutes, recorded at 1080p+ (no digital zoom).</p>
+            <p className="text-xs uppercase tracking-wide text-[var(--foreground)] font-semibold">Best quality — from a 2D floor plan</p>
+            <p><strong className="text-[var(--foreground)]">1. Build it in a CAD tool.</strong> Import the 2D floor plan into <strong className="text-[var(--foreground)]">Coohom</strong> or <strong className="text-[var(--foreground)]">Planner 5D</strong>, trace walls, and <strong className="text-[var(--foreground)]">set the scale</strong> from a known dimension. This gives accurate geometry an image-to-3D tool can&apos;t.</p>
+            <p><strong className="text-[var(--foreground)]">2. Furnish &amp; finish to match the render.</strong> Use the client&apos;s 3D render as a side-by-side reference for furniture, floor color, and wall finishes.</p>
+            <p><strong className="text-[var(--foreground)]">3. Export as GLB</strong> (may need a paid tier) <strong className="text-[var(--foreground)]">and upload here.</strong> It becomes an orbit-able dollhouse instantly.</p>
+            <p className="text-xs pt-1"><strong className="text-[var(--foreground)]">No 2D plan, render only?</strong> Run the render through Meshy / Rodin / Tripo (image-to-3D) and export GLB — approximate geometry, but works.</p>
+            <p className="text-xs">This is a dollhouse-style overview, best viewed by orbiting. For walk-through-inside rooms, use a video-based 3D tour. Full recipe: <code>docs/floor-plan-to-3d-recipe.md</code>.</p>
           </div>
         )}
       </div>
@@ -119,7 +125,7 @@ export default function NewTourPage() {
         </div>
 
         <div>
-          <label className="block text-sm font-medium mb-2">Walkthrough video</label>
+          <label className="block text-sm font-medium mb-2">3D model (GLB)</label>
           <div
             className={`border-2 border-dashed rounded-xl p-10 text-center transition-colors ${
               isLoading
@@ -149,16 +155,16 @@ export default function NewTourPage() {
               </div>
             ) : (
               <div className="text-sm text-[var(--muted-foreground)]">
-                <div className="text-2xl mb-2">📹</div>
-                <div>Drag & drop a video, or click to browse</div>
-                <div className="text-xs mt-1">MP4 or MOV · up to 2 GB</div>
+                <div className="text-2xl mb-2">🏠</div>
+                <div>Drag & drop a GLB, or click to browse</div>
+                <div className="text-xs mt-1">.glb file</div>
               </div>
             )}
           </div>
           <input
             ref={fileInputRef}
             type="file"
-            accept="video/*,.mov"
+            accept=".glb,model/gltf-binary"
             className="hidden"
             onChange={(e) => e.target.files?.[0] && setFile(e.target.files[0])}
           />
@@ -167,7 +173,7 @@ export default function NewTourPage() {
         {step === "uploading" && (
           <div>
             <div className="flex justify-between text-xs text-[var(--muted-foreground)] mb-1">
-              <span>Uploading video…</span>
+              <span>Uploading model…</span>
               <span>{progress}%</span>
             </div>
             <div className="w-full bg-[var(--muted)] rounded-full h-2">
@@ -181,7 +187,7 @@ export default function NewTourPage() {
 
         {step === "processing" && (
           <div className="text-sm text-[var(--muted-foreground)] text-center py-2">
-            Starting 3D processing…
+            Creating tour…
           </div>
         )}
 
@@ -199,8 +205,8 @@ export default function NewTourPage() {
           {step === "uploading"
             ? `Uploading… ${progress}%`
             : step === "processing"
-            ? "Starting…"
-            : "Generate 3D Tour →"}
+            ? "Creating…"
+            : "Create 3D Tour →"}
         </button>
       </form>
     </div>

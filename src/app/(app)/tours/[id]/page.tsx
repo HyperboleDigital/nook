@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, use } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import TourViewer from "@/components/tour-viewer";
+import MeshViewer from "@/components/mesh-viewer";
 import type { Tour } from "@/types";
 
 const POLL_INTERVAL_MS = 10_000;
@@ -63,6 +64,8 @@ export default function TourPage({ params }: { params: Promise<{ id: string }> }
   }
 
   const shareUrl = `${APP_URL}/tour/${tour.public_slug}`;
+  const isMesh = tour.content_type === "mesh";
+  const hasContent = isMesh ? !!tour.model_url : !!tour.ply_url;
 
   return (
     <div className="max-w-4xl">
@@ -87,21 +90,27 @@ export default function TourPage({ params }: { params: Promise<{ id: string }> }
             >
               {copied ? "Copied!" : "Copy link"}
             </button>
-            <a
-              href={`https://superspl.at/editor?load=${encodeURIComponent(tour.ply_url ?? "")}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-sm border border-[var(--border)] px-4 py-2 rounded-lg hover:bg-[var(--muted)] whitespace-nowrap"
-            >
-              Edit in SuperSplat ↗
-            </a>
+            {!isMesh && (
+              <a
+                href={`https://superspl.at/editor?load=${encodeURIComponent(tour.ply_url ?? "")}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm border border-[var(--border)] px-4 py-2 rounded-lg hover:bg-[var(--muted)] whitespace-nowrap"
+              >
+                Edit in SuperSplat ↗
+              </a>
+            )}
           </div>
         )}
       </div>
 
-      {tour.status === "complete" && tour.ply_url ? (
-        <div className="rounded-2xl overflow-hidden border border-[var(--border)]" style={{ height: 500 }}>
-          <TourViewer plyUrl={tour.ply_url} />
+      {tour.status === "complete" && hasContent ? (
+        <div className="rounded-2xl overflow-hidden border border-[var(--border)]" style={{ height: "calc(100vh - 220px)" }}>
+          {isMesh ? (
+            <MeshViewer modelUrl={tour.model_url!} />
+          ) : (
+            <TourViewer plyUrl={tour.ply_url!} />
+          )}
         </div>
       ) : tour.status === "failed" ? (
         <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-16 text-center">
