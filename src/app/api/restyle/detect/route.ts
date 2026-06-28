@@ -35,14 +35,11 @@ export async function POST(req: Request) {
 
     const objects = await detectObjects({ imageBase64: base64, mimeType });
 
-    // Cache on the version row so we never re-detect this image (saves tokens).
-    if (restyleId && imageUrl) {
-      const { data: owned } = await supabaseAdmin
-        .from("restyles").select("id").eq("id", restyleId).eq("user_id", userId).single();
-      if (owned) {
-        await supabaseAdmin
-          .from("restyle_versions").update({ objects }).eq("restyle_id", restyleId).eq("image_url", imageUrl);
-      }
+    // Persist on the project so the item list is stable across reloads (detection
+    // is non-deterministic — without this the chips changed every load).
+    if (restyleId) {
+      await supabaseAdmin
+        .from("restyles").update({ detected_objects: objects }).eq("id", restyleId).eq("user_id", userId);
     }
 
     return NextResponse.json({ objects });

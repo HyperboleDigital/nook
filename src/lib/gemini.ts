@@ -172,6 +172,101 @@ export async function restyleRoom(
   return { base64: part.inlineData.data, mimeType: part.inlineData.mimeType ?? "image/png" };
 }
 
+// Run an image-gen request with model selection + Pro→Flash fallback.
+async function generateImage(
+  parts: Record<string, unknown>[],
+  opts: { aspectRatio?: string; model?: "flash" | "pro"; preferPro?: boolean }
+): Promise<{ base64: string; mimeType: string }> {
+  const body = {
+    contents: [{ parts }],
+    generationConfig: {
+      responseModalities: ["IMAGE"],
+      ...(opts.aspectRatio ? { imageConfig: { aspectRatio: opts.aspectRatio } } : {}),
+    },
+  };
+  const preferred =
+    opts.model === "pro" ? GEMINI_IMAGE_PRO_MODEL
+    : opts.model === "flash" ? GEMINI_IMAGE_MODEL
+    : opts.preferPro ? GEMINI_IMAGE_PRO_MODEL
+    : GEMINI_IMAGE_MODEL;
+  let data: GeminiResponse;
+  try {
+    data = await geminiPost(preferred, body);
+  } catch (err) {
+    if (preferred !== GEMINI_IMAGE_MODEL) data = await geminiPost(GEMINI_IMAGE_MODEL, body);
+    else throw err;
+  }
+  const part = data.candidates?.[0]?.content?.parts?.find((p) => p.inlineData?.data);
+  if (!part?.inlineData?.data) throw new Error("Gemini returned no image");
+  return { base64: part.inlineData.data, mimeType: part.inlineData.mimeType ?? "image/png" };
+}
+
+export interface ComposeEditInput {
+  kind: RestyleMode | "item" | "style" | "remove" | "refine";
+  targetLabel?: string | null;
+  instruction?: string | null;
+  reference?: { base64: string; mimeType: string };
+}
+
+/**
+ * Apply ALL given edits to the base room in one call — the "active layers" render.
+ * References are appended as labeled images and cited by number in the prompt.
+ */
+export async function composeEdits(params: {
+  imageBase64: string;
+  mimeType: string;
+  edits: ComposeEditInput[];
+  aspectRatio?: string;
+  model?: "flash" | "pro";
+}): Promise<{ base64: string; mimeType: string }> {
+  // Assign image numbers to references (image 1 = the base room).
+  let imgNum = 2;
+  const refNum = new Map<ComposeEditInput, number>();
+  const refParts: Record<string, unknown>[] = [];
+  for (const e of params.edits) {
+    if (e.reference) {
+      refNum.set(e, imgNum);
+      refParts.push({ text: `Image ${imgNum} — reference for the ${e.targetLabel ?? "item"}:` });
+      refParts.push({ inline_data: { mime_type: e.reference.mimeType, data: e.reference.base64 } });
+      imgNum++;
+    }
+  }
+
+  const lines = params.edits.map((e, i) => {
+    const n = i + 1;
+    const label = e.targetLabel ?? "item";
+    const extra = e.instruction?.trim() ? ` Also: ${e.instruction.trim()}.` : "";
+    switch (e.kind) {
+      case "item":
+        return e.reference
+          ? `${n}. Replace the ${label} with the item shown in image ${refNum.get(e)} — match its exact design, shape, color, and finish, fitted to the room's perspective, scale, and lighting.${extra}`
+          : `${n}. Change the ${label}: ${e.instruction ?? ""}.`;
+      case "style":
+        return `${n}. Restyle the whole room in this style: ${e.instruction ?? ""}.`;
+      case "remove":
+        return `${n}. Remove all furniture, decor, rugs, and clutter — leave a clean empty room with bare floor and walls.`;
+      default:
+        return `${n}. ${e.instruction ?? ""}.`;
+    }
+  });
+
+  const prompt =
+    "Apply ALL of the following changes to the base room (image 1). Keep the room's architecture, " +
+    "layout, windows, doors, perspective, and camera angle identical — only make these changes:\n" +
+    lines.join("\n") +
+    "\nReturn one photorealistic image with every change applied.";
+
+  const parts: Record<string, unknown>[] = [
+    { text: prompt },
+    { text: "Image 1 — the base room:" },
+    { inline_data: { mime_type: params.mimeType, data: params.imageBase64 } },
+    ...refParts,
+  ];
+
+  const preferPro = params.edits.some((e) => e.reference);
+  return generateImage(parts, { aspectRatio: params.aspectRatio, model: params.model, preferPro });
+}
+
 export interface DetectedObject {
   label: string;
   /** [ymin, xmin, ymax, xmax], scaled 0–1000 relative to the image. */

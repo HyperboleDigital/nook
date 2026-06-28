@@ -36,6 +36,20 @@ export interface DetectedObject {
   box_2d: [number, number, number, number];
 }
 
+export type RestyleEditKind = "item" | "style" | "remove" | "refine";
+
+export interface RestyleEdit {
+  id: string;
+  restyle_id: string;
+  kind: RestyleEditKind;
+  target_label: string | null;
+  instruction: string | null;
+  reference_url: string | null;
+  active: boolean;
+  position: number;
+  created_at: string;
+}
+
 export interface RestyleVersion {
   id: string;
   restyle_id: string;
@@ -56,9 +70,11 @@ export interface Restyle {
   current_url: string;
   width: number | null;
   height: number | null;
+  detected_objects: DetectedObject[] | null;
   created_at: string;
   updated_at: string;
   versions?: RestyleVersion[];
+  edits?: RestyleEdit[];
 }
 
 export interface UserProfile {

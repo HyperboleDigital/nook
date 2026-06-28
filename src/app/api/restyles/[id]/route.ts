@@ -12,10 +12,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     .from("restyles").select("*").eq("id", id).eq("user_id", userId).single();
   if (!restyle) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const { data: versions } = await supabaseAdmin
-    .from("restyle_versions").select("*").eq("restyle_id", id).order("created_at", { ascending: true });
+  const { data: edits } = await supabaseAdmin
+    .from("restyle_edits").select("*").eq("restyle_id", id).order("position", { ascending: true });
 
-  return NextResponse.json({ ...restyle, versions: versions ?? [] });
+  return NextResponse.json({ ...restyle, edits: edits ?? [] });
 }
 
 // PATCH /api/restyles/[id] — revert: set current_url to a chosen version's image.
