@@ -4,6 +4,7 @@ import { supabaseAdmin } from "@/lib/supabase";
 import { uploadImage } from "@/lib/restyle-render";
 import { fetchProduct, ProductFetchError } from "@/lib/product";
 import { describeProductImages } from "@/lib/gemini";
+import { resolveImmersiveToken } from "@/lib/shopping-search";
 import type { DetectedObject } from "@/types";
 
 /** Fetch a remote image and return Gemini-ready { base64, mimeType }. */
@@ -49,7 +50,17 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const restyle = await loadOwned(id, userId);
   if (!restyle) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const { url } = await req.json().catch(() => ({}));
+  const body = await req.json().catch(() => ({}));
+  const { url: rawUrl, token } = body as { url?: string; token?: string };
+
+  // When the user picks a visual-search candidate, we receive a SerpApi immersive token
+  // instead of a direct URL — resolve it first.
+  let url = rawUrl;
+  if (!url && token) {
+    const resolved = await resolveImmersiveToken(token);
+    if (!resolved) return NextResponse.json({ error: "Couldn't resolve that product link." }, { status: 502 });
+    url = resolved;
+  }
   if (!url || typeof url !== "string") {
     return NextResponse.json({ error: "A product link is required." }, { status: 400 });
   }

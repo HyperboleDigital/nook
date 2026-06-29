@@ -32,9 +32,13 @@ export class ProductFetchError extends Error {
   }
 }
 
-const RETAILERS: Record<string, { platform: string; name: string }> = {
+export const RETAILERS: Record<string, { platform: string; name: string }> = {
   "wayfair.com": { platform: "wayfair_detail", name: "Wayfair" },
 };
+
+export function isSupportedRetailerUrl(rawUrl: string): boolean {
+  try { return retailerFor(new URL(rawUrl)) !== null; } catch { return false; }
+}
 
 function retailerFor(url: URL) {
   const host = url.hostname.replace(/^www\./, "");

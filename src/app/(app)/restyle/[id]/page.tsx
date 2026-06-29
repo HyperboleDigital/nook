@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, use } from "react";
 import Link from "next/link";
 import type { Restyle, RestyleEdit, RestyleRender } from "@/types";
+import type { ShoppingResult } from "@/lib/shopping-search";
 
 const THEMES = [
   { label: "Modern", desc: "modern contemporary style" },
@@ -100,7 +101,14 @@ export default function RestyleWorkspace({ params }: { params: Promise<{ id: str
   // Add a product (shop the look)
   const [productUrl, setProductUrl] = useState("");
   const [fetchingProduct, setFetchingProduct] = useState(false);
-  const [lastProduct, setLastProduct] = useState<{ editId: string; kind: "item" | "add"; targetLabel: string; retailer: string; title: string } | null>(null);
+  const [lastProduct, setLastProduct] = useState<{ editId: string; kind: "item" | "add"; targetLabel: string; retailer: string; title: string; canSwap: boolean } | null>(null);
+
+  // Visual search (screenshot → find similar products)
+  const [productTab, setProductTab] = useState<"link" | "photo">("link");
+  const screenshotInputRef = useRef<HTMLInputElement>(null);
+  const [searching, setSearching] = useState(false);
+  const [candidates, setCandidates] = useState<ShoppingResult[] | null>(null);
+  const [searchError, setSearchError] = useState<string | null>(null);
 
   // Room style
   const [showCustomStyle, setShowCustomStyle] = useState(false);
@@ -199,8 +207,8 @@ export default function RestyleWorkspace({ params }: { params: Promise<{ id: str
     finally { setBusy(false); }
   };
 
-  const fetchProductLink = async () => {
-    const url = productUrl.trim();
+  const fetchProductLink = async (urlOverride?: string) => {
+    const url = (urlOverride ?? productUrl).trim();
     if (!url) return;
     setFetchingProduct(true); setError(null);
     try {
@@ -213,15 +221,45 @@ export default function RestyleWorkspace({ params }: { params: Promise<{ id: str
       updateEdits(data.edits);
       const a = data.added;
       const added = (data.edits as RestyleEdit[]).find(e => e.id === a.id);
-      setLastProduct({ editId: a.id, kind: a.kind, targetLabel: a.target_label, retailer: a.retailer, title: added?.product_title ?? a.target_label });
-      setProductUrl("");
+      // kind "item" means the route matched a detected item → a swap is possible.
+      setLastProduct({ editId: a.id, kind: a.kind, targetLabel: a.target_label, retailer: a.retailer, title: added?.product_title ?? a.target_label, canSwap: a.kind === "item" });
+      if (!urlOverride) setProductUrl("");
     } catch (err) { setError(err instanceof Error ? err.message : "Couldn't fetch that product"); }
     finally { setFetchingProduct(false); }
   };
 
-  const switchProductMode = async () => {
-    if (!lastProduct) return;
-    const newKind = lastProduct.kind === "item" ? "add" : "item";
+  const runVisualSearch = async (file: File) => {
+    setSearching(true); setSearchError(null); setCandidates(null);
+    const fd = new FormData(); fd.append("image", file);
+    try {
+      const r = await fetch(`/api/restyle/${id}/visual-search`, { method: "POST", body: fd });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error ?? "Couldn't search for that item");
+      setCandidates(data.results as ShoppingResult[]);
+    } catch (err) { setSearchError(err instanceof Error ? err.message : "Search failed"); }
+    finally { setSearching(false); }
+  };
+
+  const pickCandidate = async (c: ShoppingResult) => {
+    if (!c.supported || !c.immersiveToken) return;
+    setCandidates(null); setFetchingProduct(true); setError(null);
+    try {
+      const r = await fetch(`/api/restyle/${id}/product`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: c.immersiveToken }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error ?? "Couldn't fetch that product");
+      updateEdits(data.edits);
+      const a = data.added;
+      const added = (data.edits as RestyleEdit[]).find(e => e.id === a.id);
+      setLastProduct({ editId: a.id, kind: a.kind, targetLabel: a.target_label, retailer: a.retailer, title: added?.product_title ?? a.target_label, canSwap: a.kind === "item" });
+    } catch (err) { setError(err instanceof Error ? err.message : "Couldn't fetch that product"); }
+    finally { setFetchingProduct(false); }
+  };
+
+  const setProductMode = async (newKind: "item" | "add") => {
+    if (!lastProduct || lastProduct.kind === newKind) return;
     updateEdits((restyle?.edits ?? []).map(e => e.id === lastProduct.editId ? { ...e, kind: newKind } : e));
     setLastProduct({ ...lastProduct, kind: newKind });
     try {
@@ -346,7 +384,17 @@ export default function RestyleWorkspace({ params }: { params: Promise<{ id: str
       itemGroups.set(e.target_label, arr);
     } else standalone.push(e);
   }
-  const productEdits = edits.filter(e => e.buy_url);
+  // "Shop this look" must reflect the product(s) in the image currently on screen,
+  // not every product ever staged. Each render's signature is the set of edit IDs
+  // active when it was made, so match the displayed image to its render.
+  const displayedRender = renders.find(r => r.image_url === displayUrl);
+  const shownProductIds: Set<string> | null =
+    displayUrl === restyle.original_url ? new Set()           // original room → no products
+    : displayedRender ? new Set(displayedRender.signature.split(","))
+    : null;                                                    // unknown image → fall back to active
+  const productEdits = edits.filter(e =>
+    e.buy_url && (shownProductIds ? shownProductIds.has(e.id) : e.active)
+  );
 
   const chip = (active: boolean) =>
     `text-xs px-2.5 py-1 rounded-full border transition-colors capitalize ${
@@ -381,33 +429,132 @@ export default function RestyleWorkspace({ params }: { params: Promise<{ id: str
         <div className="w-full lg:w-80 lg:shrink-0 space-y-4">
 
           {/* Add a product (shop the look) */}
-          <div className={`${card} p-4 space-y-2.5`}>
+          <div className={`${card} p-4 space-y-2.5`}
+            onPaste={productTab === "photo" ? (e) => {
+              const f = Array.from(e.clipboardData.files).find(f => f.type.startsWith("image/"));
+              if (f) runVisualSearch(f);
+            } : undefined}>
             <p className={sectionLabel}>Add a product</p>
-            <p className="text-[11px] text-[var(--muted-foreground)]">Paste a Wayfair product link to try it in this room</p>
-            <div className="flex gap-2">
-              <input type="url" value={productUrl} onChange={e => setProductUrl(e.target.value)}
-                onKeyDown={e => { if (e.key === "Enter" && productUrl.trim()) fetchProductLink(); }}
-                placeholder="https://www.wayfair.com/…" className={inp} />
-              <button type="button" disabled={fetchingProduct || !productUrl.trim()} onClick={fetchProductLink}
-                className="bg-[var(--primary)] text-[var(--primary-foreground)] px-3 rounded-lg text-xs font-medium disabled:opacity-40 shrink-0 flex items-center gap-1.5">
-                {fetchingProduct
-                  ? <span className="h-3.5 w-3.5 rounded-full border-2 border-white/40 border-t-white animate-spin" />
-                  : "Fetch"}
-              </button>
+
+            {/* Tab toggle */}
+            <div className="flex gap-1 p-0.5 bg-slate-100 rounded-lg">
+              {(["link", "photo"] as const).map(tab => (
+                <button key={tab} type="button" onClick={() => { setProductTab(tab); setCandidates(null); setSearchError(null); }}
+                  className={`flex-1 py-1 rounded-md text-xs font-medium transition-colors ${
+                    productTab === tab ? "bg-white shadow-sm text-slate-800" : "text-[var(--muted-foreground)] hover:text-slate-700"
+                  }`}>
+                  {tab === "link" ? "Paste a link" : "Upload a photo"}
+                </button>
+              ))}
             </div>
-            {lastProduct && (
-              <div className="rounded-lg border border-[var(--border)] bg-white p-2.5 text-xs space-y-1">
-                <p className="font-medium text-slate-800 line-clamp-2">{lastProduct.title}</p>
-                <p className="text-[var(--muted-foreground)]">
-                  {lastProduct.kind === "item"
-                    ? <>Will replace your <span className="capitalize">{lastProduct.targetLabel}</span></>
-                    : <>Will be added to the room</>}
-                  {" · "}
-                  <button type="button" onClick={switchProductMode} className="underline hover:text-slate-900">
-                    {lastProduct.kind === "item" ? "add as new instead" : <>replace <span className="capitalize">{lastProduct.targetLabel}</span> instead</>}
+
+            {productTab === "link" ? (
+              <>
+                <p className="text-[11px] text-[var(--muted-foreground)]">Paste a Wayfair product link to try it in this room</p>
+                <div className="flex gap-2">
+                  <input type="url" value={productUrl} onChange={e => setProductUrl(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter" && productUrl.trim()) fetchProductLink(); }}
+                    placeholder="https://www.wayfair.com/…" className={inp} />
+                  <button type="button" disabled={fetchingProduct || !productUrl.trim()} onClick={() => fetchProductLink()}
+                    className="bg-[var(--primary)] text-[var(--primary-foreground)] px-3 rounded-lg text-xs font-medium disabled:opacity-40 shrink-0 flex items-center gap-1.5">
+                    {fetchingProduct
+                      ? <span className="h-3.5 w-3.5 rounded-full border-2 border-white/40 border-t-white animate-spin" />
+                      : "Fetch"}
                   </button>
-                </p>
-                <p className="text-slate-400">Staged — hit Generate when ready.</p>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-[11px] text-[var(--muted-foreground)]">Screenshot a piece of furniture or decor — AI finds similar products on Wayfair</p>
+                <input ref={screenshotInputRef} type="file" accept="image/*" className="hidden"
+                  onChange={e => { const f = e.target.files?.[0]; if (f) runVisualSearch(f); e.target.value = ""; }} />
+                <button type="button" disabled={searching || fetchingProduct}
+                  onClick={() => screenshotInputRef.current?.click()}
+                  className="w-full border border-dashed border-[var(--border)] rounded-lg py-3 text-xs text-[var(--muted-foreground)] hover:border-slate-400 hover:text-slate-700 transition-colors disabled:opacity-40 flex items-center justify-center gap-2">
+                  {searching
+                    ? <><span className="h-3.5 w-3.5 rounded-full border-2 border-slate-300 border-t-slate-700 animate-spin" /> Searching…</>
+                    : "Choose or paste a screenshot"}
+                </button>
+                {searchError && <p className="text-xs text-red-600">{searchError}</p>}
+                {fetchingProduct && !searching && (
+                  <p className="text-xs text-[var(--muted-foreground)] flex items-center gap-1.5">
+                    <span className="h-3 w-3 rounded-full border-2 border-slate-300 border-t-slate-700 animate-spin inline-block" />
+                    Fetching product details…
+                  </p>
+                )}
+                {candidates && candidates.length > 0 && (
+                  <div className="space-y-2 pt-0.5">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
+                      Similar items found
+                    </p>
+                    {candidates.map((c, i) => (
+                      <div key={i} className={`flex gap-2 p-2 rounded-lg border ${c.supported ? "border-[var(--border)] bg-white" : "border-[var(--border)] bg-slate-50 opacity-60"}`}>
+                        {c.thumbnail && (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={c.thumbnail} alt="" className="h-14 w-14 object-cover rounded shrink-0" />
+                        )}
+                        <div className="min-w-0 flex-1 space-y-1">
+                          <p className="text-[11px] font-medium text-slate-800 line-clamp-2 leading-tight">{c.title}</p>
+                          <div className="flex items-center gap-1.5">
+                            {c.price && <span className="text-[10px] font-semibold text-slate-700">{c.price}</span>}
+                            <span className="text-[10px] text-[var(--muted-foreground)]">{c.retailer}</span>
+                          </div>
+                          <button type="button" disabled={!c.supported || fetchingProduct}
+                            onClick={() => pickCandidate(c)}
+                            className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
+                              c.supported
+                                ? "bg-[var(--primary)] text-[var(--primary-foreground)] border-[var(--primary)] hover:opacity-90"
+                                : "border-[var(--border)] text-[var(--muted-foreground)] cursor-not-allowed"
+                            }`}>
+                            {c.supported ? "Use this" : "Wayfair only for now"}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {candidates && candidates.length === 0 && (
+                  <p className="text-xs text-[var(--muted-foreground)]">No matching products found. Try a different screenshot.</p>
+                )}
+              </>
+            )}
+
+            {lastProduct && (
+              <div className="rounded-lg border border-[var(--border)] bg-white p-2.5 text-xs space-y-2">
+                <p className="font-medium text-slate-800 line-clamp-2">Added: {lastProduct.title}</p>
+                {lastProduct.canSwap ? (
+                  <>
+                    <p className="text-[var(--muted-foreground)]">
+                      This room already has a <span className="capitalize">{lastProduct.targetLabel}</span>.
+                    </p>
+                    <div className="flex gap-1.5">
+                      <button type="button" onClick={() => setProductMode("item")}
+                        className={`flex-1 py-1.5 rounded-lg border transition-colors ${
+                          lastProduct.kind === "item"
+                            ? "bg-[var(--primary)] text-[var(--primary-foreground)] border-[var(--primary)] font-medium"
+                            : "border-[var(--border)] text-[var(--muted-foreground)] hover:border-slate-400"
+                        }`}>
+                        Swap it out
+                      </button>
+                      <button type="button" onClick={() => setProductMode("add")}
+                        className={`flex-1 py-1.5 rounded-lg border transition-colors ${
+                          lastProduct.kind === "add"
+                            ? "bg-[var(--primary)] text-[var(--primary-foreground)] border-[var(--primary)] font-medium"
+                            : "border-[var(--border)] text-[var(--muted-foreground)] hover:border-slate-400"
+                        }`}>
+                        Add too
+                      </button>
+                    </div>
+                    <p className="text-slate-400">
+                      {lastProduct.kind === "item"
+                        ? <>Replaces the <span className="capitalize">{lastProduct.targetLabel}</span> already in your room with this one.</>
+                        : <>Keeps your <span className="capitalize">{lastProduct.targetLabel}</span> and adds this as a second piece.</>}
+                      {" Hit Generate when ready."}
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-[var(--muted-foreground)]">Added to your room — hit Generate when ready.</p>
+                )}
               </div>
             )}
           </div>

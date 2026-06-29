@@ -90,6 +90,7 @@ LUMA_API_KEY                        for future Reels use
 HIGGSFIELD_API_KEY
 GEMINI_API_KEY                      Google AI Studio — Room Restyle (Nano Banana image model)
 PRODUCT_API_KEY                     Product-data API for "shop the look" link ingestion (Unwrangle by default; see src/lib/product.ts)
+SERPAPI_API_KEY                     SerpApi — Google Shopping visual search (see src/lib/shopping-search.ts)
 NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
 STRIPE_SECRET_KEY
 STRIPE_WEBHOOK_SECRET

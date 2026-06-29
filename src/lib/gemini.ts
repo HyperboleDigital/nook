@@ -346,6 +346,37 @@ export async function describeProduct(params: {
   }
 }
 
+export interface ScreenshotDescription {
+  itemType: string;    // short category noun, e.g. "sofa", "floor lamp"
+  description: string; // shopping-search-friendly phrase: color, material, style, proportions
+}
+
+/**
+ * Identify the furniture/decor item in a screenshot for use as a shopping search query.
+ * Unlike the other describe* functions, errors are NOT swallowed — there's no fallback
+ * if Gemini can't identify the item (no search query to run).
+ */
+export async function describeScreenshotForSearch(params: {
+  imageBase64: string;
+  mimeType: string;
+}): Promise<ScreenshotDescription> {
+  const prompt =
+    "This is a screenshot of a piece of furniture or home decor. " +
+    "Ignore any UI chrome, social-media captions, watermarks, or background room — focus on the item itself. " +
+    'Reply as JSON: {"itemType":"<short category noun, e.g. sofa, coffee table, floor lamp, area rug, tv stand>","description":"<one concise phrase for a shopping search: color, material, style, approximate size/proportions — written the way someone types into Google Shopping, no marketing language>"}. ' +
+    "JSON only, no preamble.";
+  const data = await geminiPost(GEMINI_VISION_MODEL, {
+    contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: params.mimeType, data: params.imageBase64 } }] }],
+    generationConfig: { responseMimeType: "application/json" },
+  });
+  const text = data.candidates?.[0]?.content?.parts?.find((p) => p.text)?.text ?? "{}";
+  const parsed = JSON.parse(text.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim());
+  const itemType = String(parsed.itemType || "").trim();
+  const description = String(parsed.description || "").trim();
+  if (!description) throw new Error("Gemini couldn't identify an item in that image");
+  return { itemType: itemType || "item", description };
+}
+
 /**
  * Read a product listing's gallery (which usually includes a dimensions diagram)
  * to recover the REAL size + proportions — retail APIs rarely return dimensions as
