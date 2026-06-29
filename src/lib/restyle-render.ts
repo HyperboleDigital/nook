@@ -49,8 +49,7 @@ interface RestyleRow {
  */
 export async function recompose(
   restyle: RestyleRow,
-  userId: string,
-  model?: "flash" | "pro"
+  userId: string
 ): Promise<string> {
   const { data: edits } = await supabaseAdmin
     .from("restyle_edits")
@@ -87,7 +86,7 @@ export async function recompose(
   const composeInputs: ComposeEditInput[] = [];
   for (const e of active) {
     const reference = e.reference_url ? await urlToImage(e.reference_url) : undefined;
-    composeInputs.push({ kind: e.kind, targetLabel: e.target_label, instruction: e.instruction, reference });
+    composeInputs.push({ kind: e.kind, targetLabel: e.target_label, instruction: e.instruction, reference, referenceDesc: e.reference_desc });
   }
 
   const result = await composeEdits({
@@ -95,7 +94,6 @@ export async function recompose(
     mimeType: "image/jpeg",
     edits: composeInputs,
     aspectRatio,
-    model,
   });
 
   let outBuf = Buffer.from(result.base64, "base64");

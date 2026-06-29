@@ -202,10 +202,11 @@ async function generateImage(
 }
 
 export interface ComposeEditInput {
-  kind: RestyleMode | "item" | "style" | "remove" | "refine";
+  kind: RestyleMode | "item" | "style" | "remove" | "refine" | "add";
   targetLabel?: string | null;
   instruction?: string | null;
   reference?: { base64: string; mimeType: string };
+  referenceDesc?: string | null;
 }
 
 /**
@@ -217,7 +218,6 @@ export async function composeEdits(params: {
   mimeType: string;
   edits: ComposeEditInput[];
   aspectRatio?: string;
-  model?: "flash" | "pro";
 }): Promise<{ base64: string; mimeType: string }> {
   // Assign image numbers to references (image 1 = the base room).
   let imgNum = 2;
@@ -237,10 +237,18 @@ export async function composeEdits(params: {
     const label = e.targetLabel ?? "item";
     const extra = e.instruction?.trim() ? ` Also: ${e.instruction.trim()}.` : "";
     switch (e.kind) {
-      case "item":
-        return e.reference
-          ? `${n}. Replace the ${label} with the item shown in image ${refNum.get(e)} — match its exact design, shape, color, and finish, fitted to the room's perspective, scale, and lighting.${extra}`
-          : `${n}. Change the ${label}: ${e.instruction ?? ""}.`;
+      case "item": {
+        if (!e.reference) return `${n}. Change the ${label}: ${e.instruction ?? ""}.`;
+        const desc = e.referenceDesc?.trim() ? ` The reference ${label} is: ${e.referenceDesc.trim()}.` : "";
+        return `${n}. Replace the ${label} in this room with the product shown in image ${refNum.get(e)}.${desc} Use the reference's real proportions — its width, height, and depth ratio — even if they are very different from the current ${label}; do not keep the old ${label}'s height or footprint, and do not just re-skin or recolor the existing one — build the new product from scratch. If real dimensions are given above, size it to those measurements, scaled accurately to the room using the ceiling height (~8–9 ft), doorways, and nearby furniture as references. You may adjust the immediate area so it looks natural and correctly proportioned: if the new ${label} is shorter or longer, reposition what sits on or near it (e.g. lower the TV, move décor) and fill in the wall or floor the old ${label} used to cover. Reproduce the reference's design, materials, color, and details accurately, and match the room's perspective, lighting, and shadows. Keep the rest of the room — walls, windows, flooring, and other furniture — consistent.${extra}`;
+      }
+      case "add": {
+        const placement = e.instruction?.trim() ? ` Place it ${e.instruction.trim()}.` : "";
+        if (!e.reference)
+          return `${n}. Add a ${label} to this room.${placement} Make it look naturally placed — match the room's perspective, scale, lighting, and shadows. Do not remove or change any existing furniture or decor.`;
+        const desc = e.referenceDesc?.trim() ? ` The reference ${label} is: ${e.referenceDesc.trim()}.` : "";
+        return `${n}. Add the ${label} shown in image ${refNum.get(e)} to this room.${placement}${desc} Reproduce the reference's exact design, materials, and finish, and build it at its REAL-WORLD proportions — its true width-to-height-to-depth ratio — even if that makes it lower and wider (or taller) than a typical ${label}. If real dimensions are given above, size the product to those measurements, scaled accurately to the room using the ceiling height (~8–9 ft), doorways, and nearby furniture as references. Match the room's perspective, lighting, and shadows. Do not remove or change any existing furniture or decor.`;
+      }
       case "style":
         return `${n}. Restyle the whole room in this style: ${e.instruction ?? ""}.`;
       case "remove":
@@ -254,7 +262,9 @@ export async function composeEdits(params: {
     "Apply ALL of the following changes to the base room (image 1). Keep the room's architecture, " +
     "layout, windows, doors, perspective, and camera angle identical — only make these changes:\n" +
     lines.join("\n") +
-    "\nReturn one photorealistic image with every change applied.";
+    "\nWhen a change references another image, that image is the EXACT product to use — reproduce its " +
+    "design, proportions, and details precisely rather than restyling the original item. " +
+    "Return one photorealistic image with every change applied.";
 
   const parts: Record<string, unknown>[] = [
     { text: prompt },
@@ -263,8 +273,9 @@ export async function composeEdits(params: {
     ...refParts,
   ];
 
-  const preferPro = params.edits.some((e) => e.reference);
-  return generateImage(parts, { aspectRatio: params.aspectRatio, model: params.model, preferPro });
+  // Always use Pro for restyle renders (best fidelity, esp. reference replacement);
+  // generateImage falls back to Flash only if Pro is unavailable.
+  return generateImage(parts, { aspectRatio: params.aspectRatio, model: "pro", preferPro: true });
 }
 
 export interface DetectedObject {
@@ -303,5 +314,65 @@ export async function detectObjects(params: {
       : [];
   } catch {
     return [];
+  }
+}
+
+/**
+ * Item-aware description of a reference product, injected into the replacement
+ * prompt so swaps reproduce its real proportions/details. Describes only what
+ * defines THAT kind of item (a TV → screen/stand; a cabinet → doors; a lamp →
+ * height/shade), always anchored on proportions.
+ */
+export async function describeProduct(params: {
+  imageBase64: string;
+  mimeType: string;
+  label: string;
+}): Promise<string> {
+  const { label } = params;
+  const prompt =
+    `This is a ${label}. Describe it in one or two sentences for use in an image edit. ` +
+    `Focus on its overall shape and PROPORTIONS (how low/tall and how wide — height relative to ` +
+    `width), size, materials, color/finish, and the features that specifically define a ${label}. ` +
+    `Describe only what's relevant to a ${label}; be concrete about proportions; no preamble.`;
+  try {
+    const data = await geminiPost(GEMINI_VISION_MODEL, {
+      contents: [
+        { parts: [{ text: prompt }, { inline_data: { mime_type: params.mimeType, data: params.imageBase64 } }] },
+      ],
+    });
+    return (data.candidates?.[0]?.content?.parts?.find((p) => p.text)?.text ?? "").trim();
+  } catch {
+    return ""; // description is best-effort; replacement still works without it
+  }
+}
+
+/**
+ * Read a product listing's gallery (which usually includes a dimensions diagram)
+ * to recover the REAL size + proportions — retail APIs rarely return dimensions as
+ * text, but the spec image carries them. The result is injected into the compose
+ * prompt so the rendered product is scaled accurately (the whole selling point).
+ */
+export async function describeProductImages(params: {
+  images: { base64: string; mimeType: string }[];
+  label: string;
+}): Promise<string> {
+  if (!params.images.length) return "";
+  const { label } = params;
+  const prompt =
+    `These are photos of a ${label} from a retail listing. One of them may be a dimensions diagram. ` +
+    `1) If any image shows measurements, state the real dimensions as width × depth × height in inches. ` +
+    `2) Describe its overall proportions — how low or tall it is relative to how wide (e.g. "low and wide, ` +
+    `height about 40% of its width" or "tall and narrow"). ` +
+    `3) Note materials, color/finish, and the features that define a ${label}. ` +
+    `Reply in two or three concise sentences, leading with the dimensions if found. No preamble.`;
+  const parts: Record<string, unknown>[] = [{ text: prompt }];
+  for (const img of params.images) {
+    parts.push({ inline_data: { mime_type: img.mimeType, data: img.base64 } });
+  }
+  try {
+    const data = await geminiPost(GEMINI_VISION_MODEL, { contents: [{ parts }] });
+    return (data.candidates?.[0]?.content?.parts?.find((p) => p.text)?.text ?? "").trim();
+  } catch {
+    return ""; // best-effort
   }
 }

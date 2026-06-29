@@ -15,22 +15,29 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const { data: edits } = await supabaseAdmin
     .from("restyle_edits").select("*").eq("restyle_id", id).order("position", { ascending: true });
 
-  return NextResponse.json({ ...restyle, edits: edits ?? [] });
+  const { data: renders } = await supabaseAdmin
+    .from("restyle_renders")
+    .select("id, restyle_id, signature, image_url, created_at")
+    .eq("restyle_id", id)
+    .order("created_at", { ascending: true });
+
+  return NextResponse.json({ ...restyle, edits: edits ?? [], renders: renders ?? [] });
 }
 
-// PATCH /api/restyles/[id] — revert: set current_url to a chosen version's image.
+// PATCH /api/restyles/[id] — update title and/or current_url.
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { userId } = await auth();
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;
-  const { currentUrl } = await req.json();
-  if (!currentUrl) return NextResponse.json({ error: "currentUrl required" }, { status: 400 });
+  const body = await req.json();
+  const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  if (body.currentUrl) updates.current_url = body.currentUrl;
+  if (typeof body.title === "string") updates.title = body.title || null;
+  if (Object.keys(updates).length === 1) return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
 
   const { error } = await supabaseAdmin
-    .from("restyles")
-    .update({ current_url: currentUrl, updated_at: new Date().toISOString() })
-    .eq("id", id).eq("user_id", userId);
+    .from("restyles").update(updates).eq("id", id).eq("user_id", userId);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true });
 }
