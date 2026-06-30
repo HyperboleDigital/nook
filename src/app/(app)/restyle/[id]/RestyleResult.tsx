@@ -94,10 +94,10 @@ export default function RestyleResult({
         <div className="rounded-lg bg-red-50 border border-red-200 text-red-600 text-xs px-3 py-2">{error}</div>
       )}
 
-      {/* Shop this look — products in the viewed render only */}
+      {/* In this room — products in the viewed render only */}
       {productEdits.length > 0 && (
         <div className={`${card} p-4 space-y-2.5`}>
-          <p className={sectionLabel}>Shop this look</p>
+          <p className={sectionLabel}>In this room</p>
           {productEdits.map(e => (
             <div key={e.id} className="flex items-center gap-3">
               {e.reference_url && (

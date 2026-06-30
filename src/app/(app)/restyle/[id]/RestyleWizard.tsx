@@ -40,6 +40,8 @@ export default function RestyleWizard({
   const [srcMode, setSrcMode] = useState<SrcMode>("link");
   const [descText, setDescText] = useState("");
   const [addLabelDraft, setAddLabelDraft] = useState("");
+  const [missingDraft, setMissingDraft] = useState("");
+  const [showMissing, setShowMissing] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   if (!ws.restyle) return null;
@@ -66,6 +68,15 @@ export default function RestyleWizard({
   const uploadInspo = async (file: File) => {
     await ws.uploadPhotoProduct(file);
     ws.runVisualSearch(file);
+  };
+
+  // Failsafe for missed detection: let the user add an item the detector didn't pick up,
+  // persist it as a pill, and start swapping it.
+  const addMissingItem = async (label: string) => {
+    const l = label.trim(); if (!l) return;
+    setShowMissing(false); setMissingDraft("");
+    await ws.addCustomItem(l);
+    startItem(l, "swap");
   };
 
   const currentStaged = !!ws.lastProduct ||
@@ -179,24 +190,41 @@ export default function RestyleWizard({
             </button>
           </div>
 
-          {/* Swap → pick which item */}
+          {/* Swap → pick which item (with a manual-add failsafe for missed detection) */}
           {picker === "swap" && (
             <div className={`${card} p-4 space-y-2`}>
               <p className="text-sm font-medium text-slate-800">Which item are you replacing?</p>
-              {objects.length === 0 ? (
-                <p className="text-xs text-[var(--muted-foreground)]">No items detected — use “Add an item” instead.</p>
-              ) : (
-                <>
-                  <div className="flex flex-wrap gap-1.5">
-                    {objects.map(label => (
-                      <button key={label} type="button" onClick={() => startItem(label, "swap")} className={chip(false)}>
-                        {label}
-                      </button>
-                    ))}
+              <div className="flex flex-wrap gap-1.5 items-center">
+                {objects.map(label => (
+                  <button key={label} type="button" onClick={() => startItem(label, "swap")} className={chip(false)}>
+                    {label}
+                  </button>
+                ))}
+                {(restyle.custom_items ?? []).map(label => (
+                  <button key={label} type="button" onClick={() => startItem(label, "swap")}
+                    className="text-xs px-2.5 py-1 rounded-full border border-dashed border-slate-300 text-slate-600 hover:border-slate-400 capitalize transition-colors">
+                    {label}
+                  </button>
+                ))}
+                {!showMissing ? (
+                  <button type="button" onClick={() => setShowMissing(true)}
+                    className="text-xs px-2.5 py-1 rounded-full border border-dashed border-slate-300 text-slate-400 hover:border-slate-400 hover:text-slate-600 transition-colors">
+                    + Add item
+                  </button>
+                ) : (
+                  <div className="flex gap-1.5 w-full">
+                    <input type="text" value={missingDraft} autoFocus onChange={e => setMissingDraft(e.target.value)}
+                      onKeyDown={e => { if (e.key === "Enter") addMissingItem(missingDraft); if (e.key === "Escape") { setShowMissing(false); setMissingDraft(""); } }}
+                      placeholder="name an item we missed — e.g. floor lamp" className={inp} />
+                    <button type="button" disabled={ws.busy || !missingDraft.trim()} onClick={() => addMissingItem(missingDraft)}
+                      className="bg-[var(--primary)] text-[var(--primary-foreground)] px-3 rounded-lg text-xs font-medium disabled:opacity-40 shrink-0">Add</button>
                   </div>
-                  <p className="text-[10px] text-slate-400">The old one is removed automatically when the new one goes in.</p>
-                </>
+                )}
+              </div>
+              {objects.length === 0 && (restyle.custom_items?.length ?? 0) === 0 && (
+                <p className="text-xs text-[var(--muted-foreground)]">We didn&apos;t detect any items — add the one you want to replace above.</p>
               )}
+              <p className="text-[10px] text-amber-600">Don&apos;t see an item? Add it manually. If our detector missed it the swap may not land perfectly — a clear, specific name helps.</p>
             </div>
           )}
 
