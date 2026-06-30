@@ -17,6 +17,7 @@ export async function POST(req: Request) {
     const form = await req.formData();
     const photo = form.get("photo") as File | null;
     if (!photo) return NextResponse.json({ error: "A room photo is required" }, { status: 400 });
+    const title = (form.get("title") as string | null)?.trim() || "Untitled room";
 
     // Canonicalize the original: EXIF-rotate + downscale to MAX_DIM (keeps aspect).
     const canonical = await sharp(Buffer.from(await photo.arrayBuffer()))
@@ -38,7 +39,7 @@ export async function POST(req: Request) {
       .from("restyles")
       .insert({
         user_id: userId,
-        title: "Untitled room",
+        title,
         original_url: originalUrl,
         current_url: originalUrl,
         width: meta.width ?? null,
