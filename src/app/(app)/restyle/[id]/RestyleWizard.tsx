@@ -285,24 +285,6 @@ export default function RestyleWizard({
         </div>
       )}
 
-      {currentStaged && (
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-800 text-xs px-3 py-2">
-          ✓ {current.mode === "swap" ? "Swapping" : "Adding"} <span className="capitalize">{current.label}</span>
-          {ws.lastProduct?.title ? <span className="text-emerald-700"> → {ws.lastProduct.title}</span> : null}
-        </div>
-      )}
-      {ws.error && <div className="rounded-lg bg-red-50 border border-red-200 text-red-600 text-xs px-3 py-2">{ws.error}</div>}
-
-      <div className="flex gap-2">
-        <button type="button" onClick={nextChange}
-          className="flex-1 text-sm py-2.5 rounded-xl border border-[var(--border)] text-slate-600 hover:border-slate-400 transition-colors">
-          {currentStaged ? "Add another change" : "Cancel"}
-        </button>
-        <button type="button" onClick={closeComposer}
-          className="flex-1 bg-[var(--primary)] text-[var(--primary-foreground)] font-medium py-2.5 rounded-xl text-sm hover:opacity-90 transition-opacity">
-          Done
-        </button>
-      </div>
     </div>
   );
 
@@ -389,53 +371,78 @@ export default function RestyleWizard({
               + Add a change
             </button>
           ) : !current ? (
-            <div className={`${card} p-4 space-y-3`}>
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-2">
-                  <p className="text-sm font-medium text-slate-800">🔁 Swap an item</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {objects.map(label => (
-                      <button key={label} type="button" onClick={() => chooseItem(label, "swap")} className={chip(false)}>{label}</button>
-                    ))}
-                    {(restyle.custom_items ?? []).map(label => (
-                      <button key={label} type="button" onClick={() => chooseItem(label, "swap")}
-                        className="text-xs px-2.5 py-1 rounded-full border border-dashed border-slate-300 text-slate-600 hover:border-slate-400 capitalize transition-colors">{label}</button>
-                    ))}
-                    {!showMissing ? (
-                      <button type="button" onClick={() => setShowMissing(true)}
-                        className="text-xs px-2.5 py-1 rounded-full border border-dashed border-slate-300 text-slate-400 hover:border-slate-400 hover:text-slate-600 transition-colors">+ Add item</button>
-                    ) : (
-                      <div className="flex gap-1.5 w-full">
-                        <input type="text" value={missingDraft} autoFocus onChange={e => setMissingDraft(e.target.value)}
-                          onKeyDown={e => { if (e.key === "Enter") addMissingItem(missingDraft); if (e.key === "Escape") { setShowMissing(false); setMissingDraft(""); } }}
-                          placeholder="name an item we missed — e.g. floor lamp" className={inp} />
-                        <button type="button" disabled={ws.busy || !missingDraft.trim()} onClick={() => addMissingItem(missingDraft)}
-                          className="bg-[var(--primary)] text-[var(--primary-foreground)] px-3 rounded-lg text-xs font-medium disabled:opacity-40 shrink-0">Add</button>
-                      </div>
-                    )}
-                  </div>
-                  <p className="text-[10px] text-amber-600">Missing one? Add it — if our detector missed it the swap may not land perfectly.</p>
+            <div className={`${card} p-4 space-y-4`}>
+              {/* Tap an item in the room to change it */}
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-slate-800">Tap an item in the room to change it</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {objects.map(label => (
+                    <button key={label} type="button" onClick={() => chooseItem(label, "swap")} className={chip(false)}>{label}</button>
+                  ))}
+                  {(restyle.custom_items ?? []).map(label => (
+                    <button key={label} type="button" onClick={() => chooseItem(label, "swap")}
+                      className="text-xs px-2.5 py-1 rounded-full border border-dashed border-slate-300 text-slate-600 hover:border-slate-400 capitalize transition-colors">{label}</button>
+                  ))}
+                  {!showMissing ? (
+                    <button type="button" onClick={() => setShowMissing(true)}
+                      className="text-xs px-2.5 py-1 rounded-full border border-dashed border-slate-300 text-slate-400 hover:border-slate-400 hover:text-slate-600 transition-colors">+ Not listed?</button>
+                  ) : (
+                    <div className="flex gap-1.5 w-full">
+                      <input type="text" value={missingDraft} autoFocus onChange={e => setMissingDraft(e.target.value)}
+                        onKeyDown={e => { if (e.key === "Enter") addMissingItem(missingDraft); if (e.key === "Escape") { setShowMissing(false); setMissingDraft(""); } }}
+                        placeholder="name an item we missed — e.g. floor lamp" className={inp} />
+                      <button type="button" disabled={ws.busy || !missingDraft.trim()} onClick={() => addMissingItem(missingDraft)}
+                        className="bg-[var(--primary)] text-[var(--primary-foreground)] px-3 rounded-lg text-xs font-medium disabled:opacity-40 shrink-0">Add</button>
+                    </div>
+                  )}
                 </div>
-                <div className="space-y-2">
-                  <p className="text-sm font-medium text-slate-800">➕ Add new</p>
-                  <div className="flex gap-1.5">
-                    <input type="text" value={addLabelDraft} onChange={e => setAddLabelDraft(e.target.value)}
-                      onKeyDown={e => { if (e.key === "Enter") chooseItem(addLabelDraft, "add"); }}
-                      placeholder="e.g. area rug" className={inp} />
-                    <button type="button" disabled={!addLabelDraft.trim()} onClick={() => chooseItem(addLabelDraft, "add")}
-                      className="bg-[var(--primary)] text-[var(--primary-foreground)] px-3 rounded-lg text-xs font-medium disabled:opacity-40 shrink-0">Next</button>
-                  </div>
+                {showMissing && <p className="text-[10px] text-amber-600">If our detector missed it, the change may not land perfectly — a clear, specific name helps.</p>}
+              </div>
+
+              {/* …or add a brand-new piece */}
+              <div className="space-y-2 border-t border-[var(--border)] pt-3">
+                <p className="text-sm font-medium text-slate-800">Or add a new piece that isn&apos;t there</p>
+                <div className="flex gap-1.5">
+                  <input type="text" value={addLabelDraft} onChange={e => setAddLabelDraft(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter") chooseItem(addLabelDraft, "add"); }}
+                    placeholder="e.g. area rug, floor lamp, wall art" className={inp} />
+                  <button type="button" disabled={!addLabelDraft.trim()} onClick={() => chooseItem(addLabelDraft, "add")}
+                    className="bg-[var(--primary)] text-[var(--primary-foreground)] px-3 rounded-lg text-xs font-medium disabled:opacity-40 shrink-0">Add</button>
                 </div>
               </div>
+
               <button type="button" onClick={closeComposer}
                 className="text-xs text-[var(--muted-foreground)] hover:text-slate-700 transition-colors">Cancel</button>
             </div>
           ) : (
             <div className={`${card} p-4 space-y-3`}>
+              <button type="button" onClick={() => { setCurrent(null); resetSourcing(); }}
+                className="text-xs text-[var(--muted-foreground)] hover:text-slate-700 transition-colors">← Back to items</button>
               <p className="text-sm font-medium text-slate-800 capitalize">
-                {current.mode === "swap" ? "Swap the " : "Add "}{current.label}
+                {current.mode === "swap" ? "Replacing the " : "Adding "}{current.label}
               </p>
               {sourcePanel}
+
+              {currentStaged && (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-800 text-xs px-3 py-2">
+                  ✓ {current.mode === "swap" ? "Swapping" : "Adding"} <span className="capitalize">{current.label}</span>
+                  {ws.lastProduct?.title ? <span className="text-emerald-700"> → {ws.lastProduct.title}</span> : null}
+                </div>
+              )}
+              {ws.error && <div className="rounded-lg bg-red-50 border border-red-200 text-red-600 text-xs px-3 py-2">{ws.error}</div>}
+
+              {currentStaged && (
+                <div className="flex gap-2">
+                  <button type="button" onClick={nextChange}
+                    className="flex-1 text-sm py-2.5 rounded-xl border border-[var(--border)] text-slate-600 hover:border-slate-400 transition-colors">
+                    Change something else
+                  </button>
+                  <button type="button" onClick={closeComposer}
+                    className="flex-1 bg-[var(--primary)] text-[var(--primary-foreground)] font-medium py-2.5 rounded-xl text-sm hover:opacity-90 transition-opacity">
+                    Done
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
