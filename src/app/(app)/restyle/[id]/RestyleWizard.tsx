@@ -365,7 +365,8 @@ export default function RestyleWizard({
 
           {currentStaged && (
             <div className="rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-800 text-xs px-3 py-2">
-              ✓ Added{ws.lastProduct?.title ? `: ${ws.lastProduct.title}` : ` ${current.label}`}
+              ✓ {current.mode === "swap" ? "Swapping" : "Adding"} <span className="capitalize">{current.label}</span>
+              {ws.lastProduct?.title ? <span className="text-emerald-700"> → {ws.lastProduct.title}</span> : null}
             </div>
           )}
           {ws.error && <div className="rounded-lg bg-red-50 border border-red-200 text-red-600 text-xs px-3 py-2">{ws.error}</div>}
