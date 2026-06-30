@@ -4,6 +4,9 @@ import { supabaseAdmin } from "@/lib/supabase";
 import { describeScreenshotForSearch } from "@/lib/gemini";
 import { searchShopping, ShoppingSearchError } from "@/lib/shopping-search";
 
+// Gemini identify + four parallel SerpApi searches.
+export const maxDuration = 60;
+
 async function loadOwned(restyleId: string, userId: string) {
   const { data } = await supabaseAdmin
     .from("restyles").select("id").eq("id", restyleId).eq("user_id", userId).single();

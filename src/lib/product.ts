@@ -145,13 +145,37 @@ function extractDimensions(detail: Record<string, unknown>): string | undefined 
   return hit ? hit.slice(0, 120) : undefined;
 }
 
+/** Hosts that share/copy as short links (Amazon app → a.co, amzn.to). */
+const SHORTENERS = /^(a\.co|amzn\.to|amzn\.com)$/i;
+
+/** Follow redirects on a short link to recover the real product URL (header-only, cheap). */
+async function expandShortLink(rawUrl: string): Promise<string> {
+  let url = rawUrl;
+  for (let i = 0; i < 5; i++) {
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: "GET", redirect: "manual",
+        headers: { "user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)" },
+        signal: AbortSignal.timeout(8_000),
+      });
+    } catch { break; }
+    const loc = res.headers.get("location");
+    if (res.status >= 300 && res.status < 400 && loc) {
+      url = new URL(loc, url).toString();
+    } else break;
+  }
+  return url;
+}
+
 async function callUnwrangle(platform: string, url: string, apiKey: string) {
   const endpoint =
     `https://data.unwrangle.com/api/getter/?platform=${platform}` +
     `&url=${encodeURIComponent(url)}&api_key=${apiKey}`;
   let res: Response;
   try {
-    res = await fetch(endpoint, { signal: AbortSignal.timeout(30_000) });
+    // Amazon scrapes are slow (often 45–80s) — give the provider room before aborting.
+    res = await fetch(endpoint, { signal: AbortSignal.timeout(90_000) });
   } catch {
     throw new ProductFetchError("Couldn't reach the product service. Try again.", 502);
   }
@@ -178,6 +202,11 @@ export async function fetchProduct(rawUrl: string): Promise<ProductInfo> {
   }
   if (url.protocol !== "https:" && url.protocol !== "http:") {
     throw new ProductFetchError("That doesn't look like a valid link.");
+  }
+
+  // Amazon's app shares short a.co / amzn.to links — expand to the real product URL first.
+  if (SHORTENERS.test(url.hostname.replace(/^www\./, ""))) {
+    try { url = new URL(await expandShortLink(url.toString())); } catch { /* keep original */ }
   }
 
   const retailer = retailerFor(url);

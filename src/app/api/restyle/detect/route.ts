@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import { detectObjects } from "@/lib/gemini";
 import { supabaseAdmin } from "@/lib/supabase";
 
+export const maxDuration = 60;
+
 // POST /api/restyle/detect — detect editable objects in a room image for
 // tap-to-select editing. JSON { imageUrl, restyleId? } or multipart `image`.
 // When restyleId is given, the result is cached on the matching version row.

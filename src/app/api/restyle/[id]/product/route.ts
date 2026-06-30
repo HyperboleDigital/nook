@@ -7,6 +7,9 @@ import { describeProductImages, describeScreenshotForSearch } from "@/lib/gemini
 import { resolveImmersiveToken } from "@/lib/shopping-search";
 import type { DetectedObject } from "@/types";
 
+// Amazon scrapes via Unwrangle can take 60–90s, plus Gemini gallery sizing afterward.
+export const maxDuration = 120;
+
 /** Fetch a remote image and return Gemini-ready { base64, mimeType }. */
 async function urlToImagePart(url: string) {
   const res = await fetch(url);

@@ -3,6 +3,9 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { recompose } from "@/lib/restyle-render";
 
+// Image generation (Gemini compose over multiple edits) can run long.
+export const maxDuration = 120;
+
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { userId } = await auth();
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
