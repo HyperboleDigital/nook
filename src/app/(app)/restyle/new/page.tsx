@@ -6,20 +6,36 @@ import Link from "next/link";
 
 export default function NewRestylePage() {
   const router = useRouter();
+  const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const start = async (f: File | undefined) => {
+  // Selecting a photo only previews it — nothing is uploaded or processed until the
+  // user confirms, so a wrong pick can be swapped out first.
+  const select = (f: File | undefined) => {
     if (!f || !f.type.startsWith("image/")) return;
-    setPreview(URL.createObjectURL(f));
+    setError(null);
+    setPreview(prev => { if (prev) URL.revokeObjectURL(prev); return URL.createObjectURL(f); });
+    setFile(f);
+  };
+
+  const reset = () => {
+    setPreview(prev => { if (prev) URL.revokeObjectURL(prev); return null; });
+    setFile(null);
+    setError(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const confirm = async () => {
+    if (!file) return;
     setLoading(true);
     setError(null);
     try {
       const fd = new FormData();
-      fd.append("photo", f);
+      fd.append("photo", file);
       const res = await fetch("/api/restyle", { method: "POST", body: fd });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Upload failed");
@@ -43,7 +59,7 @@ export default function NewRestylePage() {
         </p>
       </div>
 
-      <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => start(e.target.files?.[0])} />
+      <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => select(e.target.files?.[0])} />
 
       {!preview ? (
         <div
@@ -52,7 +68,7 @@ export default function NewRestylePage() {
           }`}
           onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
           onDragLeave={() => setIsDragging(false)}
-          onDrop={(e) => { e.preventDefault(); setIsDragging(false); start(e.dataTransfer.files[0]); }}
+          onDrop={(e) => { e.preventDefault(); setIsDragging(false); select(e.dataTransfer.files[0]); }}
           onClick={() => fileInputRef.current?.click()}
         >
           <div className="text-3xl mb-2">🛋️</div>
@@ -63,10 +79,31 @@ export default function NewRestylePage() {
         <div className="space-y-4">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={preview} alt="Room" className="w-full max-h-[50vh] object-contain rounded-2xl border border-[var(--border)] bg-black" />
-          <div className="text-sm text-[var(--muted-foreground)] flex items-center gap-2">
-            <span className="inline-block h-4 w-4 rounded-full border-2 border-slate-300 border-t-slate-600 animate-spin" />
-            {loading ? "Setting up your room…" : "Done"}
-          </div>
+
+          {loading ? (
+            <div className="text-sm text-[var(--muted-foreground)] flex items-center gap-2">
+              <span className="inline-block h-4 w-4 rounded-full border-2 border-slate-300 border-t-slate-600 animate-spin" />
+              Setting up your room…
+            </div>
+          ) : (
+            <>
+              <p className="text-sm text-[var(--muted-foreground)]">Is this the room you want to restyle?</p>
+              <div className="flex gap-2">
+                <button type="button" onClick={confirm}
+                  className="flex-1 bg-[var(--primary)] text-[var(--primary-foreground)] font-semibold py-3 rounded-xl text-sm hover:opacity-90 transition-opacity">
+                  Use this room →
+                </button>
+                <button type="button" onClick={() => fileInputRef.current?.click()}
+                  className="px-4 border border-[var(--border)] rounded-xl text-sm text-slate-700 hover:border-slate-400 transition-colors">
+                  Choose a different photo
+                </button>
+              </div>
+              <button type="button" onClick={reset}
+                className="text-xs text-[var(--muted-foreground)] hover:text-slate-700 transition-colors">
+                Cancel
+              </button>
+            </>
+          )}
         </div>
       )}
 

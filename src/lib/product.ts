@@ -34,6 +34,11 @@ export class ProductFetchError extends Error {
 
 export const RETAILERS: Record<string, { platform: string; name: string }> = {
   "wayfair.com": { platform: "wayfair_detail", name: "Wayfair" },
+  "amazon.com": { platform: "amazon_detail", name: "Amazon" },
+  "walmart.com": { platform: "walmart_detail", name: "Walmart" },
+  // SerpApi's Home Depot results carry apionline.homedepot.com URLs, which match
+  // `.homedepot.com` here and are what Unwrangle's homedepot_detail expects.
+  "homedepot.com": { platform: "homedepot_detail", name: "The Home Depot" },
 };
 
 export function isSupportedRetailerUrl(rawUrl: string): boolean {
@@ -94,23 +99,43 @@ function cleanText(s: unknown): string {
 }
 
 /**
- * Build the descriptive blurb. The `features` list holds the real product detail
- * (materials, finish, design); `description` is usually Wayfair marketing boilerplate,
- * so it's only a fallback.
+ * Build the descriptive blurb. The bullet lists hold the real product detail
+ * (materials, finish, design); `description` is usually marketing boilerplate, so
+ * it's only a fallback. Field names vary by retailer: Wayfair/Home Depot use
+ * `features`, Walmart uses `key_features`, Home Depot also exposes `highlights`.
  */
 function buildDescription(detail: Record<string, unknown>): string {
-  const f = detail.features;
-  if (Array.isArray(f) && f.length) {
-    const joined = f.map(cleanText).filter(Boolean).join(" ");
-    if (joined) return joined.slice(0, 600);
+  const bullets: string[] = [];
+  for (const key of ["highlights", "features", "key_features"]) {
+    const v = detail[key];
+    if (Array.isArray(v)) bullets.push(...v.map(cleanText));
   }
+  const joined = bullets.filter(Boolean).join(" ");
+  if (joined) return joined.slice(0, 600);
   return cleanText(detail.description).slice(0, 600);
+}
+
+/** Flatten a dimensions field that may be a string, a {label,value} row, or an array of them. */
+function dimsToString(v: unknown): string {
+  if (typeof v === "string") return cleanText(v);
+  if (Array.isArray(v)) return v.map(dimsToString).filter(Boolean).join("; ");
+  if (v && typeof v === "object") {
+    const o = v as { label?: unknown; name?: unknown; value?: unknown };
+    const label = cleanText(o.label ?? o.name);
+    const value = cleanText(o.value);
+    return [label, value].filter(Boolean).join(": ");
+  }
+  return "";
 }
 
 /** Pull a dimensions string out of the listing's text fields, if present. */
 function extractDimensions(detail: Record<string, unknown>): string | undefined {
+  // Home Depot returns dimensions as a dedicated field ({label,value}) — prefer it.
+  const direct = dimsToString(detail.dimensions);
+  if (direct.trim()) return direct.slice(0, 120);
+
   const pools: string[] = [];
-  for (const key of ["at_a_glance", "features", "product_overview"]) {
+  for (const key of ["at_a_glance", "features", "key_features", "highlights", "product_overview", "specifications"]) {
     const v = detail[key];
     if (Array.isArray(v)) pools.push(...v.map(cleanText));
     else if (typeof v === "string") pools.push(cleanText(v));
@@ -158,7 +183,7 @@ export async function fetchProduct(rawUrl: string): Promise<ProductInfo> {
   const retailer = retailerFor(url);
   if (!retailer) {
     throw new ProductFetchError(
-      `We don't support that retailer yet — paste a Wayfair product link.`,
+      `We don't support that retailer yet — try a Wayfair, Amazon, Walmart, or Home Depot product link.`,
       422
     );
   }

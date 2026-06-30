@@ -1,0 +1,413 @@
+"use client";
+
+import { useState, useRef } from "react";
+import type { RestyleWorkspace } from "./useRestyleWorkspace";
+import { card, inp, stageBtn, chip, editSummary } from "./shared";
+
+// Two mutually-exclusive intents. "Empty" is a one-shot: it clears everything and renders,
+// with no add/swap steps (you can add afterward from the result). "Restyle" is the
+// swap-and-add flow. Replacing an item already removes the old one, so there's no separate
+// per-item "remove" in the wizard — that lives on the result page for fine edits.
+type Mode = "restyle" | "empty";
+type Target = { label: string; mode: "swap" | "add" };
+type SrcMode = "link" | "photo" | "describe";
+
+const MODES: { key: Mode; title: string; desc: string; icon: string }[] = [
+  { key: "restyle", title: "Add or replace items", desc: "Swap pieces that are here, or bring in new ones", icon: "🛋️" },
+  { key: "empty", title: "Empty the room", desc: "Remove all the furniture for a blank space", icon: "🧹" },
+];
+
+/**
+ * Step-by-step guided flow: goal → choose changes → source each item (link preferred,
+ * inspo search, or describe) → review → generate. Thin orchestration over the shared hook;
+ * every action reuses an existing API handler. Mobile-first: one step per screen.
+ */
+export default function RestyleWizard({
+  ws, startStep = 1, minStep = 1, initialMode = null, baseImageUrl, onDone, onCancel,
+}: {
+  ws: RestyleWorkspace;
+  startStep?: number;
+  minStep?: number;        // lowest step reachable via Back — edit sessions start above step 1
+  initialMode?: Mode | null;
+  baseImageUrl?: string;   // reference image shown beside the steps (current render when editing)
+  onDone: () => void;
+  onCancel?: () => void;
+}) {
+  const [step, setStep] = useState(startStep);
+  const [mode, setMode] = useState<Mode | null>(initialMode);
+  const [targets, setTargets] = useState<Target[]>([]);
+  const [sourceIdx, setSourceIdx] = useState(0);
+  const [srcMode, setSrcMode] = useState<SrcMode>("link");
+  const [descText, setDescText] = useState("");
+  const [addLabelDraft, setAddLabelDraft] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  if (!ws.restyle) return null;
+  const { restyle, objects, edits, activeEdits } = ws;
+
+  // ── helpers ──
+  const isSwapTarget = (label: string) => targets.some(t => t.label === label && t.mode === "swap");
+  const toggleSwap = (label: string) =>
+    setTargets(prev => prev.some(t => t.label === label && t.mode === "swap")
+      ? prev.filter(t => !(t.label === label && t.mode === "swap"))
+      : [...prev, { label, mode: "swap" }]);
+
+  const addAddTarget = (label: string) => {
+    const l = label.trim();
+    if (!l || targets.some(t => t.label === l && t.mode === "add")) return;
+    setTargets(prev => [...prev, { label: l, mode: "add" }]);
+    setAddLabelDraft("");
+  };
+  const removeTarget = (t: Target) =>
+    setTargets(prev => prev.filter(x => !(x.label === t.label && x.mode === t.mode)));
+
+  // declutter is staged immediately (no per-item sourcing)
+  const hasRemoveAll = edits.some(e => e.kind === "remove" && e.active);
+
+  const resetSourcing = () => {
+    ws.setProductUrl(""); ws.setCandidates(null); ws.setSearchError(null); ws.clearLastProduct();
+    setDescText(""); setSrcMode("link");
+  };
+
+  const goToSourcing = () => {
+    if (targets.length > 0) { setSourceIdx(0); resetSourcing(); setStep(3); }
+    else setStep(4);
+  };
+
+  const nextTarget = () => {
+    resetSourcing();
+    if (sourceIdx + 1 < targets.length) setSourceIdx(sourceIdx + 1);
+    else setStep(4);
+  };
+
+  const current = targets[sourceIdx];
+  // Has the current target been satisfied (a product staged, or a description added)?
+  const currentStaged = !!ws.lastProduct ||
+    (current ? edits.some(e => e.target_label?.toLowerCase() === current.label.toLowerCase() && (e.buy_url || e.instruction || e.reference_url)) : false);
+
+  const onGenerate = async () => { if (await ws.generate()) onDone(); };
+
+  // Empty the room is one-shot: drop any other staged changes, remove all furniture, render.
+  const onEmptyRoom = async () => {
+    for (const e of ws.activeEdits) if (e.kind !== "remove") await ws.toggle(e.id, false);
+    if (!hasRemoveAll) await ws.addEdit({ kind: "remove" });
+    if (await ws.generate()) onDone();
+  };
+
+  // ── progress header ──
+  const totalSteps = mode === "empty" ? 2 : 4;
+  const shownTotal = totalSteps - minStep + 1;
+  const shownCurrent = step - minStep + 1;
+  const header = (
+    <div className="space-y-2 mb-5">
+      <div className="flex items-center justify-between">
+        <button type="button"
+          onClick={() => step > minStep ? setStep(step - 1) : onCancel?.()}
+          className="text-xs text-[var(--muted-foreground)] hover:text-slate-700 transition-colors">
+          {step > minStep ? "← Back" : onCancel ? "← Back to result" : " "}
+        </button>
+        <span className="text-[11px] text-[var(--muted-foreground)]">Step {shownCurrent} of {shownTotal}</span>
+      </div>
+      <div className="flex gap-1">
+        {Array.from({ length: shownTotal }, (_, i) => (
+          <div key={i} className={`h-1 flex-1 rounded-full transition-colors ${i < shownCurrent ? "bg-slate-900" : "bg-slate-200"}`} />
+        ))}
+      </div>
+    </div>
+  );
+
+  // The room stays on screen through every step so they never lose sight of what they're
+  // changing — image-first on mobile, sticky beside the steps on desktop.
+  const baseImg = baseImageUrl ?? restyle.original_url;
+  const roomPanel = (
+    <div className="w-full lg:w-[44%] lg:shrink-0 lg:sticky lg:top-4 space-y-1.5">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={baseImg} alt="Your room"
+        className="w-full max-h-[40vh] lg:max-h-[78vh] object-contain rounded-2xl border border-[var(--border)] bg-[var(--muted)]" />
+      <p className="text-[11px] text-[var(--muted-foreground)] text-center">
+        {baseImg === restyle.original_url ? "Your original room — what you’re changing" : "Your room — what you’re changing"}
+      </p>
+    </div>
+  );
+
+  return (
+    <div className="flex flex-col lg:flex-row gap-6 lg:items-start max-w-5xl mx-auto">
+      {roomPanel}
+
+      <div className="w-full lg:flex-1 min-w-0">
+      {header}
+
+      {/* ── Step 1 — Goal ── */}
+      {step === 1 && (
+        <div className="space-y-4">
+          <div>
+            <h2 className="text-lg font-bold tracking-tight">What do you want to do with this room?</h2>
+            <p className="text-sm text-[var(--muted-foreground)] mt-0.5">Pick one — you can fine-tune everything later.</p>
+          </div>
+          <div className="space-y-2">
+            {MODES.map(m => {
+              const on = mode === m.key;
+              return (
+                <button key={m.key} type="button" onClick={() => setMode(m.key)}
+                  className={`w-full flex items-center gap-3 p-3 rounded-xl border text-left transition-colors ${
+                    on ? "border-slate-900 bg-[var(--accent)]" : "border-[var(--border)] hover:border-slate-400"
+                  }`}>
+                  <span className="text-xl">{m.icon}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-medium text-slate-800">{m.title}</span>
+                    <span className="block text-xs text-[var(--muted-foreground)]">{m.desc}</span>
+                  </span>
+                  <span className={`h-4 w-4 rounded-full border-2 shrink-0 ${on ? "bg-slate-900 border-slate-900" : "border-slate-300"}`} />
+                </button>
+              );
+            })}
+          </div>
+          <button type="button" disabled={!mode} onClick={() => setStep(2)}
+            className="w-full bg-[var(--primary)] text-[var(--primary-foreground)] font-semibold py-3 rounded-xl text-sm hover:opacity-90 disabled:opacity-30 transition-opacity">
+            Continue
+          </button>
+        </div>
+      )}
+
+      {/* ── Step 2 (restyle) — Choose changes ── */}
+      {step === 2 && mode === "restyle" && (
+        <div className="space-y-5">
+          <div>
+            <h2 className="text-lg font-bold tracking-tight">What&apos;s changing?</h2>
+            <p className="text-sm text-[var(--muted-foreground)] mt-0.5">Mark items to swap and add any new pieces — you&apos;ll choose products next.</p>
+          </div>
+
+          <div className={`${card} p-4 space-y-2.5`}>
+            <p className="text-sm font-medium text-slate-800">🔁 Items to swap</p>
+            {objects.length === 0 ? (
+              <p className="text-xs text-[var(--muted-foreground)]">No items detected — add new pieces below instead.</p>
+            ) : (
+              <>
+                <div className="flex flex-wrap gap-1.5">
+                  {objects.map(label => (
+                    <button key={label} type="button" onClick={() => toggleSwap(label)} className={chip(isSwapTarget(label))}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[10px] text-slate-400">Tap an item to replace it — the old one is removed automatically when the new one goes in.</p>
+              </>
+            )}
+          </div>
+
+          <div className={`${card} p-4 space-y-2.5`}>
+            <p className="text-sm font-medium text-slate-800">➕ New pieces to add</p>
+            <div className="flex gap-2">
+              <input type="text" value={addLabelDraft} onChange={e => setAddLabelDraft(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") addAddTarget(addLabelDraft); }}
+                placeholder="e.g. area rug, floor lamp, wall art" className={inp} />
+              <button type="button" disabled={!addLabelDraft.trim()} onClick={() => addAddTarget(addLabelDraft)}
+                className="bg-[var(--primary)] text-[var(--primary-foreground)] px-3 rounded-lg text-xs font-medium disabled:opacity-40 shrink-0">
+                Add
+              </button>
+            </div>
+            {targets.filter(t => t.mode === "add").length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {targets.filter(t => t.mode === "add").map(t => (
+                  <span key={t.label} className="inline-flex items-center gap-1 text-xs pl-2.5 pr-1.5 py-1 rounded-full border border-slate-300 bg-white capitalize">
+                    {t.label}
+                    <button type="button" onClick={() => removeTarget(t)} className="text-slate-400 hover:text-red-500">×</button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <button type="button" disabled={targets.length === 0} onClick={goToSourcing}
+            className="w-full bg-[var(--primary)] text-[var(--primary-foreground)] font-semibold py-3 rounded-xl text-sm hover:opacity-90 disabled:opacity-30 transition-opacity">
+            {targets.length > 0 ? "Choose products" : "Mark something to change"}
+          </button>
+        </div>
+      )}
+
+      {/* ── Step 2 (empty) — Confirm & go ── */}
+      {step === 2 && mode === "empty" && (
+        <div className="space-y-4">
+          <div>
+            <h2 className="text-lg font-bold tracking-tight">Empty this room?</h2>
+            <p className="text-sm text-[var(--muted-foreground)] mt-0.5">We&apos;ll clear out the furniture and render the bare space.</p>
+          </div>
+          <div className={`${card} p-4 text-sm text-slate-600 space-y-1.5`}>
+            <p>🧹 Furniture and decor get removed — walls, floors, windows and built-ins stay put.</p>
+            <p className="text-[var(--muted-foreground)]">Want to stage it? Once it&apos;s empty, come back and <span className="font-medium text-slate-700">add pieces</span> from the result.</p>
+          </div>
+          {ws.error && <div className="rounded-lg bg-red-50 border border-red-200 text-red-600 text-xs px-3 py-2">{ws.error}</div>}
+          <button type="button" onClick={onEmptyRoom} disabled={ws.generating || ws.busy}
+            className="w-full bg-[var(--primary)] text-[var(--primary-foreground)] font-semibold py-3 rounded-xl text-sm hover:opacity-90 disabled:opacity-30 transition-opacity flex items-center justify-center gap-2">
+            {ws.generating
+              ? <><span className="h-4 w-4 rounded-full border-2 border-white/40 border-t-white animate-spin" />Emptying the room…</>
+              : "Empty the room →"}
+          </button>
+        </div>
+      )}
+
+      {/* ── Step 3 — Source each item ── */}
+      {step === 3 && current && (
+        <div className="space-y-4">
+          <div>
+            <p className="text-[11px] text-[var(--muted-foreground)]">Item {sourceIdx + 1} of {targets.length}</p>
+            <h2 className="text-lg font-bold tracking-tight capitalize">
+              {current.mode === "swap" ? "Swap the " : "Add "}{current.label}
+            </h2>
+            <p className="text-sm text-[var(--muted-foreground)] mt-0.5">How would you like to choose it?</p>
+          </div>
+
+          {/* mode toggle */}
+          <div className="flex gap-1 p-0.5 bg-slate-100 rounded-lg">
+            {(["link", "photo", "describe"] as const).map(m => (
+              <button key={m} type="button" onClick={() => setSrcMode(m)}
+                className={`flex-1 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                  srcMode === m ? "bg-white shadow-sm text-slate-800" : "text-[var(--muted-foreground)] hover:text-slate-700"
+                }`}>
+                {m === "link" ? "I have a link" : m === "photo" ? "Find options" : "Describe it"}
+              </button>
+            ))}
+          </div>
+
+          {srcMode === "link" && (
+            <div className={`${card} p-4 space-y-2`}>
+              <p className="text-[11px] text-[var(--muted-foreground)]">Preferred — paste a Wayfair, Amazon, Walmart or Home Depot product link.</p>
+              <div className="flex gap-2">
+                <input type="url" value={ws.productUrl} onChange={e => ws.setProductUrl(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter" && ws.productUrl.trim()) ws.fetchProductLink(); }}
+                  placeholder="https://www.wayfair.com/…" className={inp} />
+                <button type="button" disabled={ws.fetchingProduct || !ws.productUrl.trim()} onClick={() => ws.fetchProductLink()}
+                  className="bg-[var(--primary)] text-[var(--primary-foreground)] px-3 rounded-lg text-xs font-medium disabled:opacity-40 shrink-0">
+                  {ws.fetchingProduct ? <span className="h-3.5 w-3.5 rounded-full border-2 border-white/40 border-t-white animate-spin inline-block" /> : "Fetch"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {srcMode === "photo" && (
+            <div className={`${card} p-4 space-y-2.5`}
+              onPaste={(e) => { const f = Array.from(e.clipboardData.files).find(f => f.type.startsWith("image/")); if (f) ws.uploadPhotoProduct(f); }}>
+              <p className="text-[11px] text-[var(--muted-foreground)]">Drop a screenshot — we&apos;ll place it in the room and find similar products to buy.</p>
+              <input ref={fileRef} type="file" accept="image/*" className="hidden"
+                onChange={e => { const f = e.target.files?.[0]; if (f) ws.uploadPhotoProduct(f); e.target.value = ""; }} />
+              <button type="button" disabled={ws.searching || ws.fetchingProduct} onClick={() => fileRef.current?.click()}
+                className="w-full border border-dashed border-[var(--border)] rounded-lg py-3 text-xs text-[var(--muted-foreground)] hover:border-slate-400 hover:text-slate-700 transition-colors disabled:opacity-40 flex items-center justify-center gap-2">
+                {ws.fetchingProduct
+                  ? <><span className="h-3.5 w-3.5 rounded-full border-2 border-slate-300 border-t-slate-700 animate-spin" /> Adding to your room…</>
+                  : "Choose or paste a photo"}
+              </button>
+              {ws.searchFile && !ws.fetchingProduct && (
+                <button type="button" disabled={ws.searching} onClick={() => ws.searchFile && ws.runVisualSearch(ws.searchFile)}
+                  className="w-full text-xs py-2 rounded-lg border border-[var(--border)] text-slate-600 hover:border-slate-400 hover:text-slate-800 transition-colors disabled:opacity-40 flex items-center justify-center gap-2">
+                  {ws.searching ? <><span className="h-3.5 w-3.5 rounded-full border-2 border-slate-300 border-t-slate-700 animate-spin" /> Searching online…</> : <>🔍 Search similar products to buy</>}
+                </button>
+              )}
+              {ws.searchError && <p className="text-xs text-red-600">{ws.searchError}</p>}
+              {ws.candidates && ws.candidates.length > 0 && (
+                <div className="space-y-2 pt-0.5">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">Shoppable matches</p>
+                  {ws.candidates.map((c, i) => (
+                    <div key={i} className={`flex gap-2 p-2 rounded-lg border ${c.supported ? "border-[var(--border)] bg-white" : "border-[var(--border)] bg-slate-50 opacity-60"}`}>
+                      {c.thumbnail && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={c.thumbnail} alt="" className="h-14 w-14 object-cover rounded shrink-0" />
+                      )}
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <p className="text-[11px] font-medium text-slate-800 line-clamp-2 leading-tight">{c.title}</p>
+                        <div className="flex items-center gap-1.5">
+                          {c.price && <span className="text-[10px] font-semibold text-slate-700">{c.price}</span>}
+                          <span className="text-[10px] text-[var(--muted-foreground)]">{c.retailer}</span>
+                        </div>
+                        <button type="button" disabled={!c.supported || ws.fetchingProduct} onClick={() => ws.pickCandidate(c)}
+                          className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
+                            c.supported ? "bg-[var(--primary)] text-[var(--primary-foreground)] border-[var(--primary)] hover:opacity-90" : "border-[var(--border)] text-[var(--muted-foreground)] cursor-not-allowed"
+                          }`}>
+                          {c.supported ? "Use this" : "Not shoppable yet"}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {srcMode === "describe" && (
+            <div className={`${card} p-4 space-y-2`}>
+              <p className="text-[11px] text-[var(--muted-foreground)]">No link or photo? Describe it — color, material, style, and where it goes.</p>
+              <input type="text" value={descText} onChange={e => setDescText(e.target.value)}
+                placeholder={`e.g. a low walnut ${current.label} with brass legs`} className={inp} />
+              <button type="button" disabled={ws.busy || !descText.trim()}
+                onClick={() => ws.addEdit({ kind: current.mode === "swap" ? "item" : "add", targetLabel: current.label, instruction: descText.trim() })}
+                className={stageBtn}>
+                Add to plan
+              </button>
+            </div>
+          )}
+
+          {currentStaged && (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-800 text-xs px-3 py-2">
+              ✓ Added{ws.lastProduct?.title ? `: ${ws.lastProduct.title}` : ` ${current.label}`}
+            </div>
+          )}
+          {ws.error && <div className="rounded-lg bg-red-50 border border-red-200 text-red-600 text-xs px-3 py-2">{ws.error}</div>}
+
+          <div className="flex gap-2">
+            <button type="button" onClick={nextTarget}
+              className="flex-1 text-sm py-3 rounded-xl border border-[var(--border)] text-slate-600 hover:border-slate-400 transition-colors">
+              Skip
+            </button>
+            <button type="button" onClick={nextTarget}
+              className="flex-1 bg-[var(--primary)] text-[var(--primary-foreground)] font-semibold py-3 rounded-xl text-sm hover:opacity-90 transition-opacity">
+              {sourceIdx + 1 < targets.length ? "Next item" : "Review"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Step 4 — Review & generate ── */}
+      {step === 4 && (
+        <div className="space-y-4">
+          <div>
+            <h2 className="text-lg font-bold tracking-tight">Review your plan</h2>
+            <p className="text-sm text-[var(--muted-foreground)] mt-0.5">{activeEdits.length} change{activeEdits.length === 1 ? "" : "s"} ready to render.</p>
+          </div>
+
+          {activeEdits.length === 0 ? (
+            <div className={`${card} p-4`}>
+              <p className="text-sm text-[var(--muted-foreground)]">Nothing staged yet. Go back and add a change.</p>
+            </div>
+          ) : (
+            <div className={`${card} p-4 space-y-2`}>
+              {activeEdits.map(e => (
+                <div key={e.id} className="flex items-center gap-3">
+                  {e.reference_url ? (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img src={e.reference_url} alt="" className="h-10 w-10 rounded-lg object-cover border border-[var(--border)] shrink-0" />
+                  ) : (
+                    <span className="h-10 w-10 rounded-lg bg-slate-100 border border-[var(--border)] shrink-0 flex items-center justify-center text-sm">
+                      {e.kind === "remove" ? "🧹" : e.kind === "style" ? "🎨" : "✦"}
+                    </span>
+                  )}
+                  <span className="text-sm text-slate-700 flex-1 truncate capitalize">{e.product_title ?? editSummary(e)}</span>
+                  <button type="button" disabled={ws.busy} onClick={() => ws.remove(e.id)}
+                    className="text-slate-300 hover:text-red-500 text-sm shrink-0">×</button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {ws.error && <div className="rounded-lg bg-red-50 border border-red-200 text-red-600 text-xs px-3 py-2">{ws.error}</div>}
+
+          <button type="button" onClick={onGenerate} disabled={ws.generating || ws.busy || !ws.canGenerate}
+            className="w-full bg-[var(--primary)] text-[var(--primary-foreground)] font-semibold py-3 rounded-xl text-sm hover:opacity-90 disabled:opacity-30 transition-opacity flex items-center justify-center gap-2">
+            {ws.generating
+              ? <><span className="h-4 w-4 rounded-full border-2 border-white/40 border-t-white animate-spin" />Generating…</>
+              : "Generate my room"}
+          </button>
+        </div>
+      )}
+      </div>
+    </div>
+  );
+}

@@ -2,8 +2,8 @@ import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { uploadImage } from "@/lib/restyle-render";
-import { fetchProduct, ProductFetchError } from "@/lib/product";
-import { describeProductImages } from "@/lib/gemini";
+import { fetchProduct, ProductFetchError, type ProductInfo } from "@/lib/product";
+import { describeProductImages, describeScreenshotForSearch } from "@/lib/gemini";
 import { resolveImmersiveToken } from "@/lib/shopping-search";
 import type { DetectedObject } from "@/types";
 
@@ -40,41 +40,8 @@ function matchDetected(objects: DetectedObject[] | null, itemType: string): stri
   return hit?.label ?? null;
 }
 
-// POST — add a product by URL. Body: { url }.
-// Fetches the listing, stores its image as a reference edit, and auto-decides
-// replace-vs-add. Does NOT render — the client calls POST /generate when ready.
-export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const { userId } = await auth();
-  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const { id } = await params;
-  const restyle = await loadOwned(id, userId);
-  if (!restyle) return NextResponse.json({ error: "Not found" }, { status: 404 });
-
-  const body = await req.json().catch(() => ({}));
-  const { url: rawUrl, token } = body as { url?: string; token?: string };
-
-  // When the user picks a visual-search candidate, we receive a SerpApi immersive token
-  // instead of a direct URL — resolve it first.
-  let url = rawUrl;
-  if (!url && token) {
-    const resolved = await resolveImmersiveToken(token);
-    if (!resolved) return NextResponse.json({ error: "Couldn't resolve that product link." }, { status: 502 });
-    url = resolved;
-  }
-  if (!url || typeof url !== "string") {
-    return NextResponse.json({ error: "A product link is required." }, { status: 400 });
-  }
-
-  let info;
-  try {
-    info = await fetchProduct(url);
-  } catch (err) {
-    if (err instanceof ProductFetchError) {
-      return NextResponse.json({ error: err.message }, { status: err.status });
-    }
-    return NextResponse.json({ error: "Couldn't fetch that product." }, { status: 502 });
-  }
-
+/** Build a reference edit from a product listing (URL or visual-search token). */
+async function fromListing(userId: string, info: ProductInfo): Promise<StagedProduct> {
   // Copy the product image into our own Blob storage (stable, CDN-served).
   let referenceUrl: string;
   try {
@@ -84,13 +51,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const mime = res.headers.get("content-type") || "image/jpeg";
     referenceUrl = await uploadImage(userId, buf, mime);
   } catch {
-    return NextResponse.json({ error: "Couldn't load the product image." }, { status: 502 });
+    throw new ProductFetchError("Couldn't load the product image.", 502);
   }
-
-  // Replace a matching detected item, otherwise add it as something new.
-  const matched = matchDetected(restyle.detected_objects, info.itemType);
-  const kind = matched ? "item" : "add";
-  const targetLabel = matched ?? info.itemType;
 
   // Recover real dimensions + proportions from the gallery (which usually includes
   // a spec diagram) — retail APIs rarely return size as text, but accurate scale is
@@ -113,13 +75,111 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     info.dimensions && `Dimensions: ${info.dimensions}`,
   ].filter(Boolean).join(". ").slice(0, 900);
 
+  return {
+    referenceUrl, referenceDesc, itemType: info.itemType,
+    buyUrl: info.buyUrl, productTitle: info.title, productPrice: info.price ?? null, retailer: info.retailer,
+  };
+}
+
+/** Build a reference edit from a screenshot the user uploaded — just render it, nothing to buy. */
+async function fromUpload(userId: string, file: File): Promise<StagedProduct> {
+  const buf = Buffer.from(await file.arrayBuffer());
+  const mimeType = file.type || "image/jpeg";
+  const base64 = buf.toString("base64");
+
+  let identified: { itemType: string; description: string };
+  try {
+    identified = await describeScreenshotForSearch({ imageBase64: base64, mimeType });
+  } catch {
+    throw new ProductFetchError("Couldn't identify an item in that photo. Try a clearer image.", 422);
+  }
+
+  let referenceUrl: string;
+  try {
+    referenceUrl = await uploadImage(userId, buf, mimeType);
+  } catch {
+    throw new ProductFetchError("Couldn't save that photo. Try again.", 502);
+  }
+
+  // Recover proportions/dimensions from the single photo for accurate scale.
+  let visionDesc = "";
+  try {
+    visionDesc = await describeProductImages({ images: [{ base64, mimeType }], label: identified.itemType });
+  } catch { /* best-effort */ }
+
+  return {
+    referenceUrl,
+    referenceDesc: (visionDesc || identified.description).slice(0, 900),
+    itemType: identified.itemType,
+    buyUrl: null, productTitle: null, productPrice: null, retailer: "",
+  };
+}
+
+interface StagedProduct {
+  referenceUrl: string;
+  referenceDesc: string;
+  itemType: string;
+  buyUrl: string | null;
+  productTitle: string | null;
+  productPrice: string | null;
+  retailer: string;
+}
+
+// POST — stage a product as a reference edit, then auto-decide replace-vs-add.
+// Three input shapes (Does NOT render — the client calls POST /generate when ready):
+//   - JSON { url }    : a pasted retailer product link
+//   - JSON { token }  : a visual-search candidate (Google Shopping immersive token → URL)
+//   - multipart image : the user's own screenshot — rendered directly, nothing to buy
+export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { userId } = await auth();
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { id } = await params;
+  const restyle = await loadOwned(id, userId);
+  if (!restyle) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  let staged: StagedProduct;
+  try {
+    if (req.headers.get("content-type")?.includes("multipart/form-data")) {
+      const form = await req.formData();
+      const file = form.get("image") as File | null;
+      if (!file) return NextResponse.json({ error: "An image is required." }, { status: 400 });
+      if (!file.type.startsWith("image/")) return NextResponse.json({ error: "That file isn't an image." }, { status: 400 });
+      staged = await fromUpload(userId, file);
+    } else {
+      const body = await req.json().catch(() => ({}));
+      const { url: rawUrl, token } = body as { url?: string; token?: string };
+
+      // A visual-search candidate gives us a SerpApi immersive token, not a URL — resolve it.
+      let url = rawUrl;
+      if (!url && token) {
+        const resolved = await resolveImmersiveToken(token);
+        if (!resolved) return NextResponse.json({ error: "Couldn't resolve that product link." }, { status: 502 });
+        url = resolved;
+      }
+      if (!url || typeof url !== "string") {
+        return NextResponse.json({ error: "A product link is required." }, { status: 400 });
+      }
+      staged = await fromListing(userId, await fetchProduct(url));
+    }
+  } catch (err) {
+    if (err instanceof ProductFetchError) {
+      return NextResponse.json({ error: err.message }, { status: err.status });
+    }
+    return NextResponse.json({ error: "Couldn't add that product." }, { status: 502 });
+  }
+
+  // Replace a matching detected item, otherwise add it as something new.
+  const matched = matchDetected(restyle.detected_objects, staged.itemType);
+  const kind = matched ? "item" : "add";
+  const targetLabel = matched ?? staged.itemType;
+
   const existing = await editsFor(id);
   const position = existing.length;
 
   const { data: inserted, error } = await supabaseAdmin.from("restyle_edits").insert({
     restyle_id: id, kind, target_label: targetLabel, instruction: null,
-    reference_url: referenceUrl, reference_desc: referenceDesc,
-    buy_url: info.buyUrl, product_title: info.title, product_price: info.price ?? null,
+    reference_url: staged.referenceUrl, reference_desc: staged.referenceDesc,
+    buy_url: staged.buyUrl, product_title: staged.productTitle, product_price: staged.productPrice,
     active: true, position,
   }).select().single();
   if (error || !inserted) return NextResponse.json({ error: error?.message ?? "DB error" }, { status: 500 });
@@ -132,6 +192,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   return NextResponse.json({
     edits: await editsFor(id),
-    added: { id: inserted.id, kind, target_label: targetLabel, retailer: info.retailer },
+    added: { id: inserted.id, kind, target_label: targetLabel, retailer: staged.retailer },
   });
 }
