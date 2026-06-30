@@ -41,3 +41,22 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true });
 }
+
+// DELETE /api/restyles/[id] — remove a restyle and its edits/renders.
+export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { userId } = await auth();
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { id } = await params;
+  // Verify ownership before touching anything.
+  const { data: owned } = await supabaseAdmin
+    .from("restyles").select("id").eq("id", id).eq("user_id", userId).single();
+  if (!owned) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  // Children first (Blob assets are left to expire; only DB rows are removed here).
+  await supabaseAdmin.from("restyle_edits").delete().eq("restyle_id", id);
+  await supabaseAdmin.from("restyle_renders").delete().eq("restyle_id", id);
+  const { error } = await supabaseAdmin.from("restyles").delete().eq("id", id).eq("user_id", userId);
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ ok: true });
+}

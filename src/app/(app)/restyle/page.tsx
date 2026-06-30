@@ -12,6 +12,7 @@ interface RestyleCard {
 
 export default function RestyleHistoryPage() {
   const [items, setItems] = useState<RestyleCard[] | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/restyles")
@@ -19,6 +20,22 @@ export default function RestyleHistoryPage() {
       .then((d) => setItems(d.restyles ?? []))
       .catch(() => setItems([]));
   }, []);
+
+  const remove = async (id: string, title: string | null) => {
+    if (!confirm(`Delete "${title ?? "Untitled"}"? This can't be undone.`)) return;
+    setDeleting(id);
+    const prev = items;
+    setItems((cur) => cur?.filter((r) => r.id !== id) ?? cur); // optimistic
+    try {
+      const res = await fetch(`/api/restyles/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error();
+    } catch {
+      setItems(prev ?? null); // restore on failure
+      alert("Couldn't delete that room. Try again.");
+    } finally {
+      setDeleting(null);
+    }
+  };
 
   return (
     <div className="max-w-4xl">
@@ -51,14 +68,24 @@ export default function RestyleHistoryPage() {
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
           {items.map((r) => (
-            <Link key={r.id} href={`/restyle/${r.id}`} className="group block rounded-xl overflow-hidden border border-[var(--border)] hover:border-slate-400 transition-colors">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={r.current_url} alt={r.title ?? "Restyle"} className="aspect-[4/3] w-full object-cover bg-[var(--muted)]" />
-              <div className="p-3">
-                <div className="text-sm font-medium truncate">{r.title ?? "Untitled"}</div>
-                <div className="text-xs text-[var(--muted-foreground)]">{new Date(r.updated_at).toLocaleDateString()}</div>
-              </div>
-            </Link>
+            <div key={r.id} className="group relative rounded-xl overflow-hidden border border-[var(--border)] hover:border-slate-400 transition-colors">
+              <Link href={`/restyle/${r.id}`} className="block">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={r.current_url} alt={r.title ?? "Restyle"} className="aspect-[4/3] w-full object-cover bg-[var(--muted)]" />
+                <div className="p-3">
+                  <div className="text-sm font-medium truncate">{r.title ?? "Untitled"}</div>
+                  <div className="text-xs text-[var(--muted-foreground)]">{new Date(r.updated_at).toLocaleDateString()}</div>
+                </div>
+              </Link>
+              <button type="button" disabled={deleting === r.id}
+                onClick={() => remove(r.id, r.title)}
+                aria-label="Delete room"
+                className="absolute top-2 right-2 h-8 w-8 rounded-full bg-white/90 backdrop-blur-sm border border-[var(--border)] text-slate-500 shadow-sm flex items-center justify-center opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 hover:text-red-600 hover:border-red-300 disabled:opacity-50 transition-all">
+                {deleting === r.id
+                  ? <span className="h-3.5 w-3.5 rounded-full border-2 border-slate-300 border-t-slate-600 animate-spin" />
+                  : <span className="text-base leading-none">🗑</span>}
+              </button>
+            </div>
           ))}
         </div>
       )}
