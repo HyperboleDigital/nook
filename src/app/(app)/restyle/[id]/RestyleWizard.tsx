@@ -61,6 +61,13 @@ export default function RestyleWizard({
   };
   const backToBuilder = () => { setCurrent(null); setPicker("none"); setAddLabelDraft(""); resetSourcing(); setStep(2); };
 
+  // Upload an inspo/product photo: place it in the room first (so it always renders, no dead
+  // end), then automatically surface matching/similar buyable options to optionally swap in.
+  const uploadInspo = async (file: File) => {
+    await ws.uploadPhotoProduct(file);
+    ws.runVisualSearch(file);
+  };
+
   const currentStaged = !!ws.lastProduct ||
     (current ? edits.some(e => e.target_label?.toLowerCase() === current.label.toLowerCase() && (e.buy_url || e.instruction || e.reference_url)) : false);
 
@@ -268,7 +275,7 @@ export default function RestyleWizard({
                 className={`flex-1 py-1.5 rounded-md text-xs font-medium transition-colors ${
                   srcMode === m ? "bg-white shadow-sm text-slate-800" : "text-[var(--muted-foreground)] hover:text-slate-700"
                 }`}>
-                {m === "link" ? "I have a link" : m === "photo" ? "Find options" : "Describe it"}
+                {m === "link" ? "Paste a link" : m === "photo" ? "Upload a photo" : "Describe it"}
               </button>
             ))}
           </div>
@@ -285,31 +292,44 @@ export default function RestyleWizard({
                   {ws.fetchingProduct ? <span className="h-3.5 w-3.5 rounded-full border-2 border-white/40 border-t-white animate-spin inline-block" /> : "Fetch"}
                 </button>
               </div>
+              <button type="button" onClick={() => setSrcMode("photo")}
+                className="text-[11px] text-[var(--muted-foreground)] underline hover:text-slate-700 transition-colors">
+                Can&apos;t find a link? Upload a photo instead →
+              </button>
             </div>
           )}
 
           {srcMode === "photo" && (
             <div className={`${card} p-4 space-y-2.5`}
-              onPaste={(e) => { const f = Array.from(e.clipboardData.files).find(f => f.type.startsWith("image/")); if (f) ws.uploadPhotoProduct(f); }}>
-              <p className="text-[11px] text-[var(--muted-foreground)]">Drop a screenshot — we&apos;ll place it in the room and find similar products to buy.</p>
+              onPaste={(e) => { const f = Array.from(e.clipboardData.files).find(f => f.type.startsWith("image/")); if (f) uploadInspo(f); }}>
+              <p className="text-[11px] text-[var(--muted-foreground)]">Upload a photo or screenshot of the product (or just inspiration). We&apos;ll place it in your room, then look for matching options you can buy.</p>
               <input ref={fileRef} type="file" accept="image/*" className="hidden"
-                onChange={e => { const f = e.target.files?.[0]; if (f) ws.uploadPhotoProduct(f); e.target.value = ""; }} />
+                onChange={e => { const f = e.target.files?.[0]; if (f) uploadInspo(f); e.target.value = ""; }} />
               <button type="button" disabled={ws.searching || ws.fetchingProduct} onClick={() => fileRef.current?.click()}
                 className="w-full border border-dashed border-[var(--border)] rounded-lg py-3 text-xs text-[var(--muted-foreground)] hover:border-slate-400 hover:text-slate-700 transition-colors disabled:opacity-40 flex items-center justify-center gap-2">
                 {ws.fetchingProduct
-                  ? <><span className="h-3.5 w-3.5 rounded-full border-2 border-slate-300 border-t-slate-700 animate-spin" /> Adding to your room…</>
-                  : "Choose or paste a photo"}
+                  ? <><span className="h-3.5 w-3.5 rounded-full border-2 border-slate-300 border-t-slate-700 animate-spin" /> Placing it in your room…</>
+                  : ws.searchFile ? "Choose a different photo" : "Choose or paste a photo"}
               </button>
+
+              {/* Photo is staged — searching for buyable matches it can optionally be swapped for */}
               {ws.searchFile && !ws.fetchingProduct && (
-                <button type="button" disabled={ws.searching} onClick={() => ws.searchFile && ws.runVisualSearch(ws.searchFile)}
-                  className="w-full text-xs py-2 rounded-lg border border-[var(--border)] text-slate-600 hover:border-slate-400 hover:text-slate-800 transition-colors disabled:opacity-40 flex items-center justify-center gap-2">
-                  {ws.searching ? <><span className="h-3.5 w-3.5 rounded-full border-2 border-slate-300 border-t-slate-700 animate-spin" /> Searching online…</> : <>🔍 Search similar products to buy</>}
-                </button>
+                <p className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1.5">
+                  ✓ Your photo is placed. {ws.searching ? "Finding options to buy…" : "Pick a match below to buy it, or keep your photo and hit Done."}
+                </p>
+              )}
+              {ws.searching && (
+                <p className="text-xs text-[var(--muted-foreground)] flex items-center gap-1.5">
+                  <span className="h-3.5 w-3.5 rounded-full border-2 border-slate-300 border-t-slate-700 animate-spin inline-block" /> Searching online…
+                </p>
               )}
               {ws.searchError && <p className="text-xs text-red-600">{ws.searchError}</p>}
+              {ws.searchFile && !ws.searching && ws.candidates && ws.candidates.length === 0 && (
+                <p className="text-xs text-[var(--muted-foreground)]">Couldn&apos;t find a match to buy — we&apos;ll use your photo. Hit Done when ready.</p>
+              )}
               {ws.candidates && ws.candidates.length > 0 && (
                 <div className="space-y-2 pt-0.5">
-                  <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">Shoppable matches</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">Options online — pick one, or keep your photo</p>
                   {ws.candidates.map((c, i) => (
                     <div key={i} className={`flex gap-2 p-2 rounded-lg border ${c.supported ? "border-[var(--border)] bg-white" : "border-[var(--border)] bg-slate-50 opacity-60"}`}>
                       {c.thumbnail && (
