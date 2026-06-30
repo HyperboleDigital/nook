@@ -35,7 +35,8 @@ export interface ShoppingResult {
   supported: boolean;
   productUrl: string | null;     // direct merchant URL (Amazon/Walmart/Home Depot)
   immersiveToken: string | null; // Google Shopping → resolve to a URL on pick (Wayfair today)
-  exact: boolean;                // true = real visual match (Google Lens), false = keyword "similar"
+  exact: boolean;                // true = visual match (Google Lens), false = keyword "similar"
+  score: number | null;          // 0–10 visual match vs the uploaded photo (graded by Gemini)
   alternates?: RetailerOption[]; // other retailers carrying the same product (Lens grouping)
 }
 
@@ -110,7 +111,7 @@ const ENGINES: {
       if (!url) return null;
       return {
         title: str(r.title), thumbnail: str(r.thumbnail), price: fmtPrice(r.price),
-        retailer: "Amazon", supported: isSupportedRetailerUrl(url), productUrl: url, immersiveToken: null, exact: false,
+        retailer: "Amazon", supported: isSupportedRetailerUrl(url), productUrl: url, immersiveToken: null, exact: false, score: null,
       };
     },
   },
@@ -124,7 +125,7 @@ const ENGINES: {
       const offer = r.primary_offer as { offer_price?: unknown } | undefined;
       return {
         title: str(r.title), thumbnail: str(r.thumbnail), price: fmtPrice(offer?.offer_price ?? r.price),
-        retailer: "Walmart", supported: isSupportedRetailerUrl(url), productUrl: url, immersiveToken: null, exact: false,
+        retailer: "Walmart", supported: isSupportedRetailerUrl(url), productUrl: url, immersiveToken: null, exact: false, score: null,
       };
     },
   },
@@ -138,7 +139,7 @@ const ENGINES: {
       const thumb = str(r.thumbnail) || firstThumb(r.thumbnails);
       return {
         title: str(r.title), thumbnail: thumb, price: fmtPrice(r.price),
-        retailer: "The Home Depot", supported: isSupportedRetailerUrl(url), productUrl: url, immersiveToken: null, exact: false,
+        retailer: "The Home Depot", supported: isSupportedRetailerUrl(url), productUrl: url, immersiveToken: null, exact: false, score: null,
       };
     },
   },
@@ -160,7 +161,7 @@ const ENGINES: {
         supported,
         productUrl: url && isSupportedRetailerUrl(url) ? url : null,
         immersiveToken: token,
-        exact: false,
+        exact: false, score: null,
       };
     },
   },
@@ -257,7 +258,7 @@ export async function searchByImage(imageUrl: string): Promise<ShoppingResult[]>
       supported: primary.supported,
       productUrl: primary.supported ? primary.url : null,
       immersiveToken: null,
-      exact: true,
+      exact: true, score: null,
       alternates: alternates.length ? alternates : undefined,
     };
   });

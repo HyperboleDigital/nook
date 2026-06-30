@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { del } from "@vercel/blob";
 import { supabaseAdmin } from "@/lib/supabase";
 import { uploadImage } from "@/lib/restyle-render";
-import { describeScreenshotForSearch } from "@/lib/gemini";
+import { describeScreenshotForSearch, scoreImageMatches } from "@/lib/gemini";
 import { searchByImage, searchShopping, ShoppingSearchError, type ShoppingResult } from "@/lib/shopping-search";
 
 // Google Lens visual match + (fallback) Gemini identify + four parallel SerpApi searches.
@@ -70,5 +70,29 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (results.length === 0) {
     return NextResponse.json({ error: "No matching products found. Try a clearer screenshot." }, { status: 404 });
   }
+
+  // Grade each candidate 0–10 against the uploaded photo (Lens's "exact" is just relevance).
+  results = results.slice(0, 8);
+  try {
+    const thumbs = await Promise.all(results.map(async (r) => {
+      if (!r.thumbnail) return null;
+      try {
+        const tr = await fetch(r.thumbnail, { signal: AbortSignal.timeout(6_000) });
+        if (!tr.ok) return null;
+        return { base64: Buffer.from(await tr.arrayBuffer()).toString("base64"), mimeType: tr.headers.get("content-type") || "image/jpeg" };
+      } catch { return null; }
+    }));
+    const idx = results.map((_, i) => i).filter((i) => thumbs[i]);
+    if (idx.length) {
+      const scores = await scoreImageMatches({
+        target: { base64: buf.toString("base64"), mimeType },
+        candidates: idx.map((i) => thumbs[i]!),
+      });
+      idx.forEach((i, k) => { if (scores[k] != null) results[i].score = scores[k]; });
+      // Best visual match first; unscored fall to the back.
+      results.sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
+    }
+  } catch { /* scoring is best-effort */ }
+
   return NextResponse.json({ results });
 }

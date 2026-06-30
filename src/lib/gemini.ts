@@ -407,3 +407,43 @@ export async function describeProductImages(params: {
     return ""; // best-effort
   }
 }
+
+/**
+ * Rate how well each candidate image matches a target product image, 0–10 (10 = clearly the
+ * same product). Used to grade shopping matches honestly instead of trusting Google Lens's
+ * "exact" label. Returns scores aligned to `candidates`; null where it couldn't judge.
+ */
+export async function scoreImageMatches(params: {
+  target: { base64: string; mimeType: string };
+  candidates: { base64: string; mimeType: string }[];
+}): Promise<(number | null)[]> {
+  if (!params.candidates.length) return [];
+  const n = params.candidates.length;
+  const prompt =
+    "The FIRST image is a TARGET product a user wants to find. The next " + n + " images are " +
+    "candidate products, in order. For EACH candidate, rate how visually similar it is to the " +
+    "target product: 10 = clearly the same product; 7–9 = very close in style, shape, material, " +
+    "and color; 4–6 = loosely similar; 0–3 = different. Judge the product itself, ignoring " +
+    "backgrounds/watermarks. " +
+    `Reply as JSON {"scores":[...]} with exactly ${n} integers (0–10) in the same order. JSON only.`;
+  const parts: Record<string, unknown>[] = [
+    { text: prompt },
+    { inline_data: { mime_type: params.target.mimeType, data: params.target.base64 } },
+  ];
+  for (const c of params.candidates) parts.push({ inline_data: { mime_type: c.mimeType, data: c.base64 } });
+  try {
+    const data = await geminiPost(GEMINI_VISION_MODEL, {
+      contents: [{ parts }],
+      generationConfig: { responseMimeType: "application/json" },
+    });
+    const text = data.candidates?.[0]?.content?.parts?.find((p) => p.text)?.text ?? "{}";
+    const parsed = JSON.parse(text.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim());
+    const scores: unknown[] = Array.isArray(parsed.scores) ? parsed.scores : [];
+    return params.candidates.map((_, i) => {
+      const v = Number(scores[i]);
+      return Number.isFinite(v) ? Math.max(0, Math.min(10, Math.round(v))) : null;
+    });
+  } catch {
+    return params.candidates.map(() => null);
+  }
+}

@@ -42,6 +42,8 @@ export default function RestyleWizard({
   const [addLabelDraft, setAddLabelDraft] = useState("");
   const [missingDraft, setMissingDraft] = useState("");
   const [showMissing, setShowMissing] = useState(false);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [pendingPreview, setPendingPreview] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   if (!ws.restyle) return null;
@@ -51,9 +53,20 @@ export default function RestyleWizard({
   // Items already staged — shown on the builder so progress is visible.
   const stagedItems = activeEdits.filter(e => e.kind === "item" || e.kind === "add");
 
+  const clearPending = () => {
+    setPendingPreview(prev => { if (prev) URL.revokeObjectURL(prev); return null; });
+    setPendingFile(null);
+  };
+  // Selecting a photo only previews it — uploading/searching waits for explicit confirm.
+  const pickPending = (f: File | undefined) => {
+    if (!f || !f.type.startsWith("image/")) return;
+    setPendingPreview(prev => { if (prev) URL.revokeObjectURL(prev); return URL.createObjectURL(f); });
+    setPendingFile(f);
+  };
+
   const resetSourcing = () => {
     ws.setProductUrl(""); ws.setCandidates(null); ws.setSearchError(null); ws.clearLastProduct();
-    setDescText(""); setSrcMode("link");
+    setDescText(""); setSrcMode("link"); clearPending();
   };
 
   // Per-item loop: choose Swap/Add → pick or name ONE item → source it → back to the builder.
@@ -69,6 +82,7 @@ export default function RestyleWizard({
     await ws.uploadPhotoProduct(file);
     ws.runVisualSearch(file);
   };
+  const confirmPending = async () => { const f = pendingFile; if (!f) return; clearPending(); await uploadInspo(f); };
 
   // Failsafe for missed detection: let the user add an item the detector didn't pick up,
   // persist it as a pill, and start swapping it.
@@ -329,33 +343,53 @@ export default function RestyleWizard({
 
           {srcMode === "photo" && (
             <div className={`${card} p-4 space-y-2.5`}
-              onPaste={(e) => { const f = Array.from(e.clipboardData.files).find(f => f.type.startsWith("image/")); if (f) uploadInspo(f); }}>
-              <p className="text-[11px] text-[var(--muted-foreground)]">Upload a photo or screenshot of the product (or just inspiration). We&apos;ll place it in your room, then look for matching options you can buy.</p>
+              onPaste={(e) => { const f = Array.from(e.clipboardData.files).find(f => f.type.startsWith("image/")); if (f) pickPending(f); }}>
+              <p className="text-[11px] text-[var(--muted-foreground)]">Upload a photo or screenshot of the product (or just inspiration). You&apos;ll confirm before we place it and search for matches.</p>
               <input ref={fileRef} type="file" accept="image/*" className="hidden"
-                onChange={e => { const f = e.target.files?.[0]; if (f) uploadInspo(f); e.target.value = ""; }} />
-              <button type="button" disabled={ws.searching || ws.fetchingProduct} onClick={() => fileRef.current?.click()}
-                className="w-full border border-dashed border-[var(--border)] rounded-lg py-3 text-xs text-[var(--muted-foreground)] hover:border-slate-400 hover:text-slate-700 transition-colors disabled:opacity-40 flex items-center justify-center gap-2">
-                {ws.fetchingProduct
-                  ? <><span className="h-3.5 w-3.5 rounded-full border-2 border-slate-300 border-t-slate-700 animate-spin" /> Placing it in your room…</>
-                  : ws.searchFile ? "Choose a different photo" : "Choose or paste a photo"}
-              </button>
+                onChange={e => { const f = e.target.files?.[0]; if (f) pickPending(f); e.target.value = ""; }} />
+
+              {/* Confirm step — preview the chosen photo before anything runs */}
+              {pendingFile && !ws.fetchingProduct ? (
+                <div className="space-y-2">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={pendingPreview ?? ""} alt="Selected" className="w-full max-h-44 object-contain rounded-lg border border-[var(--border)] bg-[var(--muted)]" />
+                  <p className="text-[11px] text-[var(--muted-foreground)]">Use this photo? We&apos;ll place it in your room and look for matches to buy.</p>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={confirmPending}
+                      className="flex-1 bg-[var(--primary)] text-[var(--primary-foreground)] font-medium py-2 rounded-lg text-xs hover:opacity-90 transition-opacity">
+                      Use this photo
+                    </button>
+                    <button type="button" onClick={() => { clearPending(); fileRef.current?.click(); }}
+                      className="px-3 border border-[var(--border)] rounded-lg text-xs text-slate-600 hover:border-slate-400 transition-colors">
+                      Choose different
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button type="button" disabled={ws.searching || ws.fetchingProduct} onClick={() => fileRef.current?.click()}
+                  className="w-full border border-dashed border-[var(--border)] rounded-lg py-3 text-xs text-[var(--muted-foreground)] hover:border-slate-400 hover:text-slate-700 transition-colors disabled:opacity-40 flex items-center justify-center gap-2">
+                  {ws.fetchingProduct
+                    ? <><span className="h-3.5 w-3.5 rounded-full border-2 border-slate-300 border-t-slate-700 animate-spin" /> Placing it in your room…</>
+                    : ws.searchFile ? "Choose a different photo" : "Choose or paste a photo"}
+                </button>
+              )}
 
               {/* Photo is staged — searching for buyable matches it can optionally be swapped for */}
-              {ws.searchFile && !ws.fetchingProduct && (
+              {!pendingFile && ws.searchFile && !ws.fetchingProduct && (
                 <p className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1.5">
                   ✓ Your photo is placed. {ws.searching ? "Finding options to buy…" : "Pick a match below to buy it, or keep your photo and hit Done."}
                 </p>
               )}
-              {ws.searching && (
+              {!pendingFile && ws.searching && (
                 <p className="text-xs text-[var(--muted-foreground)] flex items-center gap-1.5">
-                  <span className="h-3.5 w-3.5 rounded-full border-2 border-slate-300 border-t-slate-700 animate-spin inline-block" /> Searching online…
+                  <span className="h-3.5 w-3.5 rounded-full border-2 border-slate-300 border-t-slate-700 animate-spin inline-block" /> Finding the best matches…
                 </p>
               )}
-              {ws.searchError && <p className="text-xs text-red-600">{ws.searchError}</p>}
-              {ws.searchFile && !ws.searching && ws.candidates && ws.candidates.length === 0 && (
+              {!pendingFile && ws.searchError && <p className="text-xs text-red-600">{ws.searchError}</p>}
+              {!pendingFile && ws.searchFile && !ws.searching && ws.candidates && ws.candidates.length === 0 && (
                 <p className="text-xs text-[var(--muted-foreground)]">Couldn&apos;t find a match to buy — we&apos;ll use your photo. Hit Done when ready.</p>
               )}
-              {ws.candidates && ws.candidates.length > 0 && (
+              {!pendingFile && ws.candidates && ws.candidates.length > 0 && (
                 <div className="space-y-2 pt-0.5">
                   <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">Options online — pick one, or keep your photo</p>
                   {ws.candidates.map((c, i) => (
@@ -365,9 +399,13 @@ export default function RestyleWizard({
                         <img src={c.thumbnail} alt="" className="h-14 w-14 object-cover rounded shrink-0" />
                       )}
                       <div className="min-w-0 flex-1 space-y-1">
-                        <span className={`inline-block text-[9px] px-1 py-0.5 rounded ${c.exact ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
-                          {c.exact ? "Exact match" : "Similar"}
-                        </span>
+                        {typeof c.score === "number" ? (
+                          <span className={`inline-block text-[9px] px-1 py-0.5 rounded font-medium ${c.score >= 9 ? "bg-emerald-100 text-emerald-700" : c.score >= 6 ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-500"}`}>
+                            {c.score}/10 match
+                          </span>
+                        ) : (
+                          <span className="inline-block text-[9px] px-1 py-0.5 rounded bg-slate-100 text-slate-500">{c.exact ? "Match" : "Similar"}</span>
+                        )}
                         <p className="text-[11px] font-medium text-slate-800 line-clamp-2 leading-tight">{c.title}</p>
                         <div className="flex items-center gap-1.5">
                           {c.price && <span className="text-[10px] font-semibold text-slate-700">{c.price}</span>}
