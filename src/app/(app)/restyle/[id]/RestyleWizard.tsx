@@ -364,8 +364,8 @@ export default function RestyleWizard({
             </div>
           )}
 
-          {/* Composer */}
-          {!composing ? (
+          {/* Composer — shown straight away when nothing is staged; otherwise behind "+ Add a change" */}
+          {!composing && stagedItems.length > 0 ? (
             <button type="button" onClick={() => { setComposing(true); setCurrent(null); resetSourcing(); }}
               className="w-full border border-dashed border-[var(--border)] rounded-xl py-3 text-sm text-slate-600 hover:border-slate-400 hover:text-slate-800 transition-colors">
               + Add a change
@@ -411,8 +411,10 @@ export default function RestyleWizard({
                 </div>
               </div>
 
-              <button type="button" onClick={closeComposer}
-                className="text-xs text-[var(--muted-foreground)] hover:text-slate-700 transition-colors">Cancel</button>
+              {stagedItems.length > 0 && (
+                <button type="button" onClick={closeComposer}
+                  className="text-xs text-[var(--muted-foreground)] hover:text-slate-700 transition-colors">Cancel</button>
+              )}
             </div>
           ) : (
             <div className={`${card} p-4 space-y-3`}>
