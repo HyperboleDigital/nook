@@ -210,6 +210,20 @@ export function useRestyleWorkspace(id: string) {
     finally { setSearching(false); }
   };
 
+  // Keyword search from a typed description (no image to match against).
+  const runTextSearch = async (query: string) => {
+    if (!query.trim()) return;
+    setSearching(true); setSearchError(null); setCandidates(null);
+    const fd = new FormData(); fd.append("query", query.trim());
+    try {
+      const r = await fetch(`/api/restyle/${id}/visual-search`, { method: "POST", body: fd });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error ?? "Couldn't search for that item");
+      setCandidates(data.results as ShoppingResult[]);
+    } catch (err) { setSearchError(err instanceof Error ? err.message : "Search failed"); }
+    finally { setSearching(false); }
+  };
+
   // Pick a real product the search found. It replaces the photo staged from the
   // screenshot (same item, now with proper details + a Buy link) — no duplicate row.
   const pickCandidate = async (c: ShoppingResult) => {
@@ -391,7 +405,7 @@ export function useRestyleWorkspace(id: string) {
     // preview
     previewUrl, setPreviewUrl,
     // handlers
-    addEdit, addNewItem, fetchProductLink, uploadPhotoProduct, runVisualSearch, pickCandidate,
+    addEdit, addNewItem, fetchProductLink, uploadPhotoProduct, runVisualSearch, runTextSearch, pickCandidate,
     setProductMode, generate, toggle, selectOption, remove, addCustomItem, removeCustomItem, downloadImage,
     // derived
     edits, activeEdits, displayUrl, showSlider, canGenerate, atMaxCustom, suggestions,

@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import type { RestyleWorkspace } from "./useRestyleWorkspace";
 import type { ShoppingResult } from "@/lib/shopping-search";
-import { card, inp, stageBtn, chip } from "./shared";
+import { card, inp, chip } from "./shared";
 
 // Two mutually-exclusive intents. "Empty" clears everything and renders in one shot.
 // "Restyle" is a one-screen builder: stage as many swap/add changes as you like, then Generate.
@@ -274,14 +274,28 @@ export default function RestyleWizard({
       )}
 
       {srcMode === "describe" && (
-        <div className={`${card} p-4 space-y-2`}>
-          <p className="text-[11px] text-[var(--muted-foreground)]">No link or photo? Describe it — color, material, style, and where it goes.</p>
-          <input type="text" value={descText} onChange={e => setDescText(e.target.value)}
-            placeholder={`e.g. a low walnut ${current.label} with brass legs`} className={inp} />
+        <div className={`${card} p-4 space-y-2.5`}>
+          <p className="text-[11px] text-[var(--muted-foreground)]">No link or photo? Describe it — color, material, style. We&apos;ll find matching products to shop, or you can just go with your description.</p>
+          <div className="flex gap-2">
+            <input type="text" value={descText} onChange={e => setDescText(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter" && descText.trim()) ws.runTextSearch(descText); }}
+              placeholder={`e.g. a low walnut ${current.label} with brass legs`} className={inp} />
+            <button type="button" disabled={ws.searching || !descText.trim()} onClick={() => ws.runTextSearch(descText)}
+              className="bg-[var(--primary)] text-[var(--primary-foreground)] px-3 rounded-lg text-xs font-medium disabled:opacity-40 shrink-0 flex items-center gap-1.5">
+              {ws.searching ? <span className="h-3.5 w-3.5 rounded-full border-2 border-white/40 border-t-white animate-spin" /> : "Find"}
+            </button>
+          </div>
+          {ws.searchError && <p className="text-xs text-red-600">{ws.searchError}</p>}
+          {ws.searching && (
+            <p className="text-xs text-[var(--muted-foreground)] flex items-center gap-1.5">
+              <span className="h-3.5 w-3.5 rounded-full border-2 border-slate-300 border-t-slate-700 animate-spin inline-block" /> Finding products…
+            </p>
+          )}
+          <CandidateList candidates={displayCandidates} ws={ws} />
           <button type="button" disabled={ws.busy || !descText.trim()}
             onClick={() => ws.addEdit({ kind: current.mode === "swap" ? "item" : "add", targetLabel: current.label, instruction: descText.trim() })}
-            className={stageBtn}>
-            Add to plan
+            className="w-full text-xs py-2 rounded-lg border border-[var(--border)] text-slate-600 hover:border-slate-400 hover:text-slate-800 transition-colors disabled:opacity-40">
+            Just go with my description
           </button>
         </div>
       )}
@@ -529,8 +543,12 @@ function CandidateList({ candidates, ws }: { candidates: ShoppingResult[] | null
               <span className={`inline-block text-[9px] px-1 py-0.5 rounded font-medium ${word.cls}`}>{word.label}</span>
               <p className="text-[11px] font-medium text-slate-800 line-clamp-2 leading-tight">{c.title}</p>
               <div className="flex items-center gap-1.5">
-                {c.price && <span className="text-[10px] font-semibold text-slate-700">{c.price}</span>}
-                <span className="text-[10px] text-[var(--muted-foreground)]">{c.retailer}</span>
+                {c.price
+                  ? <span className="text-[10px] font-semibold text-slate-700">{c.price}</span>
+                  : viewUrl
+                    ? <a href={viewUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] font-medium text-slate-500 underline hover:text-slate-700">See price</a>
+                    : <span className="text-[10px] text-slate-400">Price varies</span>}
+                <span className="text-[10px] text-[var(--muted-foreground)]">· {c.retailer}</span>
               </div>
               {c.alternates && c.alternates.length > 0 && (
                 <p className="text-[10px] text-[var(--muted-foreground)] leading-tight">

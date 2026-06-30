@@ -29,6 +29,19 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   const form = await req.formData();
   const file = form.get("image") as File | null;
+  const query = (form.get("query") as string | null)?.trim();
+
+  // Text-only path (from "Describe it"): keyword search, no Lens/scoring (no target image).
+  if (!file && query) {
+    try {
+      const results = await searchShopping(query);
+      return NextResponse.json({ results });
+    } catch (err) {
+      if (err instanceof ShoppingSearchError) return NextResponse.json({ error: err.message }, { status: err.status });
+      return NextResponse.json({ error: "Product search failed." }, { status: 502 });
+    }
+  }
+
   if (!file) return NextResponse.json({ error: "An image is required." }, { status: 400 });
   if (!file.type.startsWith("image/")) return NextResponse.json({ error: "That file isn't an image." }, { status: 400 });
 
