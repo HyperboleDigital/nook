@@ -111,25 +111,6 @@ export function useRestyleWorkspace(id: string) {
     return () => { active = false; };
   }, [id]);
 
-  // Restore the most recent visual search (loose cache, 24h) so it survives a reload.
-  useEffect(() => {
-    let active = true;
-    Promise.resolve().then(() => {
-      if (!active) return;
-      try {
-        const raw = localStorage.getItem(`nook-vs-${id}`);
-        if (!raw) return;
-        const { ts, results } = JSON.parse(raw) as { ts: number; results: ShoppingResult[] };
-        if (Date.now() - ts < 24 * 60 * 60 * 1000 && Array.isArray(results) && results.length) {
-          setCandidates(results);
-        } else {
-          localStorage.removeItem(`nook-vs-${id}`);
-        }
-      } catch { /* ignore */ }
-    });
-    return () => { active = false; };
-  }, [id]);
-
   const saveTitle = async (t: string) => {
     const trimmed = t.trim();
     if (trimmed === (restyle?.title ?? "")) return;
@@ -224,9 +205,7 @@ export function useRestyleWorkspace(id: string) {
       const r = await fetch(`/api/restyle/${id}/visual-search`, { method: "POST", body: fd });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error ?? "Couldn't search for that item");
-      const results = data.results as ShoppingResult[];
-      setCandidates(results);
-      try { localStorage.setItem(`nook-vs-${id}`, JSON.stringify({ ts: Date.now(), results })); } catch { /* quota */ }
+      setCandidates(data.results as ShoppingResult[]);
     } catch (err) { setSearchError(err instanceof Error ? err.message : "Search failed"); }
     finally { setSearching(false); }
   };

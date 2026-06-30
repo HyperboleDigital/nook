@@ -75,7 +75,8 @@ export default function RestyleWorkspace({ params }: { params: Promise<{ id: str
         ) : (
           <RestyleWizard
             ws={ws}
-            startStep={ws.edits.length > 0 ? 4 : 1}
+            startStep={ws.edits.length > 0 ? 2 : 1}
+            initialMode={ws.edits.length > 0 ? "restyle" : null}
             onDone={() => { /* renders now exist → result view shows automatically */ }}
           />
         )
