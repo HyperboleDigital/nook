@@ -35,8 +35,8 @@ export default function RestyleWizard({
 }) {
   const [step, setStep] = useState(startStep);
   const [mode, setMode] = useState<Mode | null>(initialMode);
-  const [targets, setTargets] = useState<Target[]>([]);
-  const [sourceIdx, setSourceIdx] = useState(0);
+  const [picker, setPicker] = useState<"none" | "swap" | "add">("none");
+  const [current, setCurrent] = useState<Target | null>(null);
   const [srcMode, setSrcMode] = useState<SrcMode>("link");
   const [descText, setDescText] = useState("");
   const [addLabelDraft, setAddLabelDraft] = useState("");
@@ -45,43 +45,22 @@ export default function RestyleWizard({
   if (!ws.restyle) return null;
   const { restyle, objects, edits, activeEdits } = ws;
 
-  // ── helpers ──
-  const isSwapTarget = (label: string) => targets.some(t => t.label === label && t.mode === "swap");
-  const toggleSwap = (label: string) =>
-    setTargets(prev => prev.some(t => t.label === label && t.mode === "swap")
-      ? prev.filter(t => !(t.label === label && t.mode === "swap"))
-      : [...prev, { label, mode: "swap" }]);
-
-  const addAddTarget = (label: string) => {
-    const l = label.trim();
-    if (!l || targets.some(t => t.label === l && t.mode === "add")) return;
-    setTargets(prev => [...prev, { label: l, mode: "add" }]);
-    setAddLabelDraft("");
-  };
-  const removeTarget = (t: Target) =>
-    setTargets(prev => prev.filter(x => !(x.label === t.label && x.mode === t.mode)));
-
-  // declutter is staged immediately (no per-item sourcing)
   const hasRemoveAll = edits.some(e => e.kind === "remove" && e.active);
+  // Items already staged — shown on the builder so progress is visible.
+  const stagedItems = activeEdits.filter(e => e.kind === "item" || e.kind === "add");
 
   const resetSourcing = () => {
     ws.setProductUrl(""); ws.setCandidates(null); ws.setSearchError(null); ws.clearLastProduct();
     setDescText(""); setSrcMode("link");
   };
 
-  const goToSourcing = () => {
-    if (targets.length > 0) { setSourceIdx(0); resetSourcing(); setStep(3); }
-    else setStep(4);
+  // Per-item loop: choose Swap/Add → pick or name ONE item → source it → back to the builder.
+  const startItem = (label: string, m: "swap" | "add") => {
+    const l = label.trim(); if (!l) return;
+    setCurrent({ label: l, mode: m }); resetSourcing(); setStep(3);
   };
+  const backToBuilder = () => { setCurrent(null); setPicker("none"); setAddLabelDraft(""); resetSourcing(); setStep(2); };
 
-  const nextTarget = () => {
-    resetSourcing();
-    if (sourceIdx + 1 < targets.length) setSourceIdx(sourceIdx + 1);
-    else setStep(4);
-  };
-
-  const current = targets[sourceIdx];
-  // Has the current target been satisfied (a product staged, or a description added)?
   const currentStaged = !!ws.lastProduct ||
     (current ? edits.some(e => e.target_label?.toLowerCase() === current.label.toLowerCase() && (e.buy_url || e.instruction || e.reference_url)) : false);
 
@@ -169,58 +148,83 @@ export default function RestyleWizard({
         </div>
       )}
 
-      {/* ── Step 2 (restyle) — Choose changes ── */}
+      {/* ── Step 2 (restyle) — Builder: Swap or Add, one item at a time ── */}
       {step === 2 && mode === "restyle" && (
         <div className="space-y-5">
           <div>
-            <h2 className="text-lg font-bold tracking-tight">What&apos;s changing?</h2>
-            <p className="text-sm text-[var(--muted-foreground)] mt-0.5">Mark items to swap and add any new pieces — you&apos;ll choose products next.</p>
+            <h2 className="text-lg font-bold tracking-tight">What do you want to change?</h2>
+            <p className="text-sm text-[var(--muted-foreground)] mt-0.5">Swap something that&apos;s already here, or add a new piece. One at a time.</p>
           </div>
 
-          <div className={`${card} p-4 space-y-2.5`}>
-            <p className="text-sm font-medium text-slate-800">🔁 Items to swap</p>
-            {objects.length === 0 ? (
-              <p className="text-xs text-[var(--muted-foreground)]">No items detected — add new pieces below instead.</p>
-            ) : (
-              <>
-                <div className="flex flex-wrap gap-1.5">
-                  {objects.map(label => (
-                    <button key={label} type="button" onClick={() => toggleSwap(label)} className={chip(isSwapTarget(label))}>
-                      {label}
-                    </button>
-                  ))}
-                </div>
-                <p className="text-[10px] text-slate-400">Tap an item to replace it — the old one is removed automatically when the new one goes in.</p>
-              </>
-            )}
+          {/* Two clear choices */}
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" onClick={() => setPicker(picker === "swap" ? "none" : "swap")}
+              className={`p-4 rounded-xl border text-left transition-colors ${picker === "swap" ? "border-slate-900 bg-[var(--accent)]" : "border-[var(--border)] hover:border-slate-400"}`}>
+              <span className="text-xl block">🔁</span>
+              <span className="block text-sm font-medium text-slate-800 mt-1">Swap an item</span>
+              <span className="block text-[11px] text-[var(--muted-foreground)]">replace something here</span>
+            </button>
+            <button type="button" onClick={() => setPicker(picker === "add" ? "none" : "add")}
+              className={`p-4 rounded-xl border text-left transition-colors ${picker === "add" ? "border-slate-900 bg-[var(--accent)]" : "border-[var(--border)] hover:border-slate-400"}`}>
+              <span className="text-xl block">➕</span>
+              <span className="block text-sm font-medium text-slate-800 mt-1">Add an item</span>
+              <span className="block text-[11px] text-[var(--muted-foreground)]">bring in something new</span>
+            </button>
           </div>
 
-          <div className={`${card} p-4 space-y-2.5`}>
-            <p className="text-sm font-medium text-slate-800">➕ New pieces to add</p>
-            <div className="flex gap-2">
-              <input type="text" value={addLabelDraft} onChange={e => setAddLabelDraft(e.target.value)}
-                onKeyDown={e => { if (e.key === "Enter") addAddTarget(addLabelDraft); }}
-                placeholder="e.g. area rug, floor lamp, wall art" className={inp} />
-              <button type="button" disabled={!addLabelDraft.trim()} onClick={() => addAddTarget(addLabelDraft)}
-                className="bg-[var(--primary)] text-[var(--primary-foreground)] px-3 rounded-lg text-xs font-medium disabled:opacity-40 shrink-0">
-                Add
-              </button>
+          {/* Swap → pick which item */}
+          {picker === "swap" && (
+            <div className={`${card} p-4 space-y-2`}>
+              <p className="text-sm font-medium text-slate-800">Which item are you replacing?</p>
+              {objects.length === 0 ? (
+                <p className="text-xs text-[var(--muted-foreground)]">No items detected — use “Add an item” instead.</p>
+              ) : (
+                <>
+                  <div className="flex flex-wrap gap-1.5">
+                    {objects.map(label => (
+                      <button key={label} type="button" onClick={() => startItem(label, "swap")} className={chip(false)}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-slate-400">The old one is removed automatically when the new one goes in.</p>
+                </>
+              )}
             </div>
-            {targets.filter(t => t.mode === "add").length > 0 && (
-              <div className="flex flex-wrap gap-1.5">
-                {targets.filter(t => t.mode === "add").map(t => (
-                  <span key={t.label} className="inline-flex items-center gap-1 text-xs pl-2.5 pr-1.5 py-1 rounded-full border border-slate-300 bg-white capitalize">
-                    {t.label}
-                    <button type="button" onClick={() => removeTarget(t)} className="text-slate-400 hover:text-red-500">×</button>
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
+          )}
 
-          <button type="button" disabled={targets.length === 0} onClick={goToSourcing}
+          {/* Add → name the new item */}
+          {picker === "add" && (
+            <div className={`${card} p-4 space-y-2`}>
+              <p className="text-sm font-medium text-slate-800">What do you want to add?</p>
+              <div className="flex gap-2">
+                <input type="text" value={addLabelDraft} autoFocus onChange={e => setAddLabelDraft(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter") startItem(addLabelDraft, "add"); }}
+                  placeholder="e.g. area rug, floor lamp, wall art" className={inp} />
+                <button type="button" disabled={!addLabelDraft.trim()} onClick={() => startItem(addLabelDraft, "add")}
+                  className="bg-[var(--primary)] text-[var(--primary-foreground)] px-3 rounded-lg text-xs font-medium disabled:opacity-40 shrink-0">
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Staged so far */}
+          {stagedItems.length > 0 && (
+            <div className={`${card} p-3 space-y-1.5`}>
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">Added so far</p>
+              {stagedItems.map(e => (
+                <div key={e.id} className="flex items-center gap-2 text-xs text-slate-700">
+                  <span className="text-emerald-600">✓</span>
+                  <span className="truncate capitalize">{e.product_title ?? e.target_label}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <button type="button" disabled={activeEdits.length === 0} onClick={() => setStep(4)}
             className="w-full bg-[var(--primary)] text-[var(--primary-foreground)] font-semibold py-3 rounded-xl text-sm hover:opacity-90 disabled:opacity-30 transition-opacity">
-            {targets.length > 0 ? "Choose products" : "Mark something to change"}
+            Review &amp; generate{activeEdits.length > 0 && <span className="ml-1 bg-white/20 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">{activeEdits.length}</span>}
           </button>
         </div>
       )}
@@ -246,15 +250,15 @@ export default function RestyleWizard({
         </div>
       )}
 
-      {/* ── Step 3 — Source each item ── */}
+      {/* ── Step 3 — Source the chosen item (inspo photo / product link / describe) ── */}
       {step === 3 && current && (
         <div className="space-y-4">
           <div>
-            <p className="text-[11px] text-[var(--muted-foreground)]">Item {sourceIdx + 1} of {targets.length}</p>
+            <p className="text-[11px] text-[var(--muted-foreground)]">{current.mode === "swap" ? "Swapping" : "Adding"}</p>
             <h2 className="text-lg font-bold tracking-tight capitalize">
               {current.mode === "swap" ? "Swap the " : "Add "}{current.label}
             </h2>
-            <p className="text-sm text-[var(--muted-foreground)] mt-0.5">How would you like to choose it?</p>
+            <p className="text-sm text-[var(--muted-foreground)] mt-0.5">Upload a photo for inspiration, or paste a product link.</p>
           </div>
 
           {/* mode toggle */}
@@ -366,16 +370,12 @@ export default function RestyleWizard({
           )}
           {ws.error && <div className="rounded-lg bg-red-50 border border-red-200 text-red-600 text-xs px-3 py-2">{ws.error}</div>}
 
-          <div className="flex gap-2">
-            <button type="button" onClick={nextTarget}
-              className="flex-1 text-sm py-3 rounded-xl border border-[var(--border)] text-slate-600 hover:border-slate-400 transition-colors">
-              Skip
-            </button>
-            <button type="button" onClick={nextTarget}
-              className="flex-1 bg-[var(--primary)] text-[var(--primary-foreground)] font-semibold py-3 rounded-xl text-sm hover:opacity-90 transition-opacity">
-              {sourceIdx + 1 < targets.length ? "Next item" : "Review"}
-            </button>
-          </div>
+          <button type="button" onClick={backToBuilder}
+            className={currentStaged
+              ? "w-full bg-[var(--primary)] text-[var(--primary-foreground)] font-semibold py-3 rounded-xl text-sm hover:opacity-90 transition-opacity"
+              : "w-full text-sm py-3 rounded-xl border border-[var(--border)] text-slate-600 hover:border-slate-400 transition-colors"}>
+            {currentStaged ? "Done — back to changes" : "Cancel"}
+          </button>
         </div>
       )}
 
