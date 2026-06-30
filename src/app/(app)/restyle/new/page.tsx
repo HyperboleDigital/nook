@@ -13,6 +13,7 @@ export default function NewRestylePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null); // capture="environment" → opens the camera on mobile
 
   // Selecting a photo only previews it — nothing is uploaded or processed until the
   // user confirms, so a wrong pick can be swapped out first.
@@ -62,20 +63,33 @@ export default function NewRestylePage() {
       </div>
 
       <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => select(e.target.files?.[0])} />
+      <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => select(e.target.files?.[0])} />
 
       {!preview ? (
-        <div
-          className={`border-2 border-dashed rounded-xl p-12 text-center cursor-pointer transition-colors ${
-            isDragging ? "border-slate-900 bg-slate-50" : "border-[var(--border)] hover:border-slate-400"
-          }`}
-          onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-          onDragLeave={() => setIsDragging(false)}
-          onDrop={(e) => { e.preventDefault(); setIsDragging(false); select(e.dataTransfer.files[0]); }}
-          onClick={() => fileInputRef.current?.click()}
-        >
-          <div className="text-3xl mb-2">🛋️</div>
-          <div className="text-sm">Drag & drop a room photo, or click to browse</div>
-          <div className="text-xs text-[var(--muted-foreground)] mt-1">JPG or PNG</div>
+        <div className="space-y-3">
+          <div
+            className={`border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-colors ${
+              isDragging ? "border-slate-900 bg-slate-50" : "border-[var(--border)] hover:border-slate-400"
+            }`}
+            onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+            onDragLeave={() => setIsDragging(false)}
+            onDrop={(e) => { e.preventDefault(); setIsDragging(false); select(e.dataTransfer.files[0]); }}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <div className="text-3xl mb-2">🛋️</div>
+            <div className="text-sm">Drag &amp; drop a room photo, or tap to choose</div>
+            <div className="text-xs text-[var(--muted-foreground)] mt-1">JPG or PNG</div>
+          </div>
+          <div className="flex gap-2">
+            <button type="button" onClick={() => cameraInputRef.current?.click()}
+              className="flex-1 bg-slate-900 text-white text-sm font-medium py-3 rounded-xl hover:opacity-90 transition-opacity flex items-center justify-center gap-2">
+              📷 Take a photo
+            </button>
+            <button type="button" onClick={() => fileInputRef.current?.click()}
+              className="flex-1 border border-[var(--border)] text-sm text-slate-700 py-3 rounded-xl hover:border-slate-400 transition-colors flex items-center justify-center gap-2">
+              🖼 Choose from library
+            </button>
+          </div>
         </div>
       ) : (
         <div className="space-y-4">
