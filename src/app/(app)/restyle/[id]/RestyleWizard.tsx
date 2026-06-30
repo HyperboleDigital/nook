@@ -11,7 +11,7 @@ type Mode = "restyle" | "empty";
 type SrcMode = "link" | "photo" | "describe";
 
 const MODES: { key: Mode; title: string; desc: string; icon: string }[] = [
-  { key: "restyle", title: "Add or replace items", desc: "Swap pieces that are here, or bring in new ones", icon: "🛋️" },
+  { key: "restyle", title: "Restyle the room", desc: "Swap things out or add new pieces", icon: "🛋️" },
   { key: "empty", title: "Empty the room", desc: "Remove all the furniture for a blank space", icon: "🧹" },
 ];
 
@@ -54,6 +54,7 @@ export default function RestyleWizard({
 
   // Builder composer
   const [composing, setComposing] = useState(false);
+  const [pickMode, setPickMode] = useState<"swap" | "add" | null>(null); // choice → swap/add screen
   const [current, setCurrent] = useState<{ label: string; mode: "swap" | "add" } | null>(null);
   const [srcMode, setSrcMode] = useState<SrcMode>("link");
   const [descText, setDescText] = useState("");
@@ -134,9 +135,9 @@ export default function RestyleWizard({
     await ws.addCustomItem(l);
     chooseItem(l, "swap");
   };
-  // Compose another after one is staged.
-  const nextChange = () => { setCurrent(null); resetSourcing(); };
-  const closeComposer = () => { setComposing(false); setCurrent(null); resetSourcing(); };
+  // Compose another after one is staged → back to the swap/add choice.
+  const nextChange = () => { setCurrent(null); setPickMode(null); resetSourcing(); };
+  const closeComposer = () => { setComposing(false); setCurrent(null); setPickMode(null); resetSourcing(); };
 
   const uploadInspo = async (file: File) => { await ws.uploadPhotoProduct(file); ws.runVisualSearch(file); };
   const confirmPending = async () => { const f = pendingFile; if (!f) return; clearPending(); await uploadInspo(f); };
@@ -364,17 +365,77 @@ export default function RestyleWizard({
             </div>
           )}
 
-          {/* Composer — shown straight away when nothing is staged; otherwise behind "+ Add a change" */}
-          {!composing && stagedItems.length > 0 ? (
-            <button type="button" onClick={() => { setComposing(true); setCurrent(null); resetSourcing(); }}
+          {/* "+ Add a change" only appears to add MORE once something is staged */}
+          {!composing && stagedItems.length > 0 && (
+            <button type="button" onClick={() => { setComposing(true); setCurrent(null); setPickMode(null); resetSourcing(); }}
               className="w-full border border-dashed border-[var(--border)] rounded-xl py-3 text-sm text-slate-600 hover:border-slate-400 hover:text-slate-800 transition-colors">
               + Add a change
             </button>
-          ) : !current ? (
-            <div className={`${card} p-4 space-y-4`}>
-              {/* Tap an item in the room to change it */}
+          )}
+
+          {/* Composer — open straight away when nothing is staged */}
+          {(composing || stagedItems.length === 0) && (
+            current ? (
+              // ── Source the chosen item ──
+              <div className={`${card} p-4 space-y-3`}>
+                <button type="button" onClick={() => { setCurrent(null); resetSourcing(); }}
+                  className="text-xs text-[var(--muted-foreground)] hover:text-slate-700 transition-colors">← Back</button>
+                <p className="text-sm font-medium text-slate-800 capitalize">
+                  {current.mode === "swap" ? "Replacing the " : "Adding "}{current.label}
+                </p>
+                {sourcePanel}
+                {currentStaged && (
+                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-800 text-xs px-3 py-2">
+                    ✓ {current.mode === "swap" ? "Swapping" : "Adding"} <span className="capitalize">{current.label}</span>
+                    {ws.lastProduct?.title ? <span className="text-emerald-700"> → {ws.lastProduct.title}</span> : null}
+                  </div>
+                )}
+                {ws.error && <div className="rounded-lg bg-red-50 border border-red-200 text-red-600 text-xs px-3 py-2">{ws.error}</div>}
+                {currentStaged && (
+                  <div className="flex gap-2">
+                    <button type="button" onClick={nextChange}
+                      className="flex-1 text-sm py-2.5 rounded-xl border border-[var(--border)] text-slate-600 hover:border-slate-400 transition-colors">
+                      Make another change
+                    </button>
+                    <button type="button" onClick={closeComposer}
+                      className="flex-1 bg-[var(--primary)] text-[var(--primary-foreground)] font-medium py-2.5 rounded-xl text-sm hover:opacity-90 transition-opacity">
+                      Done
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : pickMode === null ? (
+              // ── Choice: swap something here, or add something new ──
               <div className="space-y-2">
-                <p className="text-sm font-medium text-slate-800">Tap an item in the room to change it</p>
+                <button type="button" onClick={() => setPickMode("swap")}
+                  className={`w-full flex items-center gap-3 p-4 rounded-xl border text-left transition-colors border-[var(--border)] hover:border-slate-400`}>
+                  <span className="text-xl">🔁</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-medium text-slate-800">Swap something out</span>
+                    <span className="block text-xs text-[var(--muted-foreground)]">Replace an item that&apos;s already in the room</span>
+                  </span>
+                  <span className="text-slate-300">›</span>
+                </button>
+                <button type="button" onClick={() => setPickMode("add")}
+                  className={`w-full flex items-center gap-3 p-4 rounded-xl border text-left transition-colors border-[var(--border)] hover:border-slate-400`}>
+                  <span className="text-xl">➕</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-medium text-slate-800">Add a new piece</span>
+                    <span className="block text-xs text-[var(--muted-foreground)]">Bring in furniture or decor that isn&apos;t there</span>
+                  </span>
+                  <span className="text-slate-300">›</span>
+                </button>
+                {stagedItems.length > 0 && (
+                  <button type="button" onClick={closeComposer}
+                    className="text-xs text-[var(--muted-foreground)] hover:text-slate-700 transition-colors pt-1">Cancel</button>
+                )}
+              </div>
+            ) : pickMode === "swap" ? (
+              // ── Swap: pick which item ──
+              <div className={`${card} p-4 space-y-2.5`}>
+                <button type="button" onClick={() => { setPickMode(null); setShowMissing(false); setMissingDraft(""); }}
+                  className="text-xs text-[var(--muted-foreground)] hover:text-slate-700 transition-colors">← Back</button>
+                <p className="text-sm font-medium text-slate-800">Which item are you swapping out?</p>
                 <div className="flex flex-wrap gap-1.5">
                   {objects.map(label => (
                     <button key={label} type="button" onClick={() => chooseItem(label, "swap")} className={chip(false)}>{label}</button>
@@ -396,56 +457,23 @@ export default function RestyleWizard({
                     </div>
                   )}
                 </div>
-                {showMissing && <p className="text-[10px] text-amber-600">If our detector missed it, the change may not land perfectly — a clear, specific name helps.</p>}
+                {showMissing && <p className="text-[10px] text-amber-600">If our detector missed it, the swap may not land perfectly — a clear, specific name helps.</p>}
               </div>
-
-              {/* …or add a brand-new piece */}
-              <div className="space-y-2 border-t border-[var(--border)] pt-3">
-                <p className="text-sm font-medium text-slate-800">Or add a new piece that isn&apos;t there</p>
+            ) : (
+              // ── Add: name the new piece ──
+              <div className={`${card} p-4 space-y-2.5`}>
+                <button type="button" onClick={() => setPickMode(null)}
+                  className="text-xs text-[var(--muted-foreground)] hover:text-slate-700 transition-colors">← Back</button>
+                <p className="text-sm font-medium text-slate-800">What do you want to add?</p>
                 <div className="flex gap-1.5">
-                  <input type="text" value={addLabelDraft} onChange={e => setAddLabelDraft(e.target.value)}
+                  <input type="text" value={addLabelDraft} autoFocus onChange={e => setAddLabelDraft(e.target.value)}
                     onKeyDown={e => { if (e.key === "Enter") chooseItem(addLabelDraft, "add"); }}
                     placeholder="e.g. area rug, floor lamp, wall art" className={inp} />
                   <button type="button" disabled={!addLabelDraft.trim()} onClick={() => chooseItem(addLabelDraft, "add")}
-                    className="bg-[var(--primary)] text-[var(--primary-foreground)] px-3 rounded-lg text-xs font-medium disabled:opacity-40 shrink-0">Add</button>
+                    className="bg-[var(--primary)] text-[var(--primary-foreground)] px-3 rounded-lg text-xs font-medium disabled:opacity-40 shrink-0">Next</button>
                 </div>
               </div>
-
-              {stagedItems.length > 0 && (
-                <button type="button" onClick={closeComposer}
-                  className="text-xs text-[var(--muted-foreground)] hover:text-slate-700 transition-colors">Cancel</button>
-              )}
-            </div>
-          ) : (
-            <div className={`${card} p-4 space-y-3`}>
-              <button type="button" onClick={() => { setCurrent(null); resetSourcing(); }}
-                className="text-xs text-[var(--muted-foreground)] hover:text-slate-700 transition-colors">← Back to items</button>
-              <p className="text-sm font-medium text-slate-800 capitalize">
-                {current.mode === "swap" ? "Replacing the " : "Adding "}{current.label}
-              </p>
-              {sourcePanel}
-
-              {currentStaged && (
-                <div className="rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-800 text-xs px-3 py-2">
-                  ✓ {current.mode === "swap" ? "Swapping" : "Adding"} <span className="capitalize">{current.label}</span>
-                  {ws.lastProduct?.title ? <span className="text-emerald-700"> → {ws.lastProduct.title}</span> : null}
-                </div>
-              )}
-              {ws.error && <div className="rounded-lg bg-red-50 border border-red-200 text-red-600 text-xs px-3 py-2">{ws.error}</div>}
-
-              {currentStaged && (
-                <div className="flex gap-2">
-                  <button type="button" onClick={nextChange}
-                    className="flex-1 text-sm py-2.5 rounded-xl border border-[var(--border)] text-slate-600 hover:border-slate-400 transition-colors">
-                    Change something else
-                  </button>
-                  <button type="button" onClick={closeComposer}
-                    className="flex-1 bg-[var(--primary)] text-[var(--primary-foreground)] font-medium py-2.5 rounded-xl text-sm hover:opacity-90 transition-opacity">
-                    Done
-                  </button>
-                </div>
-              )}
-            </div>
+            )
           )}
 
           <button type="button" disabled={activeEdits.length === 0 || ws.generating || ws.busy} onClick={onGenerate}
