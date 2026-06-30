@@ -313,11 +313,25 @@ export default function RestyleWizard({
                         <img src={c.thumbnail} alt="" className="h-14 w-14 object-cover rounded shrink-0" />
                       )}
                       <div className="min-w-0 flex-1 space-y-1">
+                        <span className={`inline-block text-[9px] px-1 py-0.5 rounded ${c.exact ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+                          {c.exact ? "Exact match" : "Similar"}
+                        </span>
                         <p className="text-[11px] font-medium text-slate-800 line-clamp-2 leading-tight">{c.title}</p>
                         <div className="flex items-center gap-1.5">
                           {c.price && <span className="text-[10px] font-semibold text-slate-700">{c.price}</span>}
                           <span className="text-[10px] text-[var(--muted-foreground)]">{c.retailer}</span>
                         </div>
+                        {c.alternates && c.alternates.length > 0 && (
+                          <p className="text-[10px] text-[var(--muted-foreground)] leading-tight">
+                            also at{c.alternates.map((a, j) => (
+                              <span key={j}>{j > 0 ? " · " : " "}
+                                <a href={a.url} target="_blank" rel="noopener noreferrer" className="underline hover:text-slate-700">
+                                  {a.retailer}{a.price ? ` ${a.price}` : ""}
+                                </a>
+                              </span>
+                            ))}
+                          </p>
+                        )}
                         <button type="button" disabled={!c.supported || ws.fetchingProduct} onClick={() => ws.pickCandidate(c)}
                           className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
                             c.supported ? "bg-[var(--primary)] text-[var(--primary-foreground)] border-[var(--primary)] hover:opacity-90" : "border-[var(--border)] text-[var(--muted-foreground)] cursor-not-allowed"

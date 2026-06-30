@@ -1,11 +1,13 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
+import { del } from "@vercel/blob";
 import { supabaseAdmin } from "@/lib/supabase";
+import { uploadImage } from "@/lib/restyle-render";
 import { describeScreenshotForSearch } from "@/lib/gemini";
-import { searchShopping, ShoppingSearchError } from "@/lib/shopping-search";
+import { searchByImage, searchShopping, ShoppingSearchError, type ShoppingResult } from "@/lib/shopping-search";
 
-// Gemini identify + four parallel SerpApi searches.
-export const maxDuration = 60;
+// Google Lens visual match + (fallback) Gemini identify + four parallel SerpApi searches.
+export const maxDuration = 90;
 
 async function loadOwned(restyleId: string, userId: string) {
   const { data } = await supabaseAdmin
@@ -13,8 +15,11 @@ async function loadOwned(restyleId: string, userId: string) {
   return data;
 }
 
-// POST — screenshot → Gemini description → SerpApi shopping search → candidate list.
-// Does NOT render anything; client calls POST /api/restyle/[id]/product when user picks.
+const titleKey = (t: string) => t.toLowerCase().replace(/\s+/g, " ").slice(0, 40);
+
+// POST — screenshot → find the actual product (Google Lens) across retailers, falling back to
+// keyword "similar" search when no real match is found. Does NOT render; client calls
+// POST /api/restyle/[id]/product when the user picks one.
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { userId } = await auth();
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -30,25 +35,40 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const buf = Buffer.from(await file.arrayBuffer());
   const mimeType = file.type || "image/jpeg";
 
-  let parsed;
+  // 1) Exact match via Google Lens — needs a public image URL, so upload then delete it.
+  let exact: ShoppingResult[] = [];
+  let shotUrl: string | null = null;
   try {
-    parsed = await describeScreenshotForSearch({ imageBase64: buf.toString("base64"), mimeType });
+    shotUrl = await uploadImage(userId, buf, mimeType);
+    exact = await searchByImage(shotUrl);
   } catch {
-    return NextResponse.json(
-      { error: "Couldn't identify an item in that image. Try a clearer screenshot." },
-      { status: 422 },
-    );
+    /* Lens is best-effort; we fall back to text search below */
+  } finally {
+    if (shotUrl) { try { await del(shotUrl); } catch { /* leave it; non-fatal */ } }
   }
 
-  let results;
-  try {
-    results = await searchShopping(`${parsed.description} ${parsed.itemType}`.trim());
-  } catch (err) {
-    if (err instanceof ShoppingSearchError) {
-      return NextResponse.json({ error: err.message }, { status: err.status });
+  // 2) Add keyword "similar" options when we didn't find enough renderable exact matches.
+  let results = exact;
+  if (exact.filter((r) => r.supported).length < 2) {
+    try {
+      const parsed = await describeScreenshotForSearch({ imageBase64: buf.toString("base64"), mimeType });
+      const similar = await searchShopping(`${parsed.description} ${parsed.itemType}`.trim());
+      const seen = new Set(exact.map((r) => titleKey(r.title)));
+      results = [...exact, ...similar.filter((s) => !seen.has(titleKey(s.title)))];
+    } catch (err) {
+      if (exact.length === 0) {
+        if (err instanceof ShoppingSearchError) return NextResponse.json({ error: err.message }, { status: err.status });
+        return NextResponse.json(
+          { error: "Couldn't identify an item in that image. Try a clearer screenshot." },
+          { status: 422 },
+        );
+      }
+      /* keep the exact matches we already have */
     }
-    return NextResponse.json({ error: "Product search failed." }, { status: 502 });
   }
 
-  return NextResponse.json({ itemType: parsed.itemType, description: parsed.description, results });
+  if (results.length === 0) {
+    return NextResponse.json({ error: "No matching products found. Try a clearer screenshot." }, { status: 404 });
+  }
+  return NextResponse.json({ results });
 }

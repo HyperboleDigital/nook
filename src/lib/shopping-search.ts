@@ -20,6 +20,13 @@
 
 import { isSupportedRetailerUrl } from "@/lib/product";
 
+export interface RetailerOption {
+  retailer: string;
+  price: string | null;
+  url: string;
+  supported: boolean;            // renderable + fetchable (Amazon/Wayfair/Walmart/Home Depot)
+}
+
 export interface ShoppingResult {
   title: string;
   thumbnail: string;
@@ -28,6 +35,8 @@ export interface ShoppingResult {
   supported: boolean;
   productUrl: string | null;     // direct merchant URL (Amazon/Walmart/Home Depot)
   immersiveToken: string | null; // Google Shopping → resolve to a URL on pick (Wayfair today)
+  exact: boolean;                // true = real visual match (Google Lens), false = keyword "similar"
+  alternates?: RetailerOption[]; // other retailers carrying the same product (Lens grouping)
 }
 
 export class ShoppingSearchError extends Error {
@@ -101,7 +110,7 @@ const ENGINES: {
       if (!url) return null;
       return {
         title: str(r.title), thumbnail: str(r.thumbnail), price: fmtPrice(r.price),
-        retailer: "Amazon", supported: isSupportedRetailerUrl(url), productUrl: url, immersiveToken: null,
+        retailer: "Amazon", supported: isSupportedRetailerUrl(url), productUrl: url, immersiveToken: null, exact: false,
       };
     },
   },
@@ -115,7 +124,7 @@ const ENGINES: {
       const offer = r.primary_offer as { offer_price?: unknown } | undefined;
       return {
         title: str(r.title), thumbnail: str(r.thumbnail), price: fmtPrice(offer?.offer_price ?? r.price),
-        retailer: "Walmart", supported: isSupportedRetailerUrl(url), productUrl: url, immersiveToken: null,
+        retailer: "Walmart", supported: isSupportedRetailerUrl(url), productUrl: url, immersiveToken: null, exact: false,
       };
     },
   },
@@ -129,7 +138,7 @@ const ENGINES: {
       const thumb = str(r.thumbnail) || firstThumb(r.thumbnails);
       return {
         title: str(r.title), thumbnail: thumb, price: fmtPrice(r.price),
-        retailer: "The Home Depot", supported: isSupportedRetailerUrl(url), productUrl: url, immersiveToken: null,
+        retailer: "The Home Depot", supported: isSupportedRetailerUrl(url), productUrl: url, immersiveToken: null, exact: false,
       };
     },
   },
@@ -151,6 +160,7 @@ const ENGINES: {
         supported,
         productUrl: url && isSupportedRetailerUrl(url) ? url : null,
         immersiveToken: token,
+        exact: false,
       };
     },
   },
@@ -190,6 +200,71 @@ export async function searchShopping(query: string): Promise<ShoppingResult[]> {
 
   out.sort((a, b) => Number(b.supported) - Number(a.supported));
   return out.slice(0, 6);
+}
+
+interface LensMatch {
+  title?: string;
+  link?: string;
+  source?: string;
+  thumbnail?: string;
+  price?: unknown;
+}
+
+const normTitle = (t: string) => t.toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim().slice(0, 40);
+
+/**
+ * Find the *actual* product from a screenshot via Google Lens visual matches, then group the
+ * same product across retailers. Needs a publicly-reachable image URL. Renderable retailers
+ * (Amazon/Wayfair/Walmart/Home Depot) come first; the rest ride along as inspiration/alternates.
+ */
+export async function searchByImage(imageUrl: string): Promise<ShoppingResult[]> {
+  let matches: LensMatch[];
+  try {
+    const data = await callSerpApi({ engine: "google_lens", type: "visual_matches", url: imageUrl, country: "us" });
+    matches = Array.isArray(data.visual_matches) ? (data.visual_matches as LensMatch[]) : [];
+  } catch {
+    return []; // caller falls back to text search
+  }
+
+  // Bucket by normalised title so the same item from many stores becomes one card + alternates.
+  const buckets = new Map<string, RetailerOption[]>();
+  const order: string[] = [];
+  const meta = new Map<string, { title: string; thumbnail: string }>();
+  for (const m of matches) {
+    const title = str(m.title);
+    const url = str(m.link);
+    if (!title || !url) continue;
+    const key = normTitle(title);
+    if (!key) continue;
+    if (!buckets.has(key)) { buckets.set(key, []); order.push(key); meta.set(key, { title, thumbnail: str(m.thumbnail) }); }
+    const opts = buckets.get(key)!;
+    const retailer = str(m.source) || "Store";
+    if (opts.some((o) => o.retailer.toLowerCase() === retailer.toLowerCase())) continue; // one per retailer
+    opts.push({ retailer, price: fmtPrice(m.price), url, supported: isSupportedRetailerUrl(url) });
+  }
+
+  const results: ShoppingResult[] = order.map((key) => {
+    const opts = buckets.get(key)!;
+    const m = meta.get(key)!;
+    // Prefer a renderable retailer as the primary; alternates are the others.
+    const primary = opts.find((o) => o.supported) ?? opts[0];
+    const alternates = opts.filter((o) => o !== primary);
+    return {
+      title: m.title,
+      thumbnail: m.thumbnail,
+      price: primary.price,
+      retailer: primary.retailer,
+      supported: primary.supported,
+      productUrl: primary.supported ? primary.url : null,
+      immersiveToken: null,
+      exact: true,
+      alternates: alternates.length ? alternates : undefined,
+    };
+  });
+
+  // Products with a renderable retailer first.
+  results.sort((a, b) => Number(b.supported) - Number(a.supported));
+  return results.slice(0, 6);
 }
 
 /** Resolve a Google Shopping immersive page token to a direct merchant URL via SerpApi. */

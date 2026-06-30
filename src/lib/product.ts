@@ -217,15 +217,24 @@ export async function fetchProduct(rawUrl: string): Promise<ProductInfo> {
     );
   }
 
+  // Strip query params and hash to a clean product URL.
+  const cleanUrl = `${url.origin}${url.pathname}`;
+
+  // Amazon goes through Rainforest (seconds, not Unwrangle's 60–90s); everyone else Unwrangle.
+  if (retailer.domain === "amazon.com") {
+    return fetchAmazonRainforest(url, cleanUrl);
+  }
+
   const apiKey = process.env.PRODUCT_API_KEY;
   if (!apiKey) {
     throw new ProductFetchError("Product lookups aren't configured yet.", 500);
   }
-
-  // Unwrangle requires a clean product URL — strip query params and hash.
-  const cleanUrl = `${url.origin}${url.pathname}`;
   const detail = await callUnwrangle(retailer.platform, cleanUrl, apiKey);
+  return mapUnwrangle(detail, retailer.name, cleanUrl);
+}
 
+/** Map an Unwrangle `detail` object into ProductInfo. */
+function mapUnwrangle(detail: Record<string, unknown>, retailerName: string, cleanUrl: string): ProductInfo {
   const title = String(detail.name || "").trim();
   const gallery = Array.isArray(detail.images) ? detail.images.map(String).filter(Boolean) : [];
   const imageUrl = String(detail.main_image || gallery[0] || "");
@@ -247,7 +256,69 @@ export async function fetchProduct(rawUrl: string): Promise<ProductInfo> {
     price,
     imageUrl,
     images: gallery,
-    retailer: retailer.name,
+    retailer: retailerName,
     buyUrl: cleanUrl,
+  };
+}
+
+/** Pull the 10-char ASIN out of an Amazon product URL. */
+function amazonAsin(u: URL): string | null {
+  const m = u.pathname.match(/\/(?:dp|gp\/product|gp\/aw\/d|product)\/([A-Z0-9]{10})/i);
+  return m ? m[1].toUpperCase() : null;
+}
+
+/**
+ * Amazon product detail via Rainforest API (fast, Amazon-specialist). Prefers the ASIN
+ * (`amazon_domain` + `asin`); `url` alone is the fallback (can't combine the two).
+ */
+async function fetchAmazonRainforest(url: URL, cleanUrl: string): Promise<ProductInfo> {
+  const apiKey = process.env.RAINFOREST_API_KEY;
+  if (!apiKey) throw new ProductFetchError("Amazon lookups aren't configured yet.", 500);
+
+  const asin = amazonAsin(url);
+  const qs = new URLSearchParams({ api_key: apiKey, type: "product" });
+  if (asin) { qs.set("amazon_domain", "amazon.com"); qs.set("asin", asin); }
+  else { qs.set("url", cleanUrl); }
+
+  let res: Response;
+  try {
+    res = await fetch(`https://api.rainforestapi.com/request?${qs}`, { signal: AbortSignal.timeout(30_000) });
+  } catch {
+    throw new ProductFetchError("Couldn't reach the product service. Try again.", 502);
+  }
+  if (!res.ok) throw new ProductFetchError(`Product lookup failed (${res.status}).`, 502);
+
+  const data = (await res.json()) as { request_info?: { success?: boolean }; product?: Record<string, unknown> };
+  const p = data.product;
+  if (!data.request_info?.success || !p) {
+    throw new ProductFetchError("Couldn't find that Amazon product — paste a specific product page link.", 422);
+  }
+
+  const title = String(p.title || "").trim();
+  const mainImage = (p.main_image as { link?: string } | undefined)?.link ?? "";
+  const gallery = Array.isArray(p.images)
+    ? (p.images as { link?: string }[]).map((i) => String(i?.link || "")).filter(Boolean)
+    : [];
+  const imageUrl = String(mainImage || gallery[0] || "");
+  if (!title || !imageUrl) {
+    throw new ProductFetchError("Couldn't read that product's details.", 422);
+  }
+
+  const priceObj = (p.buybox_winner as { price?: { raw?: string; value?: number; currency?: string } } | undefined)?.price;
+  const price = priceObj?.raw
+    ?? (typeof priceObj?.value === "number"
+      ? new Intl.NumberFormat("en-US", { style: "currency", currency: priceObj.currency || "USD" }).format(priceObj.value)
+      : undefined);
+
+  return {
+    title,
+    itemType: categoryToItemType(p.categories, title),
+    description: buildDescription({ features: p.feature_bullets }),
+    dimensions: extractDimensions({ dimensions: p.dimensions, specifications: p.specifications }),
+    price,
+    imageUrl,
+    images: gallery,
+    retailer: "Amazon",
+    buyUrl: String(p.link || cleanUrl),
   };
 }
