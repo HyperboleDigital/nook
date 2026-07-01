@@ -1,53 +1,57 @@
-import { auth } from "@clerk/nextjs/server";
-import { put } from "@vercel/blob";
+import { auth, currentUser } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
-import { restyleRoom, type RestyleTheme } from "@/lib/gemini";
+import sharp from "sharp";
+import { supabaseAdmin } from "@/lib/supabase";
+import { uploadImage } from "@/lib/restyle-render";
 
-// POST /api/restyle — AI virtual staging.
-// Accepts multipart form: photo (image), theme, optional instruction, optional
-// baseImage (the latest result, for iterative edits). Room photos are small, so
-// multipart-to-route is fine. Returns { url } of the restyled image on Vercel Blob.
+// Cap the working resolution; every render is normalized to the canonical dims.
+const MAX_DIM = 1536;
+
+// POST /api/restyle — create a restyle project from a room photo. No Gemini call:
+// the project starts showing the original; changes are added as toggleable edits.
 export async function POST(req: Request) {
   const { userId } = await auth();
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   try {
     const form = await req.formData();
-    const theme = (form.get("theme") as string | null) ?? "modern";
-    const instruction = (form.get("instruction") as string | null) ?? undefined;
-
-    // For an iterative edit, transform the latest result; otherwise the new photo.
-    const baseImage = form.get("baseImage") as File | null;
     const photo = form.get("photo") as File | null;
-    const source = baseImage ?? photo;
+    if (!photo) return NextResponse.json({ error: "A room photo is required" }, { status: 400 });
+    const title = (form.get("title") as string | null)?.trim() || "Untitled room";
 
-    if (!source) {
-      return NextResponse.json({ error: "A room photo is required" }, { status: 400 });
-    }
+    // Canonicalize the original: EXIF-rotate + downscale to MAX_DIM (keeps aspect).
+    // Copy into a fresh (non-shared) buffer — a view over a SharedArrayBuffer is rejected downstream.
+    const photoBuf = Buffer.from(new Uint8Array(await photo.arrayBuffer()));
+    const canonical = await sharp(photoBuf)
+      .rotate()
+      .resize({ width: MAX_DIM, height: MAX_DIM, fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 90 })
+      .toBuffer();
+    const meta = await sharp(canonical).metadata();
+    const originalUrl = await uploadImage(userId, canonical, "image/jpeg");
 
-    const buf = Buffer.from(await source.arrayBuffer());
-    const imageBase64 = buf.toString("base64");
-    const mimeType = source.type || "image/jpeg";
-
-    const result = await restyleRoom({
-      imageBase64,
-      mimeType,
-      theme: theme as RestyleTheme,
-      instruction,
-    });
-
-    const ext = result.mimeType.includes("jpeg") ? "jpg" : "png";
-    const blob = await put(
-      `restyle/${userId}/${Date.now()}.${ext}`,
-      Buffer.from(result.base64, "base64"),
-      { access: "public", contentType: result.mimeType }
+    // Ensure the user row exists (FK), mirroring the tours route.
+    const user = await currentUser();
+    await supabaseAdmin.from("users").upsert(
+      { clerk_id: userId, email: user?.emailAddresses?.[0]?.emailAddress ?? "", plan: "free", tours_used: 0, reels_used: 0 },
+      { onConflict: "clerk_id", ignoreDuplicates: true }
     );
 
-    return NextResponse.json({ url: blob.url });
+    const { data: created, error } = await supabaseAdmin
+      .from("restyles")
+      .insert({
+        user_id: userId,
+        title,
+        original_url: originalUrl,
+        current_url: originalUrl,
+        width: meta.width ?? null,
+        height: meta.height ?? null,
+      })
+      .select().single();
+    if (error || !created) return NextResponse.json({ error: error?.message ?? "DB error" }, { status: 500 });
+
+    return NextResponse.json({ restyleId: created.id });
   } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Restyle failed" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: err instanceof Error ? err.message : "Create failed" }, { status: 500 });
   }
 }
