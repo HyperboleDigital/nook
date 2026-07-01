@@ -2,6 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { detectObjects } from "@/lib/gemini";
 import { supabaseAdmin } from "@/lib/supabase";
+import { fileToBuffer } from "@/lib/file-buf";
 
 export const maxDuration = 60;
 
@@ -31,9 +32,7 @@ export async function POST(req: Request) {
       const form = await req.formData();
       const file = form.get("image") as File | null;
       if (!file) return NextResponse.json({ error: "image required" }, { status: 400 });
-      const _raw1 = new Uint8Array(await file.arrayBuffer());
-      const _buf1 = Buffer.allocUnsafe(_raw1.byteLength); _buf1.set(_raw1);
-      base64 = _buf1.toString("base64");
+      base64 = (await fileToBuffer(file)).toString("base64");
       mimeType = file.type || "image/jpeg";
     }
 

@@ -5,6 +5,7 @@ import { uploadImage } from "@/lib/restyle-render";
 import { fetchProduct, ProductFetchError, type ProductInfo } from "@/lib/product";
 import { describeProductImages, describeScreenshotForSearch } from "@/lib/gemini";
 import { resolveImmersiveToken } from "@/lib/shopping-search";
+import { fileToBuffer } from "@/lib/file-buf";
 import type { DetectedObject } from "@/types";
 
 // Amazon scrapes via Unwrangle can take 60–90s, plus Gemini gallery sizing afterward.
@@ -86,8 +87,7 @@ async function fromListing(userId: string, info: ProductInfo): Promise<StagedPro
 
 /** Build a reference edit from a screenshot the user uploaded — just render it, nothing to buy. */
 async function fromUpload(userId: string, file: File): Promise<StagedProduct> {
-  const _raw4 = new Uint8Array(await file.arrayBuffer());
-  const buf = Buffer.allocUnsafe(_raw4.byteLength); buf.set(_raw4);
+  const buf = await fileToBuffer(file);
   const mimeType = file.type || "image/jpeg";
   const base64 = buf.toString("base64");
 

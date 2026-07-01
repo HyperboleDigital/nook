@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import sharp from "sharp";
 import { supabaseAdmin } from "@/lib/supabase";
 import { uploadImage } from "@/lib/restyle-render";
+import { fileToBuffer } from "@/lib/file-buf";
 
 // Cap the working resolution; every render is normalized to the canonical dims.
 const MAX_DIM = 1536;
@@ -21,8 +22,7 @@ export async function POST(req: Request) {
 
     // Canonicalize the original: EXIF-rotate + downscale to MAX_DIM (keeps aspect).
     // Copy into a fresh (non-shared) buffer — a view over a SharedArrayBuffer is rejected downstream.
-    const _raw0 = new Uint8Array(await photo.arrayBuffer());
-    const photoBuf = Buffer.allocUnsafe(_raw0.byteLength); photoBuf.set(_raw0);
+    const photoBuf = await fileToBuffer(photo);
     const canonical = await sharp(photoBuf)
       .rotate()
       .resize({ width: MAX_DIM, height: MAX_DIM, fit: "inside", withoutEnlargement: true })
