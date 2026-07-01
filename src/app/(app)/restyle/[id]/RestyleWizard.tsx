@@ -18,12 +18,13 @@ const MODES: { key: Mode; title: string; desc: string; Icon: LucideIcon }[] = [
 ];
 
 export default function RestyleWizard({
-  ws, startStep = 1, minStep = 1, initialMode = null, baseImageUrl, onDone, onCancel,
+  ws, startStep = 1, minStep = 1, initialMode = null, initialItem = null, baseImageUrl, onDone, onCancel,
 }: {
   ws: RestyleWorkspace;
   startStep?: number;
   minStep?: number;
   initialMode?: Mode | null;
+  initialItem?: { label: string; mode: "swap" | "add" } | null; // open sourcing straight for this item
   baseImageUrl?: string;
   onDone: () => void;
   onCancel?: () => void;
@@ -31,10 +32,10 @@ export default function RestyleWizard({
   const [step, setStep] = useState(startStep);
   const [mode, setMode] = useState<Mode | null>(initialMode);
 
-  // Builder composer
-  const [composing, setComposing] = useState(false);
+  // Builder composer — when replacing one product, open its sourcing screen immediately.
+  const [composing, setComposing] = useState(!!initialItem);
   const [pickMode, setPickMode] = useState<"swap" | "add" | null>(null); // choice → swap/add screen
-  const [current, setCurrent] = useState<{ label: string; mode: "swap" | "add" } | null>(null);
+  const [current, setCurrent] = useState<{ label: string; mode: "swap" | "add" } | null>(initialItem);
   const [srcMode, setSrcMode] = useState<SrcMode>("link");
   const [descText, setDescText] = useState("");
   const [addLabelDraft, setAddLabelDraft] = useState("");

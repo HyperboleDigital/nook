@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Columns2, Download, Pencil, RotateCcw, ShoppingBag, ArrowLeftRight } from "lucide-react";
+import { Columns2, Download, Pencil, RotateCcw, ShoppingBag, ArrowLeftRight, Share2, Check, Replace } from "lucide-react";
 import type { RestyleWorkspace } from "./useRestyleWorkspace";
 import { card, sectionLabel } from "./shared";
 import { Button, IconButton, ProductCard, storeName } from "./ui";
@@ -17,11 +17,12 @@ const parsePrice = (p: string | null | undefined) => {
  * with an options strip to switch renders and actions to edit / start over.
  */
 export default function RestyleResult({
-  ws, onEditThis, onEditOriginal,
+  ws, onEditThis, onEditOriginal, onReplaceItem,
 }: {
   ws: RestyleWorkspace;
   onEditThis: () => void;
   onEditOriginal: () => void;
+  onReplaceItem: (item: { label: string; mode: "swap" | "add" }) => void;
 }) {
   const {
     restyle, renders, generating, error,
@@ -30,6 +31,16 @@ export default function RestyleResult({
   } = ws;
 
   const [showCompare, setShowCompare] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const share = async () => {
+    const url = `${window.location.origin}/r/${ws.id}`;
+    try {
+      if (navigator.share) { await navigator.share({ title: restyle?.title ?? "Room design", url }); return; }
+      await navigator.clipboard.writeText(url);
+      setCopied(true); setTimeout(() => setCopied(false), 2000);
+    } catch { /* user cancelled share sheet */ }
+  };
 
   if (!restyle) return null;
   const viewingOriginal = displayUrl === restyle.original_url;
@@ -75,13 +86,17 @@ export default function RestyleResult({
               </div>
             )}
 
-            <div className="absolute top-3 right-3 flex gap-2">
+            <div className="absolute top-3 right-3 flex items-center gap-2">
+              {copied && <span className="text-[11px] px-2 py-1 rounded-md bg-slate-900 text-white shadow-sm">Link copied</span>}
               {!viewingOriginal && (
                 <IconButton onClick={() => setShowCompare(v => !v)} aria-label="Compare before / after"
                   className={showCompare ? "bg-slate-900 text-white border-slate-900 hover:text-white" : ""}>
                   <Columns2 className="h-4 w-4" />
                 </IconButton>
               )}
+              <IconButton onClick={share} aria-label="Share link">
+                {copied ? <Check className="h-4 w-4 text-emerald-600" /> : <Share2 className="h-4 w-4" />}
+              </IconButton>
               <IconButton onClick={downloadImage} aria-label="Download image">
                 <Download className="h-4 w-4" />
               </IconButton>
@@ -159,8 +174,12 @@ export default function RestyleResult({
                       title={e.product_title ?? e.target_label ?? "Item"}
                       retailer={e.buy_url ? storeName(e.buy_url) : null}
                       price={e.product_price}
-                      viewUrl={e.buy_url}
-                    />
+                      viewUrl={e.buy_url}>
+                      <Button size="sm" variant="subtle" className="mt-1"
+                        onClick={() => onReplaceItem({ label: e.target_label ?? "item", mode: e.kind === "add" ? "add" : "swap" })}>
+                        <Replace className="h-3.5 w-3.5" /> Replace
+                      </Button>
+                    </ProductCard>
                   ))}
                 </div>
               </>

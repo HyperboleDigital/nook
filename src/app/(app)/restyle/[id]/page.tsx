@@ -14,6 +14,7 @@ export default function RestyleWorkspace({ params }: { params: Promise<{ id: str
   // starting at "what do you want to add/change". `editBase` is the image to build on.
   const [editing, setEditing] = useState(false);
   const [editBase, setEditBase] = useState<string | null>(null);
+  const [editItem, setEditItem] = useState<{ label: string; mode: "swap" | "add" } | null>(null);
 
   if (ws.loading || !ws.restyle) {
     return (
@@ -30,14 +31,18 @@ export default function RestyleWorkspace({ params }: { params: Promise<{ id: str
   const original = ws.restyle.original_url;
 
   // Edit the current result: keep the active edits, build on top of them.
-  const editThis = () => { ws.setPreviewUrl(null); setEditBase(ws.restyle!.current_url); setEditing(true); };
+  const editThis = () => { ws.setPreviewUrl(null); setEditBase(ws.restyle!.current_url); setEditItem(null); setEditing(true); };
+  // Replace one product straight from a shop card — opens the editor on that item.
+  const editReplace = (item: { label: string; mode: "swap" | "add" }) => {
+    ws.setPreviewUrl(null); setEditBase(ws.restyle!.current_url); setEditItem(item); setEditing(true);
+  };
   // Edit from the bare original: deactivate every edit (non-destructive — old renders keep
   // their products via signature), so the steps start from a clean room.
   const editOriginal = async () => {
     setEditBase(original); setEditing(true); ws.setPreviewUrl(original);
     for (const e of ws.activeEdits) await ws.toggle(e.id, false);
   };
-  const exitEdit = () => { setEditing(false); ws.setPreviewUrl(null); };
+  const exitEdit = () => { setEditing(false); setEditItem(null); ws.setPreviewUrl(null); };
 
   const showWizard = editing || !hasRenders;
 
@@ -63,11 +68,12 @@ export default function RestyleWorkspace({ params }: { params: Promise<{ id: str
       {showWizard ? (
         editing ? (
           <RestyleWizard
-            key={`edit-${editBase}`}
+            key={`edit-${editBase}-${editItem?.label ?? "all"}`}
             ws={ws}
             startStep={2}
             minStep={2}
             initialMode="restyle"
+            initialItem={editItem}
             baseImageUrl={editBase ?? original}
             onDone={exitEdit}
             onCancel={exitEdit}
@@ -81,7 +87,7 @@ export default function RestyleWorkspace({ params }: { params: Promise<{ id: str
           />
         )
       ) : (
-        <RestyleResult ws={ws} onEditThis={editThis} onEditOriginal={editOriginal} />
+        <RestyleResult ws={ws} onEditThis={editThis} onEditOriginal={editOriginal} onReplaceItem={editReplace} />
       )}
     </div>
   );
