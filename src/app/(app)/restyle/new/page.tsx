@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Camera, Sofa } from "lucide-react";
+import { Camera, ImagePlus, Sofa } from "lucide-react";
 
 export default function NewRestylePage() {
   const router = useRouter();
@@ -13,8 +13,21 @@ export default function NewRestylePage() {
   const [isDragging, setIsDragging] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isMobile, setIsMobile] = useState(false); // only phones can actually take a photo
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null); // capture="environment" → opens the camera on mobile
+
+  useEffect(() => {
+    let active = true;
+    Promise.resolve().then(() => {
+      if (!active) return;
+      setIsMobile(
+        /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ||
+        (navigator.maxTouchPoints > 1 && matchMedia("(pointer: coarse)").matches),
+      );
+    });
+    return () => { active = false; };
+  }, []);
 
   // Selecting a photo only previews it — nothing is uploaded or processed until the
   // user confirms, so a wrong pick can be swapped out first.
@@ -81,10 +94,17 @@ export default function NewRestylePage() {
             <div className="text-sm">Drag &amp; drop a room photo, or tap to choose</div>
             <div className="text-xs text-[var(--muted-foreground)] mt-1">JPG or PNG</div>
           </div>
-          <button type="button" onClick={() => cameraInputRef.current?.click()}
-            className="w-full bg-slate-900 text-white text-sm font-medium py-3 rounded-xl hover:opacity-90 transition-opacity flex items-center justify-center gap-2">
-            <Camera className="h-4 w-4" /> Take a photo
-          </button>
+          {isMobile ? (
+            <button type="button" onClick={() => cameraInputRef.current?.click()}
+              className="w-full bg-slate-900 text-white text-sm font-medium py-3 rounded-xl hover:opacity-90 transition-opacity flex items-center justify-center gap-2">
+              <Camera className="h-4 w-4" /> Take a photo
+            </button>
+          ) : (
+            <button type="button" onClick={() => fileInputRef.current?.click()}
+              className="w-full bg-slate-900 text-white text-sm font-medium py-3 rounded-xl hover:opacity-90 transition-opacity flex items-center justify-center gap-2">
+              <ImagePlus className="h-4 w-4" /> Choose a photo
+            </button>
+          )}
         </div>
       ) : (
         <div className="space-y-4">
