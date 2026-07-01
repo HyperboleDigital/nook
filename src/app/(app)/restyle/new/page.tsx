@@ -29,6 +29,22 @@ export default function NewRestylePage() {
     return () => { active = false; };
   }, []);
 
+  // Paste from clipboard (Cmd+V / Ctrl+V)
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      if (loading) return;
+      const item = Array.from(e.clipboardData?.items ?? []).find(
+        (i) => i.type.startsWith("image/"),
+      );
+      if (item) {
+        const f = item.getAsFile();
+        if (f) select(f);
+      }
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, [loading]);
+
   // Selecting a photo only previews it — nothing is uploaded or processed until the
   // user confirms, so a wrong pick can be swapped out first.
   const select = (f: File | undefined) => {
@@ -91,8 +107,8 @@ export default function NewRestylePage() {
             onClick={() => fileInputRef.current?.click()}
           >
             <Sofa className="h-8 w-8 mx-auto mb-2 text-slate-400" strokeWidth={1.5} />
-            <div className="text-sm">Drag &amp; drop a room photo, or tap to choose</div>
-            <div className="text-xs text-[var(--muted-foreground)] mt-1">JPG or PNG</div>
+            <div className="text-sm">Drag &amp; drop, paste, or tap to choose</div>
+            <div className="text-xs text-[var(--muted-foreground)] mt-1">JPG or PNG · Cmd+V to paste from clipboard</div>
           </div>
           {isMobile ? (
             <button type="button" onClick={() => cameraInputRef.current?.click()}
