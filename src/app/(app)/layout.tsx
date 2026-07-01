@@ -21,16 +21,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     href === "/dashboard" ? pathname === href : pathname.startsWith(href);
 
   const navLinks = (
-    <nav className="flex-1 p-4 space-y-1">
+    <nav className="flex-1 p-4 space-y-0.5">
       {NAV.map(item => (
         <Link
           key={item.href}
           href={item.href}
           onClick={() => setOpen(false)}
-          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${
+          className={`flex items-center gap-2.5 px-3 py-2 text-sm transition-colors ${
             isActive(item.href)
-              ? "bg-[var(--accent)] font-medium"
-              : "hover:bg-[var(--accent)]"
+              ? "bg-[var(--foreground)] text-[var(--background)] font-medium"
+              : "text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)]"
           }`}
         >
           <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -45,7 +45,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const sidebarInner = (
     <>
       <div className="p-5 border-b border-[var(--border)] flex items-center justify-between">
-        <Link href="/" onClick={() => setOpen(false)} className="text-lg font-bold tracking-tight">
+        <Link href="/" onClick={() => setOpen(false)} className="text-lg font-bold tracking-tight" style={{ letterSpacing: "-0.04em" }}>
           nook
         </Link>
         <button
