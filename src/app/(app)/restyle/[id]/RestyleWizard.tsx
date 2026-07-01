@@ -43,6 +43,7 @@ export default function RestyleWizard({
   const [showMissing, setShowMissing] = useState(false);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [pendingPreview, setPendingPreview] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   // Found matches cached per item label so revisiting doesn't re-search (saves credits).
@@ -326,32 +327,75 @@ export default function RestyleWizard({
             <p className="text-sm text-[var(--muted-foreground)] mt-0.5">Add as many swaps and new pieces as you like, then generate once.</p>
           </div>
 
-          {/* Staged changes */}
+          {/* Staged changes — tap to expand, see product details, or swap for a different one */}
           {stagedItems.length > 0 && (
             <div className="space-y-2">
-              {stagedItems.map(e => (
-                <div key={e.id} className={`${card} p-2.5 flex items-center gap-3`}>
-                  {e.reference_url
-                    ? /* eslint-disable-next-line @next/next/no-img-element */
-                      <img src={e.reference_url} alt="" className="h-12 w-12 rounded-lg object-cover border border-[var(--border)] shrink-0" />
-                    : <span className="h-12 w-12 rounded-lg bg-slate-100 border border-[var(--border)] shrink-0 flex items-center justify-center text-slate-500">{e.kind === "add" ? <Plus className="h-4 w-4" /> : <Replace className="h-4 w-4" />}</span>}
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm text-slate-800 truncate capitalize">{e.product_title ?? e.target_label}</p>
-                    <div className="flex items-center gap-2 text-[11px] text-[var(--muted-foreground)]">
-                      <span className="capitalize">{e.kind === "add" ? "Added" : "Swapped"}{e.target_label ? ` · ${e.target_label}` : ""}</span>
-                      {e.product_price && <span className="font-medium text-slate-600">{e.product_price}</span>}
-                    </div>
-                    {e.buy_url && (
-                      <a href={e.buy_url} target="_blank" rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-[11px] text-slate-700 underline hover:text-slate-900">
-                        View on {storeName(e.buy_url)} <ExternalLink className="h-3 w-3" />
-                      </a>
+              {stagedItems.map(e => {
+                const isOpen = expandedId === e.id;
+                return (
+                  <div key={e.id} className={`${card} border border-[var(--border)] overflow-hidden`}>
+                    {/* Row — always visible, click to expand */}
+                    <button type="button" onClick={() => setExpandedId(isOpen ? null : e.id)}
+                      className="w-full flex items-center gap-3 p-2.5 text-left hover:bg-[var(--muted)] transition-colors">
+                      {e.reference_url
+                        ? /* eslint-disable-next-line @next/next/no-img-element */
+                          <img src={e.reference_url} alt="" className="h-12 w-12 rounded-lg object-cover border border-[var(--border)] shrink-0" />
+                        : <span className="h-12 w-12 rounded-lg bg-slate-100 border border-[var(--border)] shrink-0 flex items-center justify-center text-slate-500">{e.kind === "add" ? <Plus className="h-4 w-4" /> : <Replace className="h-4 w-4" />}</span>}
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-slate-800 truncate capitalize">{e.product_title ?? e.target_label}</p>
+                        <p className="text-[11px] text-[var(--muted-foreground)] capitalize">
+                          {e.kind === "add" ? "Adding" : "Swapping"}{e.target_label ? ` · ${e.target_label}` : ""}
+                          {e.product_price ? ` · ${e.product_price}` : ""}
+                        </p>
+                      </div>
+                      <ChevronRight className={`h-4 w-4 text-slate-300 shrink-0 transition-transform ${isOpen ? "rotate-90" : ""}`} />
+                    </button>
+
+                    {/* Expanded detail panel */}
+                    {isOpen && (
+                      <div className="border-t border-[var(--border)] p-3 space-y-3 bg-[var(--muted)]">
+                        {/* Product details */}
+                        <div className="flex gap-3">
+                          {e.reference_url && (
+                            /* eslint-disable-next-line @next/next/no-img-element */
+                            <img src={e.reference_url} alt="" className="h-20 w-20 rounded-lg object-cover border border-[var(--border)] shrink-0" />
+                          )}
+                          <div className="min-w-0 flex-1 space-y-1">
+                            {e.product_title && <p className="text-sm font-medium text-slate-800 capitalize">{e.product_title}</p>}
+                            {e.product_price && <p className="text-sm font-semibold text-slate-900">{e.product_price}</p>}
+                            {e.buy_url && (
+                              <a href={e.buy_url} target="_blank" rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 text-xs text-[var(--primary)] underline hover:opacity-80">
+                                View on {storeName(e.buy_url)} <ExternalLink className="h-3 w-3" />
+                              </a>
+                            )}
+                            {!e.product_title && !e.buy_url && (
+                              <p className="text-xs text-[var(--muted-foreground)]">Your uploaded photo — no product link.</p>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Actions */}
+                        <div className="flex gap-2">
+                          <button type="button"
+                            onClick={() => {
+                              setExpandedId(null);
+                              setComposing(true);
+                              chooseItem(e.target_label ?? "", e.kind === "add" ? "add" : "swap");
+                            }}
+                            className="flex-1 text-xs py-2 border border-[var(--border)] rounded-lg text-slate-700 hover:border-slate-400 bg-white transition-colors font-medium">
+                            Choose a different product
+                          </button>
+                          <button type="button" disabled={ws.busy} onClick={() => { setExpandedId(null); ws.remove(e.id); }}
+                            className="px-3 text-xs py-2 border border-red-200 rounded-lg text-red-500 hover:border-red-400 hover:text-red-600 bg-white transition-colors">
+                            Remove
+                          </button>
+                        </div>
+                      </div>
                     )}
                   </div>
-                  <button type="button" disabled={ws.busy} onClick={() => ws.remove(e.id)} aria-label="Remove"
-                    className="text-slate-300 hover:text-red-500 shrink-0 p-1"><X className="h-4 w-4" /></button>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
 
