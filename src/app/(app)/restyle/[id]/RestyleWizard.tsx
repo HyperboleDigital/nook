@@ -1,42 +1,21 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { Sofa, Eraser, Replace, Plus, X, Check, ExternalLink, ChevronRight, type LucideIcon } from "lucide-react";
 import type { RestyleWorkspace } from "./useRestyleWorkspace";
 import type { ShoppingResult } from "@/lib/shopping-search";
 import { card, inp, chip } from "./shared";
+import { Button, ProductCard, matchWord, storeName } from "./ui";
 
 // Two mutually-exclusive intents. "Empty" clears everything and renders in one shot.
 // "Restyle" is a one-screen builder: stage as many swap/add changes as you like, then Generate.
 type Mode = "restyle" | "empty";
 type SrcMode = "link" | "photo" | "describe";
 
-const MODES: { key: Mode; title: string; desc: string; icon: string }[] = [
-  { key: "restyle", title: "Restyle the room", desc: "Swap things out or add new pieces", icon: "🛋️" },
-  { key: "empty", title: "Empty the room", desc: "Remove all the furniture for a blank space", icon: "🧹" },
+const MODES: { key: Mode; title: string; desc: string; Icon: LucideIcon }[] = [
+  { key: "restyle", title: "Restyle the room", desc: "Swap things out or add new pieces", Icon: Sofa },
+  { key: "empty", title: "Empty the room", desc: "Remove all the furniture for a blank space", Icon: Eraser },
 ];
-
-/** Friendly store name from a product URL, for "View on <store>". */
-function storeName(url: string | null | undefined): string {
-  if (!url) return "store";
-  try {
-    const h = new URL(url).hostname.replace(/^www\./, "");
-    if (/amazon\./.test(h)) return "Amazon";
-    if (/wayfair\./.test(h)) return "Wayfair";
-    if (/walmart\./.test(h)) return "Walmart";
-    if (/homedepot\./.test(h)) return "Home Depot";
-    if (/target\./.test(h)) return "Target";
-    if (/lowes\./.test(h)) return "Lowe's";
-    return h.split(".")[0].replace(/^./, (c) => c.toUpperCase());
-  } catch { return "store"; }
-}
-
-/** Internal 0–10 score → friendly word + color. */
-function matchWord(score: number | null, exact: boolean): { label: string; cls: string } {
-  if (score == null) return { label: exact ? "Match" : "Similar", cls: "bg-slate-100 text-slate-500" };
-  if (score >= 8) return { label: "Great match", cls: "bg-emerald-100 text-emerald-700" };
-  if (score >= 5) return { label: "Close match", cls: "bg-amber-100 text-amber-700" };
-  return { label: "Similar", cls: "bg-slate-100 text-slate-500" };
-}
 
 export default function RestyleWizard({
   ws, startStep = 1, minStep = 1, initialMode = null, baseImageUrl, onDone, onCancel,
@@ -256,8 +235,8 @@ export default function RestyleWizard({
           )}
 
           {!pendingFile && ws.searchFile && !ws.fetchingProduct && (
-            <p className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1.5">
-              ✓ Your photo is placed. {ws.searching ? "Finding options to buy…" : "Pick a match below to buy it, or keep your photo."}
+            <p className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
+              <Check className="h-3.5 w-3.5 shrink-0" /> Your photo is placed. {ws.searching ? "Finding options to buy…" : "Pick a match below to buy it, or keep your photo."}
             </p>
           )}
           {!pendingFile && ws.searching && (
@@ -322,10 +301,10 @@ export default function RestyleWizard({
               const on = mode === m.key;
               return (
                 <button key={m.key} type="button" onClick={() => setMode(m.key)}
-                  className={`w-full flex items-center gap-3 p-3 rounded-xl border text-left transition-colors ${
+                  className={`w-full flex items-center gap-3 p-3.5 rounded-xl border text-left transition-colors ${
                     on ? "border-slate-900 bg-[var(--accent)]" : "border-[var(--border)] hover:border-slate-400"
                   }`}>
-                  <span className="text-xl">{m.icon}</span>
+                  <m.Icon className="h-5 w-5 text-slate-700 shrink-0" />
                   <span className="min-w-0 flex-1">
                     <span className="block text-sm font-medium text-slate-800">{m.title}</span>
                     <span className="block text-xs text-[var(--muted-foreground)]">{m.desc}</span>
@@ -358,7 +337,7 @@ export default function RestyleWizard({
                   {e.reference_url
                     ? /* eslint-disable-next-line @next/next/no-img-element */
                       <img src={e.reference_url} alt="" className="h-12 w-12 rounded-lg object-cover border border-[var(--border)] shrink-0" />
-                    : <span className="h-12 w-12 rounded-lg bg-slate-100 border border-[var(--border)] shrink-0 flex items-center justify-center text-sm">{e.kind === "add" ? "➕" : "🔁"}</span>}
+                    : <span className="h-12 w-12 rounded-lg bg-slate-100 border border-[var(--border)] shrink-0 flex items-center justify-center text-slate-500">{e.kind === "add" ? <Plus className="h-4 w-4" /> : <Replace className="h-4 w-4" />}</span>}
                   <div className="min-w-0 flex-1">
                     <p className="text-sm text-slate-800 truncate capitalize">{e.product_title ?? e.target_label}</p>
                     <div className="flex items-center gap-2 text-[11px] text-[var(--muted-foreground)]">
@@ -367,13 +346,13 @@ export default function RestyleWizard({
                     </div>
                     {e.buy_url && (
                       <a href={e.buy_url} target="_blank" rel="noopener noreferrer"
-                        className="text-[11px] text-slate-700 underline hover:text-slate-900">
-                        View on {storeName(e.buy_url)} ↗
+                        className="inline-flex items-center gap-1 text-[11px] text-slate-700 underline hover:text-slate-900">
+                        View on {storeName(e.buy_url)} <ExternalLink className="h-3 w-3" />
                       </a>
                     )}
                   </div>
-                  <button type="button" disabled={ws.busy} onClick={() => ws.remove(e.id)}
-                    className="text-slate-300 hover:text-red-500 text-base shrink-0 px-1">×</button>
+                  <button type="button" disabled={ws.busy} onClick={() => ws.remove(e.id)} aria-label="Remove"
+                    className="text-slate-300 hover:text-red-500 shrink-0 p-1"><X className="h-4 w-4" /></button>
                 </div>
               ))}
             </div>
@@ -399,8 +378,8 @@ export default function RestyleWizard({
                 </p>
                 {sourcePanel}
                 {currentStaged && (
-                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-800 text-xs px-3 py-2">
-                    ✓ {current.mode === "swap" ? "Swapping" : "Adding"} <span className="capitalize">{current.label}</span>
+                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-800 text-xs px-3 py-2 flex items-center gap-1.5">
+                    <Check className="h-3.5 w-3.5 shrink-0" /> {current.mode === "swap" ? "Swapping" : "Adding"} <span className="capitalize">{current.label}</span>
                     {ws.lastProduct?.title ? <span className="text-emerald-700"> → {ws.lastProduct.title}</span> : null}
                   </div>
                 )}
@@ -423,21 +402,21 @@ export default function RestyleWizard({
               <div className="space-y-2">
                 <button type="button" onClick={() => setPickMode("swap")}
                   className={`w-full flex items-center gap-3 p-4 rounded-xl border text-left transition-colors border-[var(--border)] hover:border-slate-400`}>
-                  <span className="text-xl">🔁</span>
+                  <Replace className="h-5 w-5 text-slate-700 shrink-0" />
                   <span className="min-w-0 flex-1">
                     <span className="block text-sm font-medium text-slate-800">Swap something out</span>
                     <span className="block text-xs text-[var(--muted-foreground)]">Replace an item that&apos;s already in the room</span>
                   </span>
-                  <span className="text-slate-300">›</span>
+                  <ChevronRight className="h-4 w-4 text-slate-300 shrink-0" />
                 </button>
                 <button type="button" onClick={() => setPickMode("add")}
                   className={`w-full flex items-center gap-3 p-4 rounded-xl border text-left transition-colors border-[var(--border)] hover:border-slate-400`}>
-                  <span className="text-xl">➕</span>
+                  <Plus className="h-5 w-5 text-slate-700 shrink-0" />
                   <span className="min-w-0 flex-1">
                     <span className="block text-sm font-medium text-slate-800">Add a new piece</span>
                     <span className="block text-xs text-[var(--muted-foreground)]">Bring in furniture or decor that isn&apos;t there</span>
                   </span>
-                  <span className="text-slate-300">›</span>
+                  <ChevronRight className="h-4 w-4 text-slate-300 shrink-0" />
                 </button>
                 {stagedItems.length > 0 && (
                   <button type="button" onClick={closeComposer}
@@ -507,7 +486,7 @@ export default function RestyleWizard({
             <p className="text-sm text-[var(--muted-foreground)] mt-0.5">We&apos;ll clear out the furniture and render the bare space.</p>
           </div>
           <div className={`${card} p-4 text-sm text-slate-600 space-y-1.5`}>
-            <p>🧹 Furniture and decor get removed — walls, floors, windows and built-ins stay put.</p>
+            <p className="flex items-start gap-1.5"><Eraser className="h-4 w-4 shrink-0 mt-0.5 text-slate-500" /> Furniture and decor get removed — walls, floors, windows and built-ins stay put.</p>
             <p className="text-[var(--muted-foreground)]">Want to stage it? Once it&apos;s empty, come back and <span className="font-medium text-slate-700">add pieces</span> from the result.</p>
           </div>
           {ws.error && <div className="rounded-lg bg-red-50 border border-red-200 text-red-600 text-xs px-3 py-2">{ws.error}</div>}
@@ -529,56 +508,32 @@ function CandidateList({ candidates, ws }: { candidates: ShoppingResult[] | null
   if (!candidates || candidates.length === 0) return null;
   return (
     <div className="space-y-2 pt-0.5">
-      <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">Options online — pick one, or keep your photo</p>
-      {candidates.map((c, i) => {
-        const word = matchWord(c.score, c.exact);
-        const viewUrl = c.productUrl ?? c.alternates?.[0]?.url ?? null;
-        return (
-          <div key={i} className={`flex gap-2 p-2 rounded-lg border ${c.supported ? "border-[var(--border)] bg-white" : "border-[var(--border)] bg-slate-50"}`}>
-            {c.thumbnail && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={c.thumbnail} alt="" className="h-14 w-14 object-cover rounded shrink-0" />
-            )}
-            <div className="min-w-0 flex-1 space-y-1">
-              <span className={`inline-block text-[9px] px-1 py-0.5 rounded font-medium ${word.cls}`}>{word.label}</span>
-              <p className="text-[11px] font-medium text-slate-800 line-clamp-2 leading-tight">{c.title}</p>
-              <div className="flex items-center gap-1.5">
-                {c.price
-                  ? <span className="text-[10px] font-semibold text-slate-700">{c.price}</span>
-                  : viewUrl
-                    ? <a href={viewUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] font-medium text-slate-500 underline hover:text-slate-700">See price</a>
-                    : <span className="text-[10px] text-slate-400">Price varies</span>}
-                <span className="text-[10px] text-[var(--muted-foreground)]">· {c.retailer}</span>
-              </div>
-              {c.alternates && c.alternates.length > 0 && (
-                <p className="text-[10px] text-[var(--muted-foreground)] leading-tight">
-                  also at{c.alternates.map((a, j) => (
-                    <span key={j}>{j > 0 ? " · " : " "}
-                      <a href={a.url} target="_blank" rel="noopener noreferrer" className="underline hover:text-slate-700">
-                        {a.retailer}{a.price ? ` ${a.price}` : ""}
-                      </a>
-                    </span>
-                  ))}
-                </p>
-              )}
-              <div className="flex items-center gap-2 pt-0.5">
-                <button type="button" disabled={!c.supported || ws.fetchingProduct} onClick={() => ws.pickCandidate(c)}
-                  className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
-                    c.supported ? "bg-[var(--primary)] text-[var(--primary-foreground)] border-[var(--primary)] hover:opacity-90" : "border-[var(--border)] text-[var(--muted-foreground)] cursor-not-allowed"
-                  }`}>
-                  {c.supported ? "Use this" : "Not shoppable yet"}
-                </button>
-                {viewUrl && (
-                  <a href={viewUrl} target="_blank" rel="noopener noreferrer"
-                    className="text-[10px] text-slate-600 underline hover:text-slate-900">
-                    View on {storeName(viewUrl)} ↗
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">Options online — pick one, or keep yours</p>
+      {candidates.map((c, i) => (
+        <ProductCard key={i}
+          image={c.thumbnail}
+          title={c.title}
+          retailer={c.retailer}
+          price={c.price}
+          viewUrl={c.productUrl ?? c.alternates?.[0]?.url ?? null}
+          badge={matchWord(c.score, c.exact)}>
+          {c.alternates && c.alternates.length > 0 && (
+            <p className="text-[11px] text-[var(--muted-foreground)] leading-tight">
+              also at{c.alternates.map((a, j) => (
+                <span key={j}>{j > 0 ? " · " : " "}
+                  <a href={a.url} target="_blank" rel="noopener noreferrer" className="underline hover:text-slate-700">
+                    {a.retailer}{a.price ? ` ${a.price}` : ""}
                   </a>
-                )}
-              </div>
-            </div>
-          </div>
-        );
-      })}
+                </span>
+              ))}
+            </p>
+          )}
+          <Button size="sm" variant={c.supported ? "primary" : "outline"}
+            disabled={!c.supported || ws.fetchingProduct} onClick={() => ws.pickCandidate(c)} className="mt-1">
+            {c.supported ? "Use this in the room" : "Not shoppable yet"}
+          </Button>
+        </ProductCard>
+      ))}
     </div>
   );
 }
