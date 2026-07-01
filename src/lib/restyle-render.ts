@@ -2,6 +2,7 @@ import { put } from "@vercel/blob";
 import sharp from "sharp";
 import { composeEdits, type ComposeEditInput } from "@/lib/gemini";
 import { supabaseAdmin } from "@/lib/supabase";
+import { toUnsharedBuffer } from "@/lib/file-buf";
 
 const SUPPORTED: [string, number][] = [
   ["1:1", 1], ["3:4", 0.75], ["4:3", 1.3333], ["2:3", 0.6667], ["3:2", 1.5],
@@ -14,9 +15,11 @@ export function closestAspect(w: number, h: number) {
 
 export async function uploadImage(userId: string, buf: Buffer, contentType: string) {
   const ext = contentType.includes("jpeg") ? "jpg" : "png";
+  // put() sends the body via fetch; sharp's output buffer can be SharedArrayBuffer-
+  // backed on Vercel, which undici rejects. Copy into a plain-backed view first.
   const blob = await put(
     `restyle/${userId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`,
-    buf, { access: "public", contentType }
+    toUnsharedBuffer(buf), { access: "public", contentType }
   );
   return blob.url;
 }
