@@ -21,7 +21,8 @@ export async function POST(req: Request) {
 
     // Canonicalize the original: EXIF-rotate + downscale to MAX_DIM (keeps aspect).
     // Copy into a fresh (non-shared) buffer — a view over a SharedArrayBuffer is rejected downstream.
-    const photoBuf = Buffer.from(new Uint8Array(await photo.arrayBuffer()));
+    const _raw0 = new Uint8Array(await photo.arrayBuffer());
+    const photoBuf = Buffer.allocUnsafe(_raw0.byteLength); photoBuf.set(_raw0);
     const canonical = await sharp(photoBuf)
       .rotate()
       .resize({ width: MAX_DIM, height: MAX_DIM, fit: "inside", withoutEnlargement: true })

@@ -35,7 +35,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   let referenceUrl: string | null = null;
   let referenceDesc: string | null = null;
   if (referenceFile) {
-    const rbuf = Buffer.from(new Uint8Array(await referenceFile.arrayBuffer()));
+    const _raw2 = new Uint8Array(await referenceFile.arrayBuffer());
+    const rbuf = Buffer.allocUnsafe(_raw2.byteLength); rbuf.set(_raw2);
     const rmime = referenceFile.type || "image/jpeg";
     referenceUrl = await uploadImage(userId, rbuf, rmime);
     referenceDesc = await describeProduct({

@@ -45,7 +45,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!file) return NextResponse.json({ error: "An image is required." }, { status: 400 });
   if (!file.type.startsWith("image/")) return NextResponse.json({ error: "That file isn't an image." }, { status: 400 });
 
-  const buf = Buffer.from(new Uint8Array(await file.arrayBuffer()));
+  const _raw3 = new Uint8Array(await file.arrayBuffer());
+  const buf = Buffer.allocUnsafe(_raw3.byteLength); buf.set(_raw3);
   const mimeType = file.type || "image/jpeg";
 
   // 1) Exact match via Google Lens — needs a public image URL, so upload then delete it.
