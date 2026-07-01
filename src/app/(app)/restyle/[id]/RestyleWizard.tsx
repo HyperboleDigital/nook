@@ -100,7 +100,7 @@ export default function RestyleWizard({
     setDescText(""); setSrcMode("link"); clearPending();
   };
 
-  // Pick the item to source in the composer; load any cached matches for it.
+  // Pick the item to source in the composer; load cached matches or auto-search.
   const chooseItem = (label: string, m: "swap" | "add") => {
     const l = label.trim(); if (!l) return;
     resetSourcing();
@@ -108,6 +108,7 @@ export default function RestyleWizard({
     setShowMissing(false); setMissingDraft(""); setAddLabelDraft("");
     const cached = candidatesByLabel[l.toLowerCase()];
     if (cached?.length) ws.setCandidates(cached);
+    else ws.runTextSearch(l); // auto-search so candidates appear without any extra step
   };
   const addMissingItem = async (label: string) => {
     const l = label.trim(); if (!l) return;
@@ -184,6 +185,18 @@ export default function RestyleWizard({
         ))}
       </div>
 
+      {/* Candidates always visible regardless of active tab */}
+      {ws.searching && (
+        <p className="text-xs text-[var(--muted-foreground)] flex items-center gap-1.5">
+          <span className="h-3.5 w-3.5 rounded-full border-2 border-slate-300 border-t-slate-700 animate-spin inline-block" />
+          Searching for {current.label} options…
+        </p>
+      )}
+      {ws.searchError && <p className="text-xs text-red-600">{ws.searchError}</p>}
+      {!ws.searching && displayCandidates && displayCandidates.length > 0 && (
+        <CandidateList candidates={displayCandidates} ws={ws} targetLabel={current.label} />
+      )}
+
       {srcMode === "link" && (
         <div className={`${card} p-4 space-y-2`}>
           <p className="text-[11px] text-[var(--muted-foreground)]">Preferred — paste a Wayfair, Amazon, Walmart or Home Depot product link.</p>
@@ -235,21 +248,11 @@ export default function RestyleWizard({
             </button>
           )}
 
-          {!pendingFile && ws.searchFile && !ws.fetchingProduct && (
+          {!pendingFile && ws.searchFile && !ws.fetchingProduct && !ws.searching && (
             <p className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
-              <Check className="h-3.5 w-3.5 shrink-0" /> Your photo is placed. {ws.searching ? "Finding options to buy…" : "Pick a match below to buy it, or keep your photo."}
+              <Check className="h-3.5 w-3.5 shrink-0" /> Your photo is placed. {displayCandidates?.length ? "Pick a match below to buy it, or keep your photo." : "Couldn't find a buyable match — we'll use your photo."}
             </p>
           )}
-          {!pendingFile && ws.searching && (
-            <p className="text-xs text-[var(--muted-foreground)] flex items-center gap-1.5">
-              <span className="h-3.5 w-3.5 rounded-full border-2 border-slate-300 border-t-slate-700 animate-spin inline-block" /> Finding the best matches…
-            </p>
-          )}
-          {!pendingFile && ws.searchError && <p className="text-xs text-red-600">{ws.searchError}</p>}
-          {!pendingFile && ws.searchFile && !ws.searching && displayCandidates && displayCandidates.length === 0 && (
-            <p className="text-xs text-[var(--muted-foreground)]">Couldn&apos;t find a match to buy — we&apos;ll use your photo.</p>
-          )}
-          {!pendingFile && <CandidateList candidates={displayCandidates} ws={ws} />}
         </div>
       )}
 
@@ -265,13 +268,6 @@ export default function RestyleWizard({
               {ws.searching ? <span className="h-3.5 w-3.5 rounded-full border-2 border-white/40 border-t-white animate-spin" /> : "Find"}
             </button>
           </div>
-          {ws.searchError && <p className="text-xs text-red-600">{ws.searchError}</p>}
-          {ws.searching && (
-            <p className="text-xs text-[var(--muted-foreground)] flex items-center gap-1.5">
-              <span className="h-3.5 w-3.5 rounded-full border-2 border-slate-300 border-t-slate-700 animate-spin inline-block" /> Finding products…
-            </p>
-          )}
-          <CandidateList candidates={displayCandidates} ws={ws} />
           <button type="button" disabled={ws.busy || !descText.trim()}
             onClick={() => ws.addEdit({ kind: current.mode === "swap" ? "item" : "add", targetLabel: current.label, instruction: descText.trim() })}
             className="w-full text-xs py-2 rounded-lg border border-[var(--border)] text-slate-600 hover:border-slate-400 hover:text-slate-800 transition-colors disabled:opacity-40">
@@ -505,11 +501,13 @@ export default function RestyleWizard({
 }
 
 /** Shoppable matches for the item being sourced — match word, price, View on, alternates. */
-function CandidateList({ candidates, ws }: { candidates: ShoppingResult[] | null; ws: RestyleWorkspace }) {
+function CandidateList({ candidates, ws, targetLabel }: { candidates: ShoppingResult[] | null; ws: RestyleWorkspace; targetLabel?: string }) {
   if (!candidates || candidates.length === 0) return null;
   return (
     <div className="space-y-2 pt-0.5">
-      <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">Options online — pick one, or keep yours</p>
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
+        {targetLabel ? `Options for ${targetLabel} — pick one to use it` : "Options online — pick one, or keep yours"}
+      </p>
       {candidates.map((c, i) => (
         <ProductCard key={i}
           image={c.thumbnail}
@@ -530,7 +528,7 @@ function CandidateList({ candidates, ws }: { candidates: ShoppingResult[] | null
             </p>
           )}
           <Button size="sm" variant={c.supported ? "primary" : "outline"}
-            disabled={!c.supported || ws.fetchingProduct} onClick={() => ws.pickCandidate(c)} className="mt-1">
+            disabled={!c.supported || ws.fetchingProduct} onClick={() => ws.pickCandidate(c, targetLabel)} className="mt-1">
             {c.supported ? "Use this in the room" : "Not shoppable yet"}
           </Button>
         </ProductCard>

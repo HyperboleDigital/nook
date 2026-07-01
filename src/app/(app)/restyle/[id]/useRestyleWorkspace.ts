@@ -226,14 +226,17 @@ export function useRestyleWorkspace(id: string) {
 
   // Pick a real product the search found. It replaces the photo staged from the
   // screenshot (same item, now with proper details + a Buy link) — no duplicate row.
-  const pickCandidate = async (c: ShoppingResult) => {
+  // targetLabel forces which detected object to replace (overrides backend auto-detect).
+  const pickCandidate = async (c: ShoppingResult, targetLabel?: string) => {
     if (!c.supported || (!c.immersiveToken && !c.productUrl)) return;
     const replacingId = photoEditId;
     setCandidates(null); setFetchingProduct(true); setError(null);
     try {
+      const body = c.productUrl ? { url: c.productUrl } : { token: c.immersiveToken };
+      if (targetLabel) Object.assign(body, { targetLabel });
       const r = await fetch(`/api/restyle/${id}/product`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(c.productUrl ? { url: c.productUrl } : { token: c.immersiveToken }),
+        body: JSON.stringify(body),
       });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error ?? "Couldn't fetch that product");

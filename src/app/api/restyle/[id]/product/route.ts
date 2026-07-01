@@ -141,6 +141,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!restyle) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   let staged: StagedProduct;
+  let forcedTarget: string | undefined;
   try {
     if (req.headers.get("content-type")?.includes("multipart/form-data")) {
       const form = await req.formData();
@@ -150,7 +151,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       staged = await fromUpload(userId, file);
     } else {
       const body = await req.json().catch(() => ({}));
-      const { url: rawUrl, token } = body as { url?: string; token?: string };
+      const { url: rawUrl, token, targetLabel: ft } = body as { url?: string; token?: string; targetLabel?: string };
+      forcedTarget = ft;
 
       // A visual-search candidate gives us a SerpApi immersive token, not a URL — resolve it.
       let url = rawUrl;
@@ -172,9 +174,19 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   }
 
   // Replace a matching detected item, otherwise add it as something new.
-  const matched = matchDetected(restyle.detected_objects, staged.itemType);
-  const kind = matched ? "item" : "add";
-  const targetLabel = matched ?? staged.itemType;
+  // forcedTarget (from wizard) takes priority — the user explicitly chose which item.
+  let kind: "item" | "add";
+  let targetLabel: string;
+  if (forcedTarget) {
+    const inDetected = (restyle.detected_objects as Array<{ label: string }> | null)
+      ?.some(o => o.label.toLowerCase() === forcedTarget.toLowerCase());
+    kind = inDetected ? "item" : "add";
+    targetLabel = forcedTarget;
+  } else {
+    const matched = matchDetected(restyle.detected_objects, staged.itemType);
+    kind = matched ? "item" : "add";
+    targetLabel = matched ?? staged.itemType;
+  }
 
   const existing = await editsFor(id);
   const position = existing.length;
