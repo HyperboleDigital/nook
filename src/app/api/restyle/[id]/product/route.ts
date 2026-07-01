@@ -86,7 +86,7 @@ async function fromListing(userId: string, info: ProductInfo): Promise<StagedPro
 
 /** Build a reference edit from a screenshot the user uploaded — just render it, nothing to buy. */
 async function fromUpload(userId: string, file: File): Promise<StagedProduct> {
-  const buf = Buffer.from(await file.arrayBuffer());
+  const buf = Buffer.from(new Uint8Array(await file.arrayBuffer()));
   const mimeType = file.type || "image/jpeg";
   const base64 = buf.toString("base64");
 

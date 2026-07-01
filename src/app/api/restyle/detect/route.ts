@@ -31,7 +31,7 @@ export async function POST(req: Request) {
       const form = await req.formData();
       const file = form.get("image") as File | null;
       if (!file) return NextResponse.json({ error: "image required" }, { status: 400 });
-      base64 = Buffer.from(await file.arrayBuffer()).toString("base64");
+      base64 = Buffer.from(new Uint8Array(await file.arrayBuffer())).toString("base64");
       mimeType = file.type || "image/jpeg";
     }
 

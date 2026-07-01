@@ -20,7 +20,9 @@ export async function POST(req: Request) {
     const title = (form.get("title") as string | null)?.trim() || "Untitled room";
 
     // Canonicalize the original: EXIF-rotate + downscale to MAX_DIM (keeps aspect).
-    const canonical = await sharp(Buffer.from(await photo.arrayBuffer()))
+    // Copy into a fresh (non-shared) buffer — a view over a SharedArrayBuffer is rejected downstream.
+    const photoBuf = Buffer.from(new Uint8Array(await photo.arrayBuffer()));
+    const canonical = await sharp(photoBuf)
       .rotate()
       .resize({ width: MAX_DIM, height: MAX_DIM, fit: "inside", withoutEnlargement: true })
       .jpeg({ quality: 90 })

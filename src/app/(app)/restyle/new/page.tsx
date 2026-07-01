@@ -131,7 +131,7 @@ export default function NewRestylePage() {
               <div className="flex gap-2">
                 <button type="button" onClick={confirm}
                   className="flex-1 bg-[var(--primary)] text-[var(--primary-foreground)] font-semibold py-3 rounded-xl text-sm hover:opacity-90 transition-opacity">
-                  Use this room →
+                  Start restyling →
                 </button>
                 <button type="button" onClick={() => fileInputRef.current?.click()}
                   className="px-4 border border-[var(--border)] rounded-xl text-sm text-slate-700 hover:border-slate-400 transition-colors">
