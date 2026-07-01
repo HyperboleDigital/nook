@@ -327,67 +327,120 @@ export default function RestyleWizard({
             <p className="text-sm text-[var(--muted-foreground)] mt-0.5">Add as many swaps and new pieces as you like, then generate once.</p>
           </div>
 
-          {/* Staged changes — tap to expand, see product details, or swap for a different one */}
+          {/* Staged changes */}
           {stagedItems.length > 0 && (
             <div className="space-y-2">
               {stagedItems.map(e => {
                 const isOpen = expandedId === e.id;
+                const label = e.target_label ?? "";
+                const savedCandidates = candidatesByLabel[label.toLowerCase()] ?? [];
+                // Separate current product from other options
+                const otherCandidates = savedCandidates.filter(c =>
+                  c.productUrl && c.productUrl !== e.buy_url
+                );
+                const hasProduct = !!(e.buy_url || e.product_title);
+                const hasOptions = otherCandidates.length > 0;
+
                 return (
-                  <div key={e.id} className={`${card} border border-[var(--border)] overflow-hidden`}>
-                    {/* Row — always visible, click to expand */}
+                  <div key={e.id} className="border border-[var(--border)] bg-white overflow-hidden">
+                    {/* Collapsed row — always visible */}
                     <button type="button" onClick={() => setExpandedId(isOpen ? null : e.id)}
-                      className="w-full flex items-center gap-3 p-2.5 text-left hover:bg-[var(--muted)] transition-colors">
+                      className="w-full flex items-center gap-3 p-3 text-left hover:bg-[var(--muted)] transition-colors">
                       {e.reference_url
                         ? /* eslint-disable-next-line @next/next/no-img-element */
-                          <img src={e.reference_url} alt="" className="h-12 w-12 rounded-lg object-cover border border-[var(--border)] shrink-0" />
-                        : <span className="h-12 w-12 rounded-lg bg-slate-100 border border-[var(--border)] shrink-0 flex items-center justify-center text-slate-500">{e.kind === "add" ? <Plus className="h-4 w-4" /> : <Replace className="h-4 w-4" />}</span>}
+                          <img src={e.reference_url} alt="" className="h-14 w-14 object-cover border border-[var(--border)] shrink-0" />
+                        : <span className="h-14 w-14 bg-[var(--muted)] border border-[var(--border)] shrink-0 flex items-center justify-center text-slate-400">{e.kind === "add" ? <Plus className="h-5 w-5" /> : <Replace className="h-5 w-5" />}</span>}
                       <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium text-slate-800 truncate capitalize">{e.product_title ?? e.target_label}</p>
-                        <p className="text-[11px] text-[var(--muted-foreground)] capitalize">
-                          {e.kind === "add" ? "Adding" : "Swapping"}{e.target_label ? ` · ${e.target_label}` : ""}
+                        <p className="text-sm font-semibold text-slate-900 truncate capitalize tracking-tight">
+                          {e.product_title ?? label}
+                        </p>
+                        <p className="text-xs text-[var(--muted-foreground)] capitalize mt-0.5">
+                          {e.kind === "add" ? "Adding" : "Swapping"}{label ? ` · ${label}` : ""}
                           {e.product_price ? ` · ${e.product_price}` : ""}
                         </p>
+                        {/* Clear affordance */}
+                        <p className="text-[11px] text-[var(--primary)] font-medium mt-1">
+                          {isOpen ? "Hide details ↑" : `View details${hasOptions ? ` · ${otherCandidates.length + (hasProduct ? 1 : 0)} option${otherCandidates.length + (hasProduct ? 1 : 0) !== 1 ? "s" : ""} saved` : ""} ↓`}
+                        </p>
                       </div>
-                      <ChevronRight className={`h-4 w-4 text-slate-300 shrink-0 transition-transform ${isOpen ? "rotate-90" : ""}`} />
                     </button>
 
-                    {/* Expanded detail panel */}
+                    {/* Expanded panel */}
                     {isOpen && (
-                      <div className="border-t border-[var(--border)] p-3 space-y-3 bg-[var(--muted)]">
-                        {/* Product details */}
-                        <div className="flex gap-3">
-                          {e.reference_url && (
-                            /* eslint-disable-next-line @next/next/no-img-element */
-                            <img src={e.reference_url} alt="" className="h-20 w-20 rounded-lg object-cover border border-[var(--border)] shrink-0" />
+                      <div className="border-t border-[var(--border)] bg-[var(--muted)]">
+
+                        {/* ── Currently selected product ── */}
+                        <div className="p-3 space-y-2">
+                          <p className="text-[10px] font-semibold uppercase tracking-widest text-[var(--muted-foreground)]">
+                            Currently selected
+                          </p>
+                          {hasProduct ? (
+                            <ProductCard
+                              image={e.reference_url}
+                              title={e.product_title ?? label}
+                              retailer={e.buy_url ? storeName(e.buy_url) : undefined}
+                              price={e.product_price}
+                              viewUrl={e.buy_url}
+                              badge={{ label: "✓ In use", cls: "bg-emerald-100 text-emerald-700 border border-emerald-200" }}
+                            />
+                          ) : (
+                            <div className="flex gap-3 p-3 border border-amber-200 bg-amber-50">
+                              {e.reference_url
+                                ? /* eslint-disable-next-line @next/next/no-img-element */
+                                  <img src={e.reference_url} alt="" className="h-14 w-14 object-cover border border-amber-200 shrink-0" />
+                                : null}
+                              <div className="min-w-0 flex-1 space-y-1">
+                                <p className="text-xs font-medium text-amber-800 capitalize">{label}</p>
+                                <p className="text-xs text-amber-700">No product link found — we&apos;ll use your uploaded photo to render this item, but there&apos;s no buy link. Pick an option below or search for one.</p>
+                              </div>
+                            </div>
                           )}
-                          <div className="min-w-0 flex-1 space-y-1">
-                            {e.product_title && <p className="text-sm font-medium text-slate-800 capitalize">{e.product_title}</p>}
-                            {e.product_price && <p className="text-sm font-semibold text-slate-900">{e.product_price}</p>}
-                            {e.buy_url && (
-                              <a href={e.buy_url} target="_blank" rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1 text-xs text-[var(--primary)] underline hover:opacity-80">
-                                View on {storeName(e.buy_url)} <ExternalLink className="h-3 w-3" />
-                              </a>
-                            )}
-                            {!e.product_title && !e.buy_url && (
-                              <p className="text-xs text-[var(--muted-foreground)]">Your uploaded photo — no product link.</p>
-                            )}
-                          </div>
                         </div>
 
-                        {/* Actions */}
-                        <div className="flex gap-2">
+                        {/* ── Other options saved from search ── */}
+                        {hasOptions && (
+                          <div className="px-3 pb-3 space-y-2">
+                            <p className="text-[10px] font-semibold uppercase tracking-widest text-[var(--muted-foreground)]">
+                              Other options found ({otherCandidates.length})
+                            </p>
+                            {otherCandidates.map((c, i) => (
+                              <ProductCard key={i}
+                                image={c.thumbnail}
+                                title={c.title}
+                                retailer={c.retailer}
+                                price={c.price}
+                                viewUrl={c.productUrl ?? null}
+                                badge={matchWord(c.score, c.exact)}>
+                                <Button size="sm" variant={c.supported ? "outline" : "ghost"}
+                                  disabled={!c.supported || ws.fetchingProduct}
+                                  onClick={() => { setExpandedId(null); ws.pickCandidate(c, label); }}
+                                  className="mt-1">
+                                  {c.supported ? "Use this instead" : "Not shoppable"}
+                                </Button>
+                              </ProductCard>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* ── No options at all ── */}
+                        {!hasOptions && !hasProduct && (
+                          <div className="px-3 pb-3">
+                            <p className="text-xs text-[var(--muted-foreground)] bg-white border border-[var(--border)] px-3 py-2">
+                              No product options were saved for this item. Search for one below.
+                            </p>
+                          </div>
+                        )}
+
+                        {/* ── Actions ── */}
+                        <div className="px-3 pb-3 flex gap-2 pt-1">
                           <button type="button"
-                            onClick={() => {
-                              setExpandedId(null);
-                              setComposing(true);
-                              chooseItem(e.target_label ?? "", e.kind === "add" ? "add" : "swap");
-                            }}
-                            className="flex-1 text-xs py-2 border border-[var(--border)] rounded-lg text-slate-700 hover:border-slate-400 bg-white transition-colors font-medium">
-                            Choose a different product
+                            onClick={() => { setExpandedId(null); setComposing(true); chooseItem(label, e.kind === "add" ? "add" : "swap"); }}
+                            className="flex-1 text-xs py-2 border border-[var(--border)] bg-white text-slate-700 hover:border-slate-400 transition-colors font-medium">
+                            Search for different options
                           </button>
-                          <button type="button" disabled={ws.busy} onClick={() => { setExpandedId(null); ws.remove(e.id); }}
-                            className="px-3 text-xs py-2 border border-red-200 rounded-lg text-red-500 hover:border-red-400 hover:text-red-600 bg-white transition-colors">
+                          <button type="button" disabled={ws.busy}
+                            onClick={() => { setExpandedId(null); ws.remove(e.id); }}
+                            className="px-3 text-xs py-2 border border-red-200 bg-white text-red-500 hover:border-red-400 hover:text-red-600 transition-colors">
                             Remove
                           </button>
                         </div>
