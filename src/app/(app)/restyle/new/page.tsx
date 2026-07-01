@@ -3,7 +3,7 @@
 import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Camera, ImagePlus, Sofa } from "lucide-react";
+import { Camera, Sofa } from "lucide-react";
 
 export default function NewRestylePage() {
   const router = useRouter();
@@ -81,16 +81,10 @@ export default function NewRestylePage() {
             <div className="text-sm">Drag &amp; drop a room photo, or tap to choose</div>
             <div className="text-xs text-[var(--muted-foreground)] mt-1">JPG or PNG</div>
           </div>
-          <div className="flex gap-2">
-            <button type="button" onClick={() => cameraInputRef.current?.click()}
-              className="flex-1 bg-slate-900 text-white text-sm font-medium py-3 rounded-xl hover:opacity-90 transition-opacity flex items-center justify-center gap-2">
-              <Camera className="h-4 w-4" /> Take a photo
-            </button>
-            <button type="button" onClick={() => fileInputRef.current?.click()}
-              className="flex-1 border border-[var(--border)] text-sm text-slate-700 py-3 rounded-xl hover:border-slate-400 transition-colors flex items-center justify-center gap-2">
-              <ImagePlus className="h-4 w-4" /> Choose from library
-            </button>
-          </div>
+          <button type="button" onClick={() => cameraInputRef.current?.click()}
+            className="w-full bg-slate-900 text-white text-sm font-medium py-3 rounded-xl hover:opacity-90 transition-opacity flex items-center justify-center gap-2">
+            <Camera className="h-4 w-4" /> Take a photo
+          </button>
         </div>
       ) : (
         <div className="space-y-4">
