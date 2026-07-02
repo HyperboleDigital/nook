@@ -3,9 +3,10 @@ import { NextResponse } from "next/server";
 import { del } from "@vercel/blob";
 import { supabaseAdmin } from "@/lib/supabase";
 import { uploadImage } from "@/lib/restyle-render";
-import { describeScreenshotForSearch, scoreImageMatches } from "@/lib/gemini";
+import { describeScreenshotForSearch, locateProductPhoto, scoreImageMatches } from "@/lib/gemini";
 import { searchByImage, searchShopping, ShoppingSearchError, type ShoppingResult } from "@/lib/shopping-search";
 import { fileToBuffer } from "@/lib/file-buf";
+import { cropToBox } from "@/lib/image-crop";
 
 // Google Lens visual match + (fallback) Gemini identify + four parallel SerpApi searches.
 export const maxDuration = 90;
@@ -46,8 +47,15 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!file) return NextResponse.json({ error: "An image is required." }, { status: 400 });
   if (!file.type.startsWith("image/")) return NextResponse.json({ error: "That file isn't an image." }, { status: 400 });
 
-  const buf = await fileToBuffer(file);
+  let buf = await fileToBuffer(file);
   const mimeType = file.type || "image/jpeg";
+
+  // Full-page/app screenshots carry UI chrome (nav bars, price, buttons) that pollutes Lens
+  // visual matching — crop to just the product photo before searching, same as product/route.
+  try {
+    const box = await locateProductPhoto({ imageBase64: buf.toString("base64"), mimeType });
+    if (box) buf = await cropToBox(buf, box);
+  } catch { /* best-effort — fall back to the full screenshot */ }
 
   // 1) Exact match via Google Lens — needs a public image URL, so upload then delete it.
   let exact: ShoppingResult[] = [];

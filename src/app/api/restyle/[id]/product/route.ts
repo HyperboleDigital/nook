@@ -3,9 +3,10 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { uploadImage } from "@/lib/restyle-render";
 import { fetchProduct, ProductFetchError, type ProductInfo } from "@/lib/product";
-import { describeProductImages, describeScreenshotForSearch } from "@/lib/gemini";
+import { describeProductImages, describeScreenshotForSearch, locateProductPhoto } from "@/lib/gemini";
 import { resolveImmersiveToken } from "@/lib/shopping-search";
 import { fileToBuffer } from "@/lib/file-buf";
+import { cropToBox } from "@/lib/image-crop";
 import type { DetectedObject } from "@/types";
 
 // Amazon scrapes via Unwrangle can take 60–90s, plus Gemini gallery sizing afterward.
@@ -87,8 +88,16 @@ async function fromListing(userId: string, info: ProductInfo): Promise<StagedPro
 
 /** Build a reference edit from a screenshot the user uploaded — just render it, nothing to buy. */
 async function fromUpload(userId: string, file: File): Promise<StagedProduct> {
-  const buf = await fileToBuffer(file);
+  let buf = await fileToBuffer(file);
   const mimeType = file.type || "image/jpeg";
+
+  // Full-page/app screenshots carry UI chrome (nav bars, price, buttons) that pollutes
+  // both identification and the render reference — crop to just the product photo.
+  try {
+    const box = await locateProductPhoto({ imageBase64: buf.toString("base64"), mimeType });
+    if (box) buf = await cropToBox(buf, box);
+  } catch { /* best-effort — fall back to the full screenshot */ }
+
   const base64 = buf.toString("base64");
 
   let identified: { itemType: string; description: string };

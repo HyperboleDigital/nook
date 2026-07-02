@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Camera, ImagePlus, Sofa } from "lucide-react";
+import { downscaleImage } from "@/lib/image-client";
 
 export default function NewRestylePage() {
   const router = useRouter();
@@ -66,8 +67,11 @@ export default function NewRestylePage() {
     setLoading(true);
     setError(null);
     try {
+      // Phone camera photos routinely exceed Vercel's 4.5 MB request-body limit — downscale
+      // client-side first so the upload doesn't die with a bare "load failed".
+      const small = await downscaleImage(file);
       const fd = new FormData();
-      fd.append("photo", file);
+      fd.append("photo", small);
       if (name.trim()) fd.append("title", name.trim());
       const res = await fetch("/api/restyle", { method: "POST", body: fd });
       const data = await res.json();

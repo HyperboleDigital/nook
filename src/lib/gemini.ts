@@ -346,6 +346,41 @@ export async function describeProduct(params: {
   }
 }
 
+/**
+ * Find the bounding box of the primary product photo within a screenshot. Screenshots of
+ * listing pages/apps carry a lot of UI chrome (nav bars, price, buttons, thumbnails strip)
+ * that pollutes both Google Lens visual matching and the render reference — cropping to just
+ * the product photo before using it anywhere noticeably improves match quality. Returns null
+ * when nothing confident is found so the caller can fall back to the full image.
+ */
+export async function locateProductPhoto(params: {
+  imageBase64: string;
+  mimeType: string;
+}): Promise<[number, number, number, number] | null> {
+  const prompt =
+    "This is a screenshot of a product listing page or shopping app screen. Find the bounding " +
+    "box of the main product photo only — the large hero image of the item itself. Exclude " +
+    "navigation bars, back/share buttons, price text, badges, thumbnail strips, and any other UI chrome. " +
+    'Reply as JSON: {"box_2d":[ymin,xmin,ymax,xmax]} as integers 0-1000 (relative to the full ' +
+    'screenshot), or {"box_2d":null} if there is no clear product photo. JSON only, no preamble.';
+  try {
+    const data = await geminiPost(GEMINI_VISION_MODEL, {
+      contents: [
+        { parts: [{ text: prompt }, { inline_data: { mime_type: params.mimeType, data: params.imageBase64 } }] },
+      ],
+      generationConfig: { responseMimeType: "application/json" },
+    });
+    const text = data.candidates?.[0]?.content?.parts?.find((p) => p.text)?.text ?? "{}";
+    const parsed = JSON.parse(text.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim());
+    const box = parsed.box_2d;
+    return Array.isArray(box) && box.length === 4 && box.every((n: unknown) => typeof n === "number")
+      ? (box as [number, number, number, number])
+      : null;
+  } catch {
+    return null; // best-effort — caller falls back to the full screenshot
+  }
+}
+
 export interface ScreenshotDescription {
   itemType: string;    // short category noun, e.g. "sofa", "floor lamp"
   description: string; // shopping-search-friendly phrase: color, material, style, proportions
