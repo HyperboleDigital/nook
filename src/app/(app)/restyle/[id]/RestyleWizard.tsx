@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { Sofa, Eraser, Replace, Plus, X, Check, ExternalLink, ChevronRight, type LucideIcon } from "lucide-react";
 import type { RestyleWorkspace } from "./useRestyleWorkspace";
 import type { ShoppingResult } from "@/lib/shopping-search";
+import { downscaleImage } from "@/lib/image-client";
 import { card, inp, chip } from "./shared";
 import { Button, ProductCard, matchWord, storeName } from "./ui";
 
@@ -34,11 +35,10 @@ export default function RestyleWizard({
 
   // Builder composer — when replacing one product, open its sourcing screen immediately.
   const [composing, setComposing] = useState(!!initialItem);
-  const [pickMode, setPickMode] = useState<"swap" | "add" | null>(null); // choice → swap/add screen
+  const [pickMode, setPickMode] = useState<"swap" | null>(null); // choice → swap screen ("add" skips straight to sourcing)
   const [current, setCurrent] = useState<{ label: string; mode: "swap" | "add" } | null>(initialItem);
   const [srcMode, setSrcMode] = useState<SrcMode>("link");
   const [descText, setDescText] = useState("");
-  const [addLabelDraft, setAddLabelDraft] = useState("");
   const [missingDraft, setMissingDraft] = useState("");
   const [showMissing, setShowMissing] = useState(false);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
@@ -101,15 +101,17 @@ export default function RestyleWizard({
     setDescText(""); setSrcMode("link"); clearPending();
   };
 
-  // Pick the item to source in the composer; load cached matches or auto-search.
+  // Open the composer for an item. We do NOT search here — options are only looked
+  // up once the user actually pastes a link or uploads a reference photo. "Add" can
+  // start with no label (empty) and let the AI identify the piece from the photo/link.
   const chooseItem = (label: string, m: "swap" | "add") => {
-    const l = label.trim(); if (!l) return;
+    const l = label.trim();
+    if (m === "swap" && !l) return;
     resetSourcing();
     setCurrent({ label: l, mode: m });
-    setShowMissing(false); setMissingDraft(""); setAddLabelDraft("");
-    const cached = candidatesByLabel[l.toLowerCase()];
-    if (cached?.length) ws.setCandidates(cached);
-    else ws.runTextSearch(l); // auto-search so candidates appear without any extra step
+    setShowMissing(false); setMissingDraft("");
+    const cached = l ? candidatesByLabel[l.toLowerCase()] : null;
+    if (cached?.length) ws.setCandidates(cached); // show previously-found options, but don't re-search
   };
   const addMissingItem = async (label: string) => {
     const l = label.trim(); if (!l) return;
@@ -121,7 +123,13 @@ export default function RestyleWizard({
   const nextChange = () => { setCurrent(null); setPickMode(null); resetSourcing(); };
   const closeComposer = () => { setComposing(false); setCurrent(null); setPickMode(null); resetSourcing(); };
 
-  const uploadInspo = async (file: File) => { await ws.uploadPhotoProduct(file); ws.runVisualSearch(file); };
+  const uploadInspo = async (file: File) => {
+    // Downscale client-side first — raw phone photos blow past Vercel's 4.5 MB
+    // body limit and the upload dies as a bare "load failed".
+    const small = await downscaleImage(file);
+    await ws.uploadPhotoProduct(small);
+    ws.runVisualSearch(small);
+  };
   const confirmPending = async () => { const f = pendingFile; if (!f) return; clearPending(); await uploadInspo(f); };
 
   const currentStaged = !!ws.lastProduct ||
@@ -176,7 +184,7 @@ export default function RestyleWizard({
   const sourcePanel = current && (
     <div className="space-y-3">
       <div className="flex gap-1 p-0.5 bg-slate-100 rounded-lg">
-        {(["link", "photo", "describe"] as const).map(m => (
+        {(current.mode === "add" ? (["link", "photo"] as const) : (["link", "photo", "describe"] as const)).map(m => (
           <button key={m} type="button" onClick={() => setSrcMode(m)}
             className={`flex-1 py-1.5 rounded-md text-xs font-medium transition-colors ${
               srcMode === m ? "bg-white shadow-sm text-slate-800" : "text-[var(--muted-foreground)] hover:text-slate-700"
@@ -190,7 +198,7 @@ export default function RestyleWizard({
       {ws.searching && (
         <p className="text-xs text-[var(--muted-foreground)] flex items-center gap-1.5">
           <span className="h-3.5 w-3.5 rounded-full border-2 border-slate-300 border-t-slate-700 animate-spin inline-block" />
-          Searching for {current.label} options…
+          Searching for {current.label || "matching"} options…
         </p>
       )}
       {ws.searchError && <p className="text-xs text-red-600">{ws.searchError}</p>}
@@ -468,12 +476,14 @@ export default function RestyleWizard({
                 <button type="button" onClick={() => { setCurrent(null); resetSourcing(); }}
                   className="text-xs text-[var(--muted-foreground)] hover:text-slate-700 transition-colors">← Back</button>
                 <p className="text-sm font-medium text-slate-800 capitalize">
-                  {current.mode === "swap" ? "Replacing the " : "Adding "}{current.label}
+                  {current.mode === "swap"
+                    ? `Replacing the ${current.label}`
+                    : current.label ? `Adding ${current.label}` : "Adding a new piece"}
                 </p>
                 {sourcePanel}
                 {currentStaged && (
                   <div className="rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-800 text-xs px-3 py-2 flex items-center gap-1.5">
-                    <Check className="h-3.5 w-3.5 shrink-0" /> {current.mode === "swap" ? "Swapping" : "Adding"} <span className="capitalize">{current.label}</span>
+                    <Check className="h-3.5 w-3.5 shrink-0" /> {current.mode === "swap" ? "Swapping" : "Adding"} <span className="capitalize">{current.label || "your new piece"}</span>
                     {ws.lastProduct?.title ? <span className="text-emerald-700"> → {ws.lastProduct.title}</span> : null}
                   </div>
                 )}
@@ -503,12 +513,12 @@ export default function RestyleWizard({
                   </span>
                   <ChevronRight className="h-4 w-4 text-slate-300 shrink-0" />
                 </button>
-                <button type="button" onClick={() => setPickMode("add")}
+                <button type="button" onClick={() => chooseItem("", "add")}
                   className={`w-full flex items-center gap-3 p-4 rounded-xl border text-left transition-colors border-[var(--border)] hover:border-slate-400`}>
                   <Plus className="h-5 w-5 text-slate-700 shrink-0" />
                   <span className="min-w-0 flex-1">
                     <span className="block text-sm font-medium text-slate-800">Add a new piece</span>
-                    <span className="block text-xs text-[var(--muted-foreground)]">Bring in furniture or decor that isn&apos;t there</span>
+                    <span className="block text-xs text-[var(--muted-foreground)]">Paste a link or upload a photo — we&apos;ll figure out what it is</span>
                   </span>
                   <ChevronRight className="h-4 w-4 text-slate-300 shrink-0" />
                 </button>
@@ -546,21 +556,7 @@ export default function RestyleWizard({
                 </div>
                 {showMissing && <p className="text-[10px] text-amber-600">If our detector missed it, the swap may not land perfectly — a clear, specific name helps.</p>}
               </div>
-            ) : (
-              // ── Add: name the new piece ──
-              <div className={`${card} p-4 space-y-2.5`}>
-                <button type="button" onClick={() => setPickMode(null)}
-                  className="text-xs text-[var(--muted-foreground)] hover:text-slate-700 transition-colors">← Back</button>
-                <p className="text-sm font-medium text-slate-800">What do you want to add?</p>
-                <div className="flex gap-1.5">
-                  <input type="text" value={addLabelDraft} autoFocus onChange={e => setAddLabelDraft(e.target.value)}
-                    onKeyDown={e => { if (e.key === "Enter") chooseItem(addLabelDraft, "add"); }}
-                    placeholder="e.g. area rug, floor lamp, wall art" className={inp} />
-                  <button type="button" disabled={!addLabelDraft.trim()} onClick={() => chooseItem(addLabelDraft, "add")}
-                    className="bg-[var(--primary)] text-[var(--primary-foreground)] px-3 rounded-lg text-xs font-medium disabled:opacity-40 shrink-0">Next</button>
-                </div>
-              </div>
-            )
+            ) : null
           )}
 
           <button type="button" disabled={activeEdits.length === 0 || ws.generating || ws.busy} onClick={onGenerate}
