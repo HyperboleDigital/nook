@@ -71,15 +71,28 @@ export default function RestyleWizard({
     try { localStorage.setItem(`nook-restyle-${id}`, JSON.stringify({ ts: Date.now(), candidatesByLabel })); } catch { /* quota */ }
   }, [id, candidatesByLabel]);
 
-  // Mirror live search results into the per-label cache.
+  // Fill in the label once the AI identifies an "add" item from its photo/link — keeps the
+  // header text, staged-item lookups, and further searches all pointed at the real label.
   useEffect(() => {
-    const lbl = current?.label?.toLowerCase();
+    const detected = ws.lastProduct?.targetLabel;
+    if (!detected || !current || current.label) return;
+    let active = true;
+    Promise.resolve().then(() => { if (active) setCurrent(c => (c && !c.label ? { ...c, label: detected } : c)); });
+    return () => { active = false; };
+  }, [ws.lastProduct?.targetLabel, current]);
+
+  // Mirror live search results into the per-label cache. "Add" items start sourcing with
+  // no label (the AI detects it from the photo/link) — once staged, the backend's detected
+  // target_label is the real key the staged-item panel reads by, so prefer that over the
+  // empty current.label; otherwise results would cache under "" and never surface again.
+  useEffect(() => {
+    const lbl = (ws.lastProduct?.targetLabel || current?.label)?.toLowerCase();
     const caps = ws.candidates;
     if (!lbl || !caps || !caps.length) return;
     let active = true;
     Promise.resolve().then(() => { if (active) setCandidatesByLabel(prev => ({ ...prev, [lbl]: caps })); });
     return () => { active = false; };
-  }, [ws.candidates, current?.label]);
+  }, [ws.candidates, current?.label, ws.lastProduct?.targetLabel]);
 
   if (!ws.restyle) return null;
   const { restyle, objects, edits, activeEdits } = ws;
