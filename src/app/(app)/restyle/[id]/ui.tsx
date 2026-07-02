@@ -1,8 +1,9 @@
 "use client";
 
 import { cva, type VariantProps } from "class-variance-authority";
-import { ExternalLink } from "lucide-react";
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import { ExternalLink, X } from "lucide-react";
+import { useEffect } from "react";
+import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 // ── Button ───────────────────────────────────────────────────────────────────
@@ -150,6 +151,198 @@ export function ProductCard({
 
         {children}
       </div>
+    </div>
+  );
+}
+
+// ── Spinner ───────────────────────────────────────────────────────────────────
+// One sized spinner (this file used to have ~10 hand-rolled copies of this div).
+const spinnerVariants = cva("inline-block rounded-full border-2 border-current/25 border-t-current animate-spin", {
+  variants: { size: { xs: "h-3 w-3", sm: "h-3.5 w-3.5", md: "h-4 w-4", lg: "h-7 w-7" } },
+  defaultVariants: { size: "sm" },
+});
+export function Spinner({ size, className }: VariantProps<typeof spinnerVariants> & { className?: string }) {
+  return <span className={cn(spinnerVariants({ size }), className)} />;
+}
+
+// ── Input ─────────────────────────────────────────────────────────────────────
+// Sharp, border-only focus state — replaces shared.ts's `inp` (rounded, ring-based).
+export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <input
+      className={cn(
+        "w-full bg-white border border-[var(--border)] rounded-none px-3 py-2 text-sm",
+        "placeholder:text-[var(--muted-foreground)] focus:outline-none focus:border-[var(--foreground)]",
+        "transition-colors",
+        className,
+      )}
+      {...props}
+    />
+  );
+}
+
+// ── SectionLabel ──────────────────────────────────────────────────────────────
+export function SectionLabel({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <p className={cn("text-[10px] font-semibold uppercase tracking-widest text-[var(--muted-foreground)]", className)}>
+      {children}
+    </p>
+  );
+}
+
+// ── StatusBanner ──────────────────────────────────────────────────────────────
+// Replaces every ad-hoc emerald/amber/red rounded box across the restyle screens.
+const bannerVariants = cva("flex items-start gap-2 border px-3 py-2 text-xs", {
+  variants: {
+    variant: {
+      info: "bg-[var(--muted)] border-[var(--border)] text-[var(--foreground)]",
+      success: "bg-emerald-50 border-emerald-200 text-emerald-800",
+      warning: "bg-amber-50 border-amber-200 text-amber-800",
+      error: "bg-red-50 border-red-200 text-red-700",
+    },
+  },
+  defaultVariants: { variant: "info" },
+});
+export function StatusBanner({
+  variant, icon, children, className,
+}: VariantProps<typeof bannerVariants> & { icon?: ReactNode; children: ReactNode; className?: string }) {
+  return (
+    <div className={cn(bannerVariants({ variant }), className)}>
+      {icon && <span className="shrink-0 mt-0.5">{icon}</span>}
+      <div className="min-w-0 flex-1">{children}</div>
+    </div>
+  );
+}
+
+// ── Skeleton ──────────────────────────────────────────────────────────────────
+export function Skeleton({ className }: { className?: string }) {
+  return <div className={cn("animate-pulse bg-[var(--muted)]", className)} />;
+}
+
+/** Placeholder matching ProductCard's geometry — shown while search results load. */
+export function SkeletonProductCard() {
+  return (
+    <div className="flex gap-3 p-3 border border-[var(--border)] bg-white">
+      <Skeleton className="h-16 w-16 shrink-0" />
+      <div className="min-w-0 flex-1 space-y-2 py-0.5">
+        <Skeleton className="h-3 w-3/4" />
+        <Skeleton className="h-3 w-1/2" />
+        <Skeleton className="h-6 w-24 mt-2" />
+      </div>
+    </div>
+  );
+}
+
+// ── ProgressOverlay ───────────────────────────────────────────────────────────
+// Full-bleed overlay for the canvas during generate — status + optional context line.
+export function ProgressOverlay({ status, subtext }: { status: string; subtext?: string }) {
+  return (
+    <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-white/80 text-center px-4">
+      <Spinner size="lg" className="text-[var(--primary)]" />
+      <p className="text-sm font-medium text-[var(--foreground)]">{status}</p>
+      {subtext && <p className="text-xs text-[var(--muted-foreground)]">{subtext}</p>}
+    </div>
+  );
+}
+
+// ── Chip ──────────────────────────────────────────────────────────────────────
+// Detected-item / staged-item chips. sm for compact rows, md meets the 40px touch target.
+const chipVariants = cva(
+  "inline-flex items-center gap-1.5 border rounded-none font-medium capitalize whitespace-nowrap cursor-pointer transition-colors select-none",
+  {
+    variants: {
+      variant: {
+        default: "border-[var(--border)] text-[var(--muted-foreground)] bg-white hover:border-[var(--foreground)] hover:text-[var(--foreground)]",
+        active: "border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]",
+        staged: "border-[var(--primary)] text-[var(--primary)] bg-white",
+        dashed: "border-dashed border-[var(--border)] text-[var(--muted-foreground)] bg-white hover:border-[var(--foreground)] hover:text-[var(--foreground)]",
+      },
+      size: {
+        sm: "text-xs px-2.5 py-1 h-7",
+        md: "text-sm px-3.5 min-h-10",
+      },
+    },
+    defaultVariants: { variant: "default", size: "md" },
+  },
+);
+export function Chip({
+  className, variant, size, staged, ...props
+}: ButtonHTMLAttributes<HTMLButtonElement> & VariantProps<typeof chipVariants> & { staged?: boolean }) {
+  return (
+    <button type="button" className={cn(chipVariants({ variant, size }), className)} {...props}>
+      {props.children}
+      {staged && <span className="h-1.5 w-1.5 rounded-full bg-[var(--primary)] shrink-0" />}
+    </button>
+  );
+}
+
+// ── SegmentedTabs ─────────────────────────────────────────────────────────────
+// Sharp tab switcher (link/photo/describe) — replaces the pill-shaped, shadowed version.
+export function SegmentedTabs<T extends string>({
+  options, value, onChange, className,
+}: { options: { value: T; label: string }[]; value: T; onChange: (v: T) => void; className?: string }) {
+  return (
+    <div className={cn("flex border border-[var(--border)]", className)}>
+      {options.map((o, i) => (
+        <button
+          key={o.value}
+          type="button"
+          onClick={() => onChange(o.value)}
+          className={cn(
+            "flex-1 py-2 text-xs font-medium transition-colors",
+            i > 0 && "border-l border-[var(--border)]",
+            value === o.value
+              ? "bg-[var(--foreground)] text-[var(--background)]"
+              : "bg-white text-[var(--muted-foreground)] hover:text-[var(--foreground)]",
+          )}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ── Sheet ─────────────────────────────────────────────────────────────────────
+// <md: fixed bottom sheet. md+: in-layout right side panel (not an overlay — the caller
+// lays it out next to the canvas). No drag-to-dismiss — X button + backdrop tap only.
+export function Sheet({
+  open, onClose, title, children,
+}: { open: boolean; onClose: () => void; title?: string; children: ReactNode }) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
+  if (!open) return null;
+  return (
+    <>
+      {/* Mobile: fixed bottom sheet + backdrop */}
+      <div className="md:hidden fixed inset-0 z-40 bg-black/40" onClick={onClose} />
+      <div className="md:hidden fixed inset-x-0 bottom-0 z-50 max-h-[85dvh] flex flex-col border-t border-[var(--foreground)] bg-white pb-[env(safe-area-inset-bottom)]">
+        <div className="flex justify-center pt-1.5 shrink-0"><span className="h-1 w-10 bg-[var(--border)]" /></div>
+        <SheetChrome title={title} onClose={onClose} />
+        <div className="overflow-y-auto px-4 pb-4">{children}</div>
+      </div>
+
+      {/* Desktop: in-layout right panel */}
+      <div className="hidden md:flex md:flex-col md:w-[400px] md:shrink-0 md:border-l md:border-[var(--border)] md:bg-white md:h-full md:overflow-y-auto">
+        <SheetChrome title={title} onClose={onClose} />
+        <div className="px-4 pb-4">{children}</div>
+      </div>
+    </>
+  );
+}
+
+function SheetChrome({ title, onClose }: { title?: string; onClose: () => void }) {
+  return (
+    <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)] shrink-0">
+      {title ? <h3 className="text-sm font-semibold tracking-tight">{title}</h3> : <span />}
+      <IconButton onClick={onClose} aria-label="Close" className="h-7 w-7">
+        <X className="h-4 w-4" />
+      </IconButton>
     </div>
   );
 }

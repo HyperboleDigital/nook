@@ -1,67 +1,49 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import type { Restyle, RestyleEdit, RestyleRender } from "@/types";
+import { useState, useEffect, useRef, useCallback } from "react";
+import type { DetectedObject, Restyle, RestyleEdit, RestyleRender } from "@/types";
 import type { ShoppingResult } from "@/lib/shopping-search";
-import { ITEM_SUGGESTIONS, normalizeToCategory } from "./shared";
 
-export type LastProduct = {
-  editId: string;
-  kind: "item" | "add";
-  targetLabel: string;
-  retailer: string;
-  title: string;
-  canSwap: boolean;
+export type SearchState = {
+  status: "idle" | "loading" | "ready" | "error";
+  scored: boolean;
+  results: ShoppingResult[];
+  error?: string;
 };
 
+export type Sourcing = {
+  label: string;           // "" until the AI identifies an unlabeled "add" item
+  mode: "swap" | "add";
+  stagedEditId: string | null;
+  lastStaged?: { title: string; retailer: string };
+} | null;
+
+const EMPTY_SEARCH: SearchState = { status: "idle", scored: false, results: [] };
+const OPTIMISTIC_PREFIX = "optimistic-";
+
 /**
- * All restyle-workspace state, side effects, API handlers and derived values in one
- * place so the page shell, guided wizard, result page and advanced panel share a single
- * source of truth. Logic is a behavior-preserving lift of the original page component.
+ * All restyle-workspace state, side effects, and API handlers in one place so the studio
+ * shell, canvas, and sourcing panel share a single source of truth. Search results are keyed
+ * by item label and hydrated from the server (GET /searches) instead of client localStorage,
+ * so they survive reloads and work across devices. Picking a candidate is optimistic — the
+ * edit appears staged immediately and reconciles (or rolls back) once the server responds.
  */
 export function useRestyleWorkspace(id: string) {
   const [restyle, setRestyle] = useState<Restyle | null>(null);
   const [renders, setRenders] = useState<RestyleRender[]>([]);
-  const [objects, setObjects] = useState<string[] | null>(null);
+  const [objects, setObjects] = useState<DetectedObject[] | null>(null);
+  const [detecting, setDetecting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [titleDraft, setTitleDraft] = useState("");
 
-  // Modify an item
-  const [selectedLabel, setSelectedLabel] = useState<string | null>(null);
-  const [instruction, setInstruction] = useState("");
-  const [reference, setReference] = useState<File | null>(null);
-  const refInputRef = useRef<HTMLInputElement>(null);
-  const [showItemInput, setShowItemInput] = useState(false);
-  const [newItemName, setNewItemName] = useState("");
-
-  // Add to room
-  const [addLabel, setAddLabel] = useState("");
-  const [addPlacement, setAddPlacement] = useState("");
-  const [addRef, setAddRef] = useState<File | null>(null);
-  const addRefInputRef = useRef<HTMLInputElement>(null);
-
-  // Add a product (shop the look)
-  const [productUrl, setProductUrl] = useState("");
-  const [fetchingProduct, setFetchingProduct] = useState(false);
-  const [lastProduct, setLastProduct] = useState<LastProduct | null>(null);
-
-  // Photo-first product flow
-  const [productTab, setProductTab] = useState<"photo" | "link">("photo");
-  const screenshotInputRef = useRef<HTMLInputElement>(null);
-  const [searchFile, setSearchFile] = useState<File | null>(null);
-  const [photoEditId, setPhotoEditId] = useState<string | null>(null);
-  const [searching, setSearching] = useState(false);
-  const [candidates, setCandidates] = useState<ShoppingResult[] | null>(null);
-  const [searchError, setSearchError] = useState<string | null>(null);
-
-  // Room style (advanced)
-  const [showCustomStyle, setShowCustomStyle] = useState(false);
-  const [customStyle, setCustomStyle] = useState("");
-  const [showRefine, setShowRefine] = useState(false);
-  const [refineText, setRefineText] = useState("");
+  // The item currently being sourced (chip/hotspot tapped, or "+ Add" pressed).
+  const [sourcing, setSourcing] = useState<Sourcing>(null);
+  const [searches, setSearches] = useState<Record<string, SearchState>>({});
+  const [pickingKey, setPickingKey] = useState<string | null>(null);
+  const [stagingLink, setStagingLink] = useState(false);
 
   // Before/after slider
   const [compare, setCompare] = useState(50);
@@ -83,29 +65,59 @@ export function useRestyleWorkspace(id: string) {
   // History preview
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
+  // ── Load: project + persisted searches in parallel, then poll detection if pending ──
   useEffect(() => {
     let active = true;
     (async () => {
-      const res = await fetch(`/api/restyles/${id}`);
-      if (!active || !res.ok) return;
-      const d: Restyle = await res.json();
+      const [restyleRes, searchesRes] = await Promise.all([
+        fetch(`/api/restyles/${id}`),
+        fetch(`/api/restyle/${id}/searches`).catch(() => null),
+      ]);
+      if (!active || !restyleRes.ok) return;
+      const d: Restyle = await restyleRes.json();
       setRestyle(d);
       setRenders(d.renders ?? []);
       setTitleDraft(d.title ?? "");
 
+      if (searchesRes?.ok) {
+        const sj = await searchesRes.json();
+        const hydrated: Record<string, SearchState> = {};
+        for (const row of sj.searches ?? []) {
+          hydrated[row.label] = { status: "ready", scored: row.scored, results: row.results ?? [] };
+        }
+        if (active) setSearches(hydrated);
+      }
+
       if (d.detected_objects && d.detected_objects.length > 0) {
-        setObjects(d.detected_objects.map((o) => o.label));
+        if (active) setObjects(d.detected_objects);
         return;
       }
+
+      // Detection was fired in the background at create time — poll briefly for it to land
+      // before falling back to a synchronous detect call.
+      if (active) setDetecting(true);
+      for (let i = 0; i < 10 && active; i++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        const pr = await fetch(`/api/restyles/${id}`);
+        if (!pr.ok) continue;
+        const pd: Restyle = await pr.json();
+        if (pd.detected_objects && pd.detected_objects.length > 0) {
+          if (active) { setObjects(pd.detected_objects); setRestyle((prev) => prev ? { ...prev, detected_objects: pd.detected_objects } : prev); setDetecting(false); }
+          return;
+        }
+      }
+      if (!active) return;
       try {
         const dr = await fetch("/api/restyle/detect", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ imageUrl: d.original_url, restyleId: id }),
         });
         const dj = await dr.json();
-        if (active) setObjects((dj.objects ?? []).map((o: { label: string }) => o.label));
+        if (active) setObjects(dj.objects ?? []);
       } catch {
         if (active) setObjects([]);
+      } finally {
+        if (active) setDetecting(false);
       }
     })();
     return () => { active = false; };
@@ -114,7 +126,7 @@ export function useRestyleWorkspace(id: string) {
   const saveTitle = async (t: string) => {
     const trimmed = t.trim();
     if (trimmed === (restyle?.title ?? "")) return;
-    setRestyle(prev => prev ? { ...prev, title: trimmed || null } : prev);
+    setRestyle((prev) => prev ? { ...prev, title: trimmed || null } : prev);
     try {
       await fetch(`/api/restyles/${id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
@@ -123,153 +135,148 @@ export function useRestyleWorkspace(id: string) {
     } catch { /* best effort */ }
   };
 
-  const updateEdits = (edits: RestyleEdit[]) =>
-    setRestyle(prev => prev ? { ...prev, edits } : prev);
+  const updateEdits = (edits: RestyleEdit[]) => setRestyle((prev) => prev ? { ...prev, edits } : prev);
 
-  const addEdit = async (fields: Record<string, string>, refFile?: File | null) => {
+  // ── Sourcing panel open/close ──
+  const openSourcing = (label: string, mode: "swap" | "add") => setSourcing({ label, mode, stagedEditId: null });
+  const closeSourcing = () => setSourcing(null);
+
+  // Text-only edit with no product — "just go with my description".
+  const addEdit = async (fields: Record<string, string>) => {
     setBusy(true); setError(null);
     try {
       const fd = new FormData();
       Object.entries(fields).forEach(([k, v]) => fd.append(k, v));
-      if (refFile) fd.append("reference", refFile);
       const r = await fetch(`/api/restyle/${id}/edits`, { method: "POST", body: fd });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error ?? "Failed");
       updateEdits(data.edits);
-      setSelectedLabel(null); setInstruction(""); setReference(null);
-      setCustomStyle(""); setShowCustomStyle(false);
-      setRefineText(""); setShowRefine(false);
     } catch (err) { setError(err instanceof Error ? err.message : "Something went wrong"); }
     finally { setBusy(false); }
   };
 
-  const addNewItem = async () => {
-    if (!addLabel.trim()) return;
-    setBusy(true); setError(null);
-    try {
-      const fd = new FormData();
-      fd.append("kind", "add"); fd.append("targetLabel", addLabel.trim());
-      if (addPlacement.trim()) fd.append("instruction", addPlacement.trim());
-      if (addRef) fd.append("reference", addRef);
-      const r = await fetch(`/api/restyle/${id}/edits`, { method: "POST", body: fd });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data.error ?? "Failed");
-      updateEdits(data.edits);
-      setAddLabel(""); setAddPlacement(""); setAddRef(null);
-    } catch (err) { setError(err instanceof Error ? err.message : "Something went wrong"); }
-    finally { setBusy(false); }
-  };
+  const setSearchState = (label: string, patch: Partial<SearchState> | ((prev: SearchState) => SearchState)) =>
+    setSearches((prev) => ({
+      ...prev,
+      [label]: typeof patch === "function" ? patch(prev[label] ?? EMPTY_SEARCH) : { ...(prev[label] ?? EMPTY_SEARCH), ...patch },
+    }));
 
-  const fetchProductLink = async (urlOverride?: string) => {
-    const url = (urlOverride ?? productUrl).trim();
-    if (!url) return;
-    setFetchingProduct(true); setError(null);
-    try {
-      const r = await fetch(`/api/restyle/${id}/product`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url }),
-      });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data.error ?? "Couldn't fetch that product");
-      updateEdits(data.edits);
-      const a = data.added;
-      const added = (data.edits as RestyleEdit[]).find(e => e.id === a.id);
-      setLastProduct({ editId: a.id, kind: a.kind, targetLabel: a.target_label, retailer: a.retailer, title: added?.product_title ?? a.target_label, canSwap: a.kind === "item" });
-      if (!urlOverride) setProductUrl("");
-    } catch (err) { setError(err instanceof Error ? err.message : "Couldn't fetch that product"); }
-    finally { setFetchingProduct(false); }
-  };
+  // Poll the persisted search row until Gemini scoring + Wayfair token resolution land
+  // (the response we already applied is unscored so the user isn't staring at nothing).
+  const pollScored = useCallback(async (label: string) => {
+    for (let i = 0; i < 8; i++) {
+      await new Promise((r) => setTimeout(r, 2500));
+      try {
+        const r = await fetch(`/api/restyle/${id}/searches?label=${encodeURIComponent(label)}`);
+        if (!r.ok) continue;
+        const data = await r.json();
+        const row = data.searches?.[0];
+        if (row?.scored) { setSearchState(label, { status: "ready", scored: true, results: row.results ?? [] }); return; }
+      } catch { /* keep polling */ }
+    }
+  }, [id]);
 
-  // Stage the user's own screenshot as a reference and render it directly — no shopping
-  // required. Keeps the file around so they can optionally search for a buyable match.
-  const uploadPhotoProduct = async (file: File) => {
-    setSearchFile(file); setCandidates(null); setSearchError(null);
-    setFetchingProduct(true); setError(null);
-    const fd = new FormData(); fd.append("image", file);
-    try {
-      const r = await fetch(`/api/restyle/${id}/product`, { method: "POST", body: fd });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data.error ?? "Couldn't add that photo");
-      updateEdits(data.edits);
-      const a = data.added;
-      setPhotoEditId(a.id);
-      setLastProduct({ editId: a.id, kind: a.kind, targetLabel: a.target_label, retailer: a.retailer, title: a.target_label, canSwap: a.kind === "item" });
-    } catch (err) { setError(err instanceof Error ? err.message : "Couldn't add that photo"); }
-    finally { setFetchingProduct(false); }
-  };
-
-  const runVisualSearch = async (file: File) => {
-    setSearching(true); setSearchError(null); setCandidates(null);
-    const fd = new FormData(); fd.append("image", file);
+  // stage=true also creates the reference edit from this image in the same request (the
+  // photo becomes the render reference immediately; picking a real match later replaces it).
+  const runVisualSearch = async (file: File, label: string, opts?: { stage?: boolean }) => {
+    setSearchState(label, { status: "loading", scored: false });
+    const fd = new FormData();
+    fd.append("image", file); fd.append("label", label);
+    if (opts?.stage) fd.append("stage", "1");
     try {
       const r = await fetch(`/api/restyle/${id}/visual-search`, { method: "POST", body: fd });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error ?? "Couldn't search for that item");
-      setCandidates(data.results as ShoppingResult[]);
-    } catch (err) { setSearchError(err instanceof Error ? err.message : "Search failed"); }
-    finally { setSearching(false); }
-  };
-
-  // Keyword search from a typed description (no image to match against).
-  const runTextSearch = async (query: string) => {
-    if (!query.trim()) return;
-    setSearching(true); setSearchError(null); setCandidates(null);
-    const fd = new FormData(); fd.append("query", query.trim());
-    try {
-      const r = await fetch(`/api/restyle/${id}/visual-search`, { method: "POST", body: fd });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data.error ?? "Couldn't search for that item");
-      setCandidates(data.results as ShoppingResult[]);
-    } catch (err) { setSearchError(err instanceof Error ? err.message : "Search failed"); }
-    finally { setSearching(false); }
-  };
-
-  // Pick a real product the search found. It replaces the photo staged from the
-  // screenshot (same item, now with proper details + a Buy link) — no duplicate row.
-  // targetLabel forces which detected object to replace (overrides backend auto-detect).
-  const pickCandidate = async (c: ShoppingResult, targetLabel?: string) => {
-    if (!c.supported || (!c.immersiveToken && !c.productUrl)) return;
-    const replacingId = photoEditId;
-    setCandidates(null); setFetchingProduct(true); setError(null);
-    try {
-      const body = c.productUrl ? { url: c.productUrl } : { token: c.immersiveToken };
-      if (targetLabel) Object.assign(body, { targetLabel });
-      const r = await fetch(`/api/restyle/${id}/product`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data.error ?? "Couldn't fetch that product");
-      let editList = data.edits as RestyleEdit[];
-      const a = data.added;
-      if (replacingId && replacingId !== a.id) {
-        try {
-          const dr = await fetch(`/api/restyle/${id}/edits?editId=${replacingId}`, { method: "DELETE" });
-          const dd = await dr.json();
-          if (dr.ok) editList = dd.edits as RestyleEdit[];
-        } catch { /* best effort */ }
+      setSearchState(label, { status: "ready", scored: !!data.scored, results: data.results ?? [] });
+      if (data.edits) {
+        updateEdits(data.edits);
+        setSourcing((s) => s && s.label === label
+          ? { ...s, stagedEditId: data.added?.id ?? s.stagedEditId, lastStaged: { title: data.added?.target_label ?? label, retailer: "" } }
+          : s);
       }
-      setPhotoEditId(null);
-      updateEdits(editList);
-      const added = editList.find(e => e.id === a.id);
-      setLastProduct({ editId: a.id, kind: a.kind, targetLabel: a.target_label, retailer: a.retailer, title: added?.product_title ?? a.target_label, canSwap: a.kind === "item" });
-    } catch (err) { setError(err instanceof Error ? err.message : "Couldn't fetch that product"); }
-    finally { setFetchingProduct(false); }
+      if (!data.scored) pollScored(label);
+    } catch (err) {
+      setSearchState(label, { status: "error", error: err instanceof Error ? err.message : "Search failed" });
+    }
   };
 
-  const setProductMode = async (newKind: "item" | "add") => {
-    if (!lastProduct || lastProduct.kind === newKind) return;
-    updateEdits((restyle?.edits ?? []).map(e => e.id === lastProduct.editId ? { ...e, kind: newKind } : e));
-    setLastProduct({ ...lastProduct, kind: newKind });
+  const runTextSearch = async (query: string, label: string) => {
+    if (!query.trim()) return;
+    setSearchState(label, { status: "loading", scored: false });
+    const fd = new FormData();
+    fd.append("query", query.trim()); fd.append("label", label);
     try {
-      await fetch(`/api/restyle/${id}/edits`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ editId: lastProduct.editId, kind: newKind }),
-      });
-    } catch { /* best effort — optimistic already set */ }
+      const r = await fetch(`/api/restyle/${id}/visual-search`, { method: "POST", body: fd });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error ?? "Couldn't search for that item");
+      setSearchState(label, { status: "ready", scored: !!data.scored, results: data.results ?? [] });
+      if (!data.scored) pollScored(label);
+    } catch (err) {
+      setSearchState(label, { status: "error", error: err instanceof Error ? err.message : "Search failed" });
+    }
   };
 
-  const clearLastProduct = () => { setLastProduct(null); setSearchFile(null); setPhotoEditId(null); };
+  // Stage a pasted retailer link directly — independent of search, for when the agent
+  // already has the exact product URL in hand.
+  const stageProductLink = async (url: string, label: string) => {
+    if (!url.trim()) return;
+    const replaceEditId = sourcing?.label === label ? sourcing.stagedEditId ?? undefined : undefined;
+    setStagingLink(true); setError(null);
+    try {
+      const body: Record<string, unknown> = { url: url.trim(), targetLabel: label };
+      if (replaceEditId) body.replaceEditId = replaceEditId;
+      const r = await fetch(`/api/restyle/${id}/product`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error ?? "Couldn't fetch that product");
+      updateEdits(data.edits);
+      setSourcing((s) => s && s.label === label
+        ? { ...s, stagedEditId: data.added.id, lastStaged: { title: data.added.target_label, retailer: data.added.retailer } }
+        : s);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't fetch that product");
+    } finally {
+      setStagingLink(false);
+    }
+  };
+
+  // Optimistic: the picked candidate appears staged immediately (thumbnail/title/price from
+  // the search result itself — no need to wait on the network for what the user already sees
+  // on screen); reconciled with the server's real edit list on success, rolled back on failure.
+  const pickCandidate = async (c: ShoppingResult, label: string, key: string) => {
+    if (!c.supported || (!c.immersiveToken && !c.productUrl)) return;
+    const replaceEditId = sourcing?.label === label ? sourcing.stagedEditId ?? undefined : undefined;
+    const optimisticId = `${OPTIMISTIC_PREFIX}${Date.now()}`;
+    const prevEdits = restyle?.edits ?? [];
+    const optimisticEdit: RestyleEdit = {
+      id: optimisticId, restyle_id: id, kind: "item", target_label: label,
+      instruction: null, reference_url: c.thumbnail || null, reference_desc: null,
+      active: true, position: prevEdits.length, created_at: new Date().toISOString(),
+      buy_url: c.productUrl, product_title: c.title, product_price: c.price,
+    };
+    updateEdits([...prevEdits.filter((e) => e.id !== replaceEditId), optimisticEdit]);
+    setPickingKey(key); setError(null);
+    try {
+      const body: Record<string, unknown> = c.productUrl ? { url: c.productUrl } : { token: c.immersiveToken };
+      body.targetLabel = label;
+      if (replaceEditId) body.replaceEditId = replaceEditId;
+      const r = await fetch(`/api/restyle/${id}/product`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error ?? "Couldn't fetch that product");
+      updateEdits(data.edits);
+      setSourcing((s) => s && s.label === label
+        ? { ...s, stagedEditId: data.added.id, lastStaged: { title: data.added.target_label, retailer: data.added.retailer } }
+        : s);
+    } catch (err) {
+      updateEdits(prevEdits); // roll back the optimistic edit
+      setError(err instanceof Error ? err.message : "Couldn't fetch that product");
+    } finally {
+      setPickingKey(null);
+    }
+  };
 
   const generate = async () => {
     setGenerating(true); setError(null); setPreviewUrl(null);
@@ -277,37 +284,30 @@ export function useRestyleWorkspace(id: string) {
       const r = await fetch(`/api/restyle/${id}/generate`, { method: "POST" });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error ?? "Generate failed");
-      setRestyle(prev => prev ? { ...prev, current_url: data.url, edits: data.edits } : prev);
+      setRestyle((prev) => prev ? { ...prev, current_url: data.url, edits: data.edits } : prev);
       if (data.renders) setRenders(data.renders);
       return true;
     } catch (err) { setError(err instanceof Error ? err.message : "Generate failed"); return false; }
     finally { setGenerating(false); }
   };
 
+  // Deactivate everything, ensure a "remove" edit, generate — a bare room.
+  const emptyRoom = async () => {
+    const active = restyle?.edits?.filter((e) => e.active) ?? [];
+    for (const e of active) if (e.kind !== "remove") await toggle(e.id, false);
+    const hasRemoveAll = restyle?.edits?.some((e) => e.kind === "remove" && e.active);
+    if (!hasRemoveAll) await addEdit({ kind: "remove" });
+    return generate();
+  };
+
   const toggle = async (editId: string, active: boolean) => {
-    updateEdits((restyle?.edits ?? []).map(e => e.id === editId ? { ...e, active } : e));
+    updateEdits((restyle?.edits ?? []).map((e) => (e.id === editId ? { ...e, active } : e)));
     try {
       await fetch(`/api/restyle/${id}/edits`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ editId, active }),
       });
     } catch { /* best effort — optimistic is already set */ }
-  };
-
-  const selectOption = async (targetLabel: string, editId: string | null) => {
-    const updated = (restyle?.edits ?? []).map(e =>
-      e.kind === "item" && e.target_label === targetLabel ? { ...e, active: e.id === editId } : e
-    );
-    updateEdits(updated);
-    const states = Object.fromEntries(
-      updated.filter(e => e.kind === "item" && e.target_label === targetLabel).map(e => [e.id, e.active])
-    );
-    try {
-      await fetch(`/api/restyle/${id}/edits`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ states }),
-      });
-    } catch { /* best effort */ }
   };
 
   const remove = async (editId: string) => {
@@ -328,9 +328,7 @@ export function useRestyleWorkspace(id: string) {
       });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error ?? "Failed");
-      setRestyle(prev => prev ? { ...prev, custom_items: data.custom_items } : prev);
-      setSelectedLabel(label); setInstruction(""); setReference(null);
-      setNewItemName(""); setShowItemInput(false);
+      setRestyle((prev) => prev ? { ...prev, custom_items: data.custom_items } : prev);
     } catch (err) { setError(err instanceof Error ? err.message : "Something went wrong"); }
   };
 
@@ -339,10 +337,7 @@ export function useRestyleWorkspace(id: string) {
     try {
       const r = await fetch(`/api/restyle/${id}/items?label=${encodeURIComponent(label)}`, { method: "DELETE" });
       const data = await r.json();
-      if (r.ok) {
-        setRestyle(prev => prev ? { ...prev, custom_items: data.custom_items, edits: data.edits } : prev);
-        if (selectedLabel === label) setSelectedLabel(null);
-      }
+      if (r.ok) setRestyle((prev) => prev ? { ...prev, custom_items: data.custom_items, edits: data.edits } : prev);
     } catch { /* best effort */ }
     finally { setBusy(false); }
   };
@@ -362,57 +357,37 @@ export function useRestyleWorkspace(id: string) {
   // ── Derived ──
   const loading = !restyle || objects === null;
   const edits = restyle?.edits ?? [];
-  const activeEdits = edits.filter(e => e.active);
+  const activeEdits = edits.filter((e) => e.active);
+  const stagedItems = activeEdits.filter((e) => e.kind === "item" || e.kind === "add");
   const displayUrl = previewUrl ?? restyle?.current_url ?? "";
   const showSlider = !previewUrl && !!restyle && displayUrl !== restyle.original_url;
-  const canGenerate = activeEdits.length > 0;
+  const hasOptimistic = activeEdits.some((e) => e.id.startsWith(OPTIMISTIC_PREFIX));
+  const canGenerate = activeEdits.length > 0 && !hasOptimistic;
   const atMaxCustom = (restyle?.custom_items?.length ?? 0) >= 5;
-  const suggestions = selectedLabel ? (ITEM_SUGGESTIONS[normalizeToCategory(selectedLabel)] ?? []) : [];
 
-  const itemGroups = new Map<string, RestyleEdit[]>();
-  const standalone: RestyleEdit[] = [];
-  for (const e of edits) {
-    if (e.kind === "item" && e.target_label) {
-      const arr = itemGroups.get(e.target_label) ?? []; arr.push(e);
-      itemGroups.set(e.target_label, arr);
-    } else standalone.push(e);
-  }
   // "Shop this look" reflects only the product(s) in the image currently on screen.
-  const displayedRender = renders.find(r => r.image_url === displayUrl);
+  const displayedRender = renders.find((r) => r.image_url === displayUrl);
   const shownProductIds: Set<string> | null =
     restyle && displayUrl === restyle.original_url ? new Set()
     : displayedRender ? new Set(displayedRender.signature.split(","))
     : null;
-  const productEdits = edits.filter(e =>
-    e.buy_url && (shownProductIds ? shownProductIds.has(e.id) : e.active)
-  );
+  const productEdits = edits.filter((e) => e.buy_url && (shownProductIds ? shownProductIds.has(e.id) : e.active));
 
   return {
-    id, restyle, renders, objects: objects ?? [], loading,
+    id, restyle, renders, objects: objects ?? [], customItems: restyle?.custom_items ?? [], detecting, loading,
     busy, generating, error, setError,
     titleDraft, setTitleDraft, saveTitle,
-    // modify
-    selectedLabel, setSelectedLabel, instruction, setInstruction, reference, setReference,
-    refInputRef, showItemInput, setShowItemInput, newItemName, setNewItemName,
-    // add
-    addLabel, setAddLabel, addPlacement, setAddPlacement, addRef, setAddRef, addRefInputRef,
-    // product
-    productUrl, setProductUrl, fetchingProduct, lastProduct, setLastProduct, clearLastProduct,
-    productTab, setProductTab, screenshotInputRef, searchFile, photoEditId,
-    searching, candidates, setCandidates, searchError, setSearchError,
-    // style (advanced)
-    showCustomStyle, setShowCustomStyle, customStyle, setCustomStyle,
-    showRefine, setShowRefine, refineText, setRefineText,
+    sourcing, openSourcing, closeSourcing,
+    searches, runVisualSearch, runTextSearch, pickCandidate, pickingKey,
+    stageProductLink, stagingLink,
     // slider
     compare, imgWrapRef, sliderHandlers,
     // preview
     previewUrl, setPreviewUrl,
     // handlers
-    addEdit, addNewItem, fetchProductLink, uploadPhotoProduct, runVisualSearch, runTextSearch, pickCandidate,
-    setProductMode, generate, toggle, selectOption, remove, addCustomItem, removeCustomItem, downloadImage,
+    addEdit, toggle, remove, addCustomItem, removeCustomItem, generate, emptyRoom, downloadImage,
     // derived
-    edits, activeEdits, displayUrl, showSlider, canGenerate, atMaxCustom, suggestions,
-    itemGroups, standalone, productEdits,
+    edits, activeEdits, stagedItems, displayUrl, showSlider, canGenerate, atMaxCustom, productEdits,
   };
 }
 
