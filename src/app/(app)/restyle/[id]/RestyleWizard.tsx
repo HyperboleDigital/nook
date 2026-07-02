@@ -271,9 +271,18 @@ export default function RestyleWizard({
           )}
 
           {!pendingFile && ws.searchFile && !ws.fetchingProduct && !ws.searching && (
-            <p className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
-              <Check className="h-3.5 w-3.5 shrink-0" /> Your photo is placed. {displayCandidates?.length ? "Pick a match below to buy it, or keep your photo." : "Couldn't find a buyable match — we'll use your photo."}
-            </p>
+            ws.lastProduct?.retailer ? (
+              // A real product replaced the uploaded photo as the reference — make that
+              // switch unmissable, since the room render now uses the product's own photo,
+              // not the screenshot you uploaded.
+              <p className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
+                <Check className="h-3.5 w-3.5 shrink-0" /> Switched to <strong>{ws.lastProduct.title}</strong> from {ws.lastProduct.retailer} — your uploaded photo is no longer used.
+              </p>
+            ) : (
+              <p className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
+                <Check className="h-3.5 w-3.5 shrink-0" /> Your photo is placed. {displayCandidates?.length ? "Pick a match below to buy it, or keep your photo." : "Couldn't find a buyable match — we'll use your photo."}
+              </p>
+            )
           )}
         </div>
       )}

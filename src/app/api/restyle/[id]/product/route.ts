@@ -211,10 +211,18 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   }).select().single();
   if (error || !inserted) return NextResponse.json({ error: error?.message ?? "DB error" }, { status: 500 });
 
-  // Single active item per detected label.
-  if (kind === "item") {
+  // Single active edit per target_label — a label is one conceptual slot in the room
+  // regardless of kind. This used to only cover kind "item" (a swap of a detected object),
+  // so staging a photo as an "add" (a custom item with no matching detected object, e.g.
+  // "canvas print") and later picking a real product for the SAME label left both edits
+  // active: the old photo reference never got deactivated. That's what caused the stale
+  // "still shows my old screenshot" thumbnail and the picked product going missing from
+  // "Shop this look" — the render/signature ended up carrying two conflicting edits for
+  // one slot. kind can also flip item⇄add via the PATCH toggle, so match on label across
+  // both kinds, not just the kind of the edit we just inserted.
+  if (targetLabel) {
     await supabaseAdmin.from("restyle_edits").update({ active: false })
-      .eq("restyle_id", id).eq("kind", "item").eq("target_label", targetLabel).neq("id", inserted.id);
+      .eq("restyle_id", id).eq("target_label", targetLabel).in("kind", ["item", "add"]).neq("id", inserted.id);
   }
 
   return NextResponse.json({
