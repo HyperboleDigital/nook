@@ -21,11 +21,12 @@ export type Sourcing = {
 const EMPTY_SEARCH: SearchState = { status: "idle", scored: false, results: [] };
 const OPTIMISTIC_PREFIX = "optimistic-";
 
-// A wall isn't a furniture/decor item there's a product to swap it for — filter it out of
-// hotspots and the chip row entirely. Careful not to drop legitimate wall-mounted decor like
-// "wall art" or "wall mirror", which the detector also reports and IS swappable.
-const BARE_WALL = /^(the\s+)?(left|right|back|front|far)?\s*walls?$/i;
-const swappableObjects = (objs: DetectedObject[]) => objs.filter((o) => !BARE_WALL.test(o.label.trim()));
+// Walls and a bare ceiling aren't furniture/decor items there's a product to swap them for —
+// filter them out of hotspots and the chip row entirely. Careful not to drop legitimate
+// swappable items that share the word, like "wall art"/"wall mirror" or "ceiling fan"/
+// "ceiling light".
+const NOT_SWAPPABLE = /^(the\s+)?(left|right|back|front|far)?\s*(walls?|ceiling)$/i;
+const swappableObjects = (objs: DetectedObject[]) => objs.filter((o) => !NOT_SWAPPABLE.test(o.label.trim()));
 
 /**
  * All restyle-workspace state, side effects, and API handlers in one place so the studio
