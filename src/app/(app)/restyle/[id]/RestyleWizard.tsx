@@ -355,9 +355,12 @@ export default function RestyleWizard({
                 const isOpen = expandedId === e.id;
                 const label = e.target_label ?? "";
                 const savedCandidates = candidatesByLabel[label.toLowerCase()] ?? [];
-                // Separate current product from other options
+                // Separate current product from other options. Wayfair listings sourced via
+                // the keyword-fallback (Google Shopping) engine only carry an immersiveToken —
+                // not a direct productUrl — until resolved at pick-time, so requiring
+                // productUrl here would silently drop every supported Wayfair option.
                 const otherCandidates = savedCandidates.filter(c =>
-                  c.productUrl && c.productUrl !== e.buy_url
+                  (c.productUrl || c.immersiveToken) && c.productUrl !== e.buy_url
                 );
                 const hasProduct = !!(e.buy_url || e.product_title);
                 const hasOptions = otherCandidates.length > 0;
