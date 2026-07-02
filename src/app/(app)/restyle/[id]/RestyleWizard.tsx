@@ -49,6 +49,15 @@ export default function RestyleWizard({
   // Found matches cached per item label so revisiting doesn't re-search (saves credits).
   const [candidatesByLabel, setCandidatesByLabel] = useState<Record<string, ShoppingResult[]>>({});
 
+  // Tracks which specific candidate is mid-pick — some retailers (Wayfair via Unwrangle) can
+  // take up to ~90s to fetch full listing detail, and with no per-item feedback that looked
+  // like the app had frozen. Key is arbitrary as long as it's unique per rendered candidate.
+  const [pickingKey, setPickingKey] = useState<string | null>(null);
+  const pickWithFeedback = async (c: ShoppingResult, targetLabel: string | undefined, key: string) => {
+    setPickingKey(key);
+    try { await ws.pickCandidate(c, targetLabel); } finally { setPickingKey(null); }
+  };
+
   const id = ws.id;
 
   // ── per-room cache: restore on mount, persist on change ── (hooks must stay unconditional)
@@ -216,7 +225,8 @@ export default function RestyleWizard({
       )}
       {ws.searchError && <p className="text-xs text-red-600">{ws.searchError}</p>}
       {!ws.searching && displayCandidates && displayCandidates.length > 0 && (
-        <CandidateList candidates={displayCandidates} ws={ws} targetLabel={current.label} />
+        <CandidateList candidates={displayCandidates} ws={ws} targetLabel={current.label}
+          pickingKey={pickingKey} onPick={pickWithFeedback} />
       )}
 
       {srcMode === "link" && (
@@ -436,22 +446,31 @@ export default function RestyleWizard({
                             <p className="text-[10px] font-semibold uppercase tracking-widest text-[var(--muted-foreground)]">
                               Other options found ({otherCandidates.length})
                             </p>
-                            {otherCandidates.map((c, i) => (
-                              <ProductCard key={i}
-                                image={c.thumbnail}
-                                title={c.title}
-                                retailer={c.retailer}
-                                price={c.price}
-                                viewUrl={c.productUrl ?? null}
-                                badge={matchWord(c.score, c.exact)}>
-                                <Button size="sm" variant={c.supported ? "outline" : "ghost"}
-                                  disabled={!c.supported || ws.fetchingProduct}
-                                  onClick={() => { setExpandedId(null); ws.pickCandidate(c, label); }}
-                                  className="mt-1">
-                                  {c.supported ? "Use this instead" : "Not shoppable"}
-                                </Button>
-                              </ProductCard>
-                            ))}
+                            {otherCandidates.map((c, i) => {
+                              const key = `${e.id}:${i}`;
+                              const picking = pickingKey === key;
+                              return (
+                                <ProductCard key={i}
+                                  image={c.thumbnail}
+                                  title={c.title}
+                                  retailer={c.retailer}
+                                  price={c.price}
+                                  viewUrl={c.productUrl ?? null}
+                                  badge={matchWord(c.score, c.exact)}>
+                                  <Button size="sm" variant={c.supported ? "outline" : "ghost"}
+                                    disabled={!c.supported || ws.fetchingProduct}
+                                    onClick={() => pickWithFeedback(c, label, key)}
+                                    className="mt-1">
+                                    {picking
+                                      ? <><span className="h-3 w-3 rounded-full border-2 border-current border-t-transparent animate-spin" />Adding…</>
+                                      : c.supported ? "Use this instead" : "Not shoppable"}
+                                  </Button>
+                                  {picking && (
+                                    <p className="text-[11px] text-[var(--muted-foreground)]">Fetching live price and details — can take up to a minute for some retailers.</p>
+                                  )}
+                                </ProductCard>
+                              );
+                            })}
                           </div>
                         )}
 
@@ -626,38 +645,50 @@ export default function RestyleWizard({
 }
 
 /** Shoppable matches for the item being sourced — match word, price, View on, alternates. */
-function CandidateList({ candidates, ws, targetLabel }: { candidates: ShoppingResult[] | null; ws: RestyleWorkspace; targetLabel?: string }) {
+function CandidateList({ candidates, ws, targetLabel, pickingKey, onPick }: {
+  candidates: ShoppingResult[] | null; ws: RestyleWorkspace; targetLabel?: string;
+  pickingKey: string | null; onPick: (c: ShoppingResult, targetLabel: string | undefined, key: string) => void;
+}) {
   if (!candidates || candidates.length === 0) return null;
   return (
     <div className="space-y-2 pt-0.5">
       <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
         {targetLabel ? `Options for ${targetLabel} — pick one to use it` : "Options online — pick one, or keep yours"}
       </p>
-      {candidates.map((c, i) => (
-        <ProductCard key={i}
-          image={c.thumbnail}
-          title={c.title}
-          retailer={c.retailer}
-          price={c.price}
-          viewUrl={c.productUrl ?? c.alternates?.[0]?.url ?? null}
-          badge={matchWord(c.score, c.exact)}>
-          {c.alternates && c.alternates.length > 0 && (
-            <p className="text-[11px] text-[var(--muted-foreground)] leading-tight">
-              also at{c.alternates.map((a, j) => (
-                <span key={j}>{j > 0 ? " · " : " "}
-                  <a href={a.url} target="_blank" rel="noopener noreferrer" className="underline hover:text-slate-700">
-                    {a.retailer}{a.price ? ` ${a.price}` : ""}
-                  </a>
-                </span>
-              ))}
-            </p>
-          )}
-          <Button size="sm" variant={c.supported ? "primary" : "outline"}
-            disabled={!c.supported || ws.fetchingProduct} onClick={() => ws.pickCandidate(c, targetLabel)} className="mt-1">
-            {c.supported ? "Use this in the room" : "Not shoppable yet"}
-          </Button>
-        </ProductCard>
-      ))}
+      {candidates.map((c, i) => {
+        const key = `live:${targetLabel ?? ""}:${i}`;
+        const picking = pickingKey === key;
+        return (
+          <ProductCard key={i}
+            image={c.thumbnail}
+            title={c.title}
+            retailer={c.retailer}
+            price={c.price}
+            viewUrl={c.productUrl ?? c.alternates?.[0]?.url ?? null}
+            badge={matchWord(c.score, c.exact)}>
+            {c.alternates && c.alternates.length > 0 && (
+              <p className="text-[11px] text-[var(--muted-foreground)] leading-tight">
+                also at{c.alternates.map((a, j) => (
+                  <span key={j}>{j > 0 ? " · " : " "}
+                    <a href={a.url} target="_blank" rel="noopener noreferrer" className="underline hover:text-slate-700">
+                      {a.retailer}{a.price ? ` ${a.price}` : ""}
+                    </a>
+                  </span>
+                ))}
+              </p>
+            )}
+            <Button size="sm" variant={c.supported ? "primary" : "outline"}
+              disabled={!c.supported || ws.fetchingProduct} onClick={() => onPick(c, targetLabel, key)} className="mt-1">
+              {picking
+                ? <><span className="h-3 w-3 rounded-full border-2 border-current border-t-transparent animate-spin" />Adding…</>
+                : c.supported ? "Use this in the room" : "Not shoppable yet"}
+            </Button>
+            {picking && (
+              <p className="text-[11px] text-[var(--muted-foreground)]">Fetching live price and details — can take up to a minute for some retailers.</p>
+            )}
+          </ProductCard>
+        );
+      })}
     </div>
   );
 }

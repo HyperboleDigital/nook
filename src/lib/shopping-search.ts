@@ -269,7 +269,7 @@ export async function searchByImage(imageUrl: string): Promise<ShoppingResult[]>
 }
 
 /** Resolve a Google Shopping immersive page token to a direct merchant URL via SerpApi. */
-export async function resolveImmersiveToken(token: string): Promise<string | null> {
+export async function resolveImmersiveToken(token: string, timeoutMs = 30_000): Promise<string | null> {
   const apiKey = process.env.SERPAPI_API_KEY;
   if (!apiKey) return null;
 
@@ -277,7 +277,7 @@ export async function resolveImmersiveToken(token: string): Promise<string | nul
     engine: "google_immersive_product", page_token: token, api_key: apiKey, gl: "us", hl: "en",
   });
   try {
-    const res = await fetch(`https://serpapi.com/search.json?${qs}`, { signal: AbortSignal.timeout(30_000) });
+    const res = await fetch(`https://serpapi.com/search.json?${qs}`, { signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok) return null;
     const data = await res.json() as { product_results?: { stores?: { name?: string; link?: string }[] } };
     const stores = data.product_results?.stores ?? [];
@@ -287,4 +287,21 @@ export async function resolveImmersiveToken(token: string): Promise<string | nul
   } catch {
     return null;
   }
+}
+
+/**
+ * Fill in a direct productUrl for supported-but-token-only results (Wayfair via Google
+ * Shopping) so the UI can show a real "View on Wayfair" link and price at search time,
+ * instead of only after the user commits to a pick. Best-effort and time-boxed — a
+ * candidate that doesn't resolve in time just falls back to lazy resolution on pick,
+ * same as before.
+ */
+export async function resolveTokenUrls(results: ShoppingResult[]): Promise<ShoppingResult[]> {
+  const targets = results.filter((r) => r.supported && !r.productUrl && r.immersiveToken);
+  if (!targets.length) return results;
+  await Promise.all(targets.map(async (r) => {
+    const url = await resolveImmersiveToken(r.immersiveToken!, 10_000);
+    if (url) r.productUrl = url;
+  }));
+  return results;
 }

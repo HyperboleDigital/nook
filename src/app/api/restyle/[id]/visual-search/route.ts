@@ -4,7 +4,7 @@ import { del } from "@vercel/blob";
 import { supabaseAdmin } from "@/lib/supabase";
 import { uploadImage } from "@/lib/restyle-render";
 import { describeScreenshotForSearch, locateProductPhoto, scoreImageMatches } from "@/lib/gemini";
-import { searchByImage, searchShopping, ShoppingSearchError, type ShoppingResult } from "@/lib/shopping-search";
+import { resolveTokenUrls, searchByImage, searchShopping, ShoppingSearchError, type ShoppingResult } from "@/lib/shopping-search";
 import { fileToBuffer } from "@/lib/file-buf";
 import { cropToBox } from "@/lib/image-crop";
 
@@ -36,7 +36,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   // Text-only path (from "Describe it"): keyword search, no Lens/scoring (no target image).
   if (!file && query) {
     try {
-      const results = await searchShopping(query);
+      const all = await searchShopping(query);
+      // Never surface "not shoppable" results — a link/price is the whole point.
+      const supported = all.filter((r) => r.supported);
+      if (supported.length === 0) {
+        return NextResponse.json({ error: "No shoppable products found. Try a different search." }, { status: 404 });
+      }
+      const results = await resolveTokenUrls(supported);
       return NextResponse.json({ results });
     } catch (err) {
       if (err instanceof ShoppingSearchError) return NextResponse.json({ error: err.message }, { status: err.status });
@@ -99,6 +105,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     }
   }
 
+  // Never surface "not shoppable" results — a link/price is the whole point, and a greyed-out
+  // card the user can't act on is just noise.
+  results = results.filter((r) => r.supported);
   if (results.length === 0) {
     return NextResponse.json({ error: "No matching products found. Try a clearer screenshot." }, { status: 404 });
   }
@@ -125,6 +134,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       results.sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
     }
   } catch (err) { console.error("[restyle/visual-search] scoring failed:", err); /* best-effort */ }
+
+  // Wayfair candidates from the Google Shopping engine carry only an immersiveToken (no
+  // direct URL) until resolved — do that now so "View on Wayfair" shows immediately instead
+  // of only appearing after the user commits to a pick.
+  results = await resolveTokenUrls(results);
 
   return NextResponse.json({ results });
 }
