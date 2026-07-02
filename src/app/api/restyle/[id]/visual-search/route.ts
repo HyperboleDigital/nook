@@ -3,11 +3,11 @@ import { NextResponse, after } from "next/server";
 import { del } from "@vercel/blob";
 import { supabaseAdmin } from "@/lib/supabase";
 import { uploadImage } from "@/lib/restyle-render";
-import { describeProductImages, describeScreenshotForSearch, locateProductPhoto, scoreImageMatches } from "@/lib/gemini";
+import { describeScreenshotForSearch, locateProductPhoto, scoreImageMatches } from "@/lib/gemini";
 import { resolveTokenUrls, searchByImage, searchShopping, ShoppingSearchError, type ShoppingResult } from "@/lib/shopping-search";
 import { fileToBuffer } from "@/lib/file-buf";
 import { cropToBox } from "@/lib/image-crop";
-import { loadOwnedRestyle, stageEdit, type StagedProduct } from "@/lib/restyle-edits";
+import { loadOwnedRestyle } from "@/lib/restyle-edits";
 
 // Google Lens visual match + Gemini identify (parallel) + four parallel SerpApi searches.
 // Scoring + Wayfair token resolution happen in after() once the response is already sent.
@@ -26,15 +26,14 @@ async function upsertSearch(restyleId: string, label: string, fields: { query?: 
 // (Google Lens + keyword search) across supported retailers. Responds fast with unscored
 // results, then refines scoring + resolves Wayfair links in the background (after()) and
 // persists the final set so a later GET /api/restyle/[id]/searches?label= — or a reload —
-// sees the same results without re-running the whole pipeline.
-//   - `image` (file) + `stage=1`: uploading fresh inspo — also creates the reference edit in
-//     this same request, sharing the crop + identification already computed here instead of
-//     a second round-trip. (In practice this path isn't hit anymore — uploading a photo only
-//     stages it now, see product/route.ts's fromUpload; search is deferred. Kept working in
-//     case a caller wants stage+search combined again.)
+// sees the same results without re-running the whole pipeline. Never stages a reference
+// edit — that happens in product/route.ts (a photo upload stages, this only ever searches).
+//   - `image` (file): a fresh screenshot/photo (e.g. the "Describe it" fallback path never
+//     reaches here with a file — only `imageUrl` or `query` do in the current UI, but a raw
+//     file upload is still supported for future callers).
 //   - `imageUrl`: search using a photo that's already staged (already cropped, already
 //     hosted) — used after generate to look up buyable options for inspo-only items that
-//     ended up in the render. Never stages (there's nothing to stage, it already is).
+//     ended up in the render.
 //   - `query` only: text search (from "Describe it"), no Lens/scoring.
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { userId } = await auth();
@@ -48,8 +47,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const imageUrl = (form.get("imageUrl") as string | null)?.trim() || undefined;
   const query = (form.get("query") as string | null)?.trim();
   const label = ((form.get("label") as string | null) ?? "").trim().toLowerCase();
-  const stage = form.get("stage") === "1";
-  const forcedTarget = (form.get("targetLabel") as string | null) ?? undefined;
 
   // Text-only path (from "Describe it"): keyword search, no Lens/scoring (no target image).
   if (!file && !imageUrl && query) {
@@ -129,7 +126,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   // Only delete a blob we uploaded ourselves in this request — an imageUrl is someone else's
   // permanent asset (the staged edit's own reference photo), never ours to clean up.
-  if (!stage && !imageUrl && shotUrl) { try { await del(shotUrl); } catch { /* leave it; non-fatal */ } }
+  if (!imageUrl && shotUrl) { try { await del(shotUrl); } catch { /* leave it; non-fatal */ } }
 
   const seen = new Set(exact.map((r) => titleKey(r.title)));
   let results = [...exact, ...keyword.filter((r) => !seen.has(titleKey(r.title)))];
@@ -141,27 +138,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   }
 
   await upsertSearch(id, label, { query: searchQuery, results, scored: false });
-
-  // Stage the reference edit now, reusing the crop/identify/upload already done above instead
-  // of the client making a second round-trip (POST /product) that redoes both Gemini calls.
-  let staged: { edits: Awaited<ReturnType<typeof stageEdit>>["edits"]; added: Awaited<ReturnType<typeof stageEdit>>["added"] } | null = null;
-  if (stage && shotUrl && identified) {
-    try {
-      let visionDesc = "";
-      try {
-        visionDesc = await describeProductImages({ images: [{ base64: lensBase64, mimeType }], label: identified.itemType });
-      } catch { /* best-effort */ }
-      const staging: StagedProduct = {
-        referenceUrl: shotUrl,
-        referenceDesc: (visionDesc || identified.description).slice(0, 900),
-        itemType: identified.itemType,
-        buyUrl: null, productTitle: null, productPrice: null, retailer: "",
-      };
-      staged = await stageEdit(id, restyle, staging, forcedTarget || label || undefined);
-    } catch (err) {
-      console.error("[visual-search] stage failed:", err);
-    }
-  }
 
   // Scoring (Gemini) + Wayfair token resolution happen after the response is sent — the
   // client already has unscored results to show; this just re-ranks/enriches them in place.
@@ -191,5 +167,5 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     await upsertSearch(id, label, { query: searchQuery, results: final, scored: true });
   });
 
-  return NextResponse.json({ results, scored: false, ...(staged ? { edits: staged.edits, added: staged.added } : {}) });
+  return NextResponse.json({ results, scored: false });
 }

@@ -176,32 +176,6 @@ export function useRestyleWorkspace(id: string) {
     }
   }, [id]);
 
-  // stage=true also creates the reference edit from this image in the same request. Not
-  // used by the photo tab anymore (see stagePhoto below — uploading is just inspo now,
-  // search is deferred to after generate) but kept working for any caller that wants the
-  // combined stage+search behavior back.
-  const runVisualSearch = async (file: File, label: string, opts?: { stage?: boolean }) => {
-    setSearchState(label, { status: "loading", scored: false });
-    const fd = new FormData();
-    fd.append("image", file); fd.append("label", label);
-    if (opts?.stage) fd.append("stage", "1");
-    try {
-      const r = await fetch(`/api/restyle/${id}/visual-search`, { method: "POST", body: fd });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data.error ?? "Couldn't search for that item");
-      setSearchState(label, { status: "ready", scored: !!data.scored, results: data.results ?? [] });
-      if (data.edits) {
-        updateEdits(data.edits);
-        setSourcing((s) => s && s.label === label
-          ? { ...s, stagedEditId: data.added?.id ?? s.stagedEditId, lastStaged: { title: data.added?.target_label ?? label, retailer: "" } }
-          : s);
-      }
-      if (!data.scored) pollScored(label);
-    } catch (err) {
-      setSearchState(label, { status: "error", error: err instanceof Error ? err.message : "Search failed" });
-    }
-  };
-
   // Search using a photo that's ALREADY staged (its reference_url) rather than a fresh
   // upload — used after generate to look up buyable options for inspo-only items that made
   // it into the render, without re-cropping/re-hosting an image we already have.
@@ -440,7 +414,7 @@ export function useRestyleWorkspace(id: string) {
     busy, generating, error, setError,
     titleDraft, setTitleDraft, saveTitle,
     sourcing, openSourcing, closeSourcing,
-    searches, runVisualSearch, runVisualSearchByUrl, runTextSearch, pickCandidate, pickingKey,
+    searches, runVisualSearchByUrl, runTextSearch, pickCandidate, pickingKey,
     stagePhoto, stageProductLink, stagingLink,
     // slider
     compare, imgWrapRef, sliderHandlers,
