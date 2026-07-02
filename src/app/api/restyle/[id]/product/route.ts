@@ -88,24 +88,26 @@ async function fromListing(userId: string, info: ProductInfo): Promise<StagedPro
 
 /** Build a reference edit from a screenshot the user uploaded — just render it, nothing to buy. */
 async function fromUpload(userId: string, file: File): Promise<StagedProduct> {
-  let buf = await fileToBuffer(file);
+  const rawBuf = await fileToBuffer(file);
   const mimeType = file.type || "image/jpeg";
 
-  // Full-page/app screenshots carry UI chrome (nav bars, price, buttons) that pollutes
-  // both identification and the render reference — crop to just the product photo.
-  try {
-    const box = await locateProductPhoto({ imageBase64: buf.toString("base64"), mimeType });
-    if (box) buf = await cropToBox(buf, box);
-  } catch { /* best-effort — fall back to the full screenshot */ }
-
-  const base64 = buf.toString("base64");
-
+  // Identify off the ORIGINAL screenshot — listing screenshots often carry the literal
+  // product title/brand as legible text, a much stronger signal than a generic description.
   let identified: { itemType: string; description: string };
   try {
-    identified = await describeScreenshotForSearch({ imageBase64: base64, mimeType });
+    identified = await describeScreenshotForSearch({ imageBase64: rawBuf.toString("base64"), mimeType });
   } catch {
     throw new ProductFetchError("Couldn't identify an item in that photo. Try a clearer image.", 422);
   }
+
+  // Full-page/app screenshots carry UI chrome (nav bars, price, buttons) that pollutes the
+  // render reference — crop to just the product photo before staging/rendering with it.
+  let buf = rawBuf;
+  try {
+    const box = await locateProductPhoto({ imageBase64: rawBuf.toString("base64"), mimeType });
+    if (box) buf = await cropToBox(rawBuf, box);
+  } catch { /* best-effort — fall back to the full screenshot */ }
+  const base64 = buf.toString("base64");
 
   let referenceUrl: string;
   try {

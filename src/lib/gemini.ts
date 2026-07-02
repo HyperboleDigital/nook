@@ -384,21 +384,29 @@ export async function locateProductPhoto(params: {
 export interface ScreenshotDescription {
   itemType: string;    // short category noun, e.g. "sofa", "floor lamp"
   description: string; // shopping-search-friendly phrase: color, material, style, proportions
+  productTitle?: string; // literal title/brand text read off the screenshot, if legible
 }
 
 /**
  * Identify the furniture/decor item in a screenshot for use as a shopping search query.
  * Unlike the other describe* functions, errors are NOT swallowed — there's no fallback
  * if Gemini can't identify the item (no search query to run).
+ *
+ * Run this on the FULL, uncropped screenshot (not a product-photo crop) — retailer listing
+ * screenshots usually carry the exact title/brand as legible text (e.g. "Ebern Designs
+ * Wuppertal Tennis Court"), and a literal title searches far more precisely for niche or
+ * branded items than a generic color/material description ever can.
  */
 export async function describeScreenshotForSearch(params: {
   imageBase64: string;
   mimeType: string;
 }): Promise<ScreenshotDescription> {
   const prompt =
-    "This is a screenshot of a piece of furniture or home decor. " +
-    "Ignore any UI chrome, social-media captions, watermarks, or background room — focus on the item itself. " +
-    'Reply as JSON: {"itemType":"<short category noun, e.g. sofa, coffee table, floor lamp, area rug, tv stand>","description":"<one concise phrase for a shopping search: color, material, style, approximate size/proportions — written the way someone types into Google Shopping, no marketing language>"}. ' +
+    "This is a screenshot of a piece of furniture or home decor, likely from a shopping app or " +
+    "retailer website. Ignore any social-media captions, watermarks, or background room — focus on the item itself. " +
+    "If the screenshot shows a literal product title, listing name, or brand as text anywhere " +
+    "(e.g. a listing page header), read it exactly as written — this is the most valuable signal for finding the exact product. " +
+    'Reply as JSON: {"itemType":"<short category noun, e.g. sofa, coffee table, floor lamp, area rug, tv stand>","description":"<one concise phrase for a shopping search: color, material, style, approximate size/proportions — written the way someone types into Google Shopping, no marketing language>","productTitle":"<the exact title/brand text visible on the screenshot, or null if none is legible>"}. ' +
     "JSON only, no preamble.";
   const data = await geminiPost(GEMINI_VISION_MODEL, {
     contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: params.mimeType, data: params.imageBase64 } }] }],
@@ -408,8 +416,9 @@ export async function describeScreenshotForSearch(params: {
   const parsed = JSON.parse(text.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim());
   const itemType = String(parsed.itemType || "").trim();
   const description = String(parsed.description || "").trim();
+  const productTitle = String(parsed.productTitle || "").trim() || undefined;
   if (!description) throw new Error("Gemini couldn't identify an item in that image");
-  return { itemType: itemType || "item", description };
+  return { itemType: itemType || "item", description, productTitle };
 }
 
 /**

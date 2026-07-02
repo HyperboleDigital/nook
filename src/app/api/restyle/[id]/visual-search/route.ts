@@ -47,34 +47,41 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!file) return NextResponse.json({ error: "An image is required." }, { status: 400 });
   if (!file.type.startsWith("image/")) return NextResponse.json({ error: "That file isn't an image." }, { status: 400 });
 
-  let buf = await fileToBuffer(file);
+  const rawBuf = await fileToBuffer(file);
   const mimeType = file.type || "image/jpeg";
 
   // Full-page/app screenshots carry UI chrome (nav bars, price, buttons) that pollutes Lens
-  // visual matching — crop to just the product photo before searching, same as product/route.
+  // visual matching — crop to just the product photo before the visual search/scoring.
+  let lensBuf = rawBuf;
   try {
-    const box = await locateProductPhoto({ imageBase64: buf.toString("base64"), mimeType });
-    if (box) buf = await cropToBox(buf, box);
+    const box = await locateProductPhoto({ imageBase64: rawBuf.toString("base64"), mimeType });
+    if (box) lensBuf = await cropToBox(rawBuf, box);
   } catch { /* best-effort — fall back to the full screenshot */ }
 
   // 1) Exact match via Google Lens — needs a public image URL, so upload then delete it.
   let exact: ShoppingResult[] = [];
   let shotUrl: string | null = null;
   try {
-    shotUrl = await uploadImage(userId, buf, mimeType);
+    shotUrl = await uploadImage(userId, lensBuf, mimeType);
     exact = await searchByImage(shotUrl);
-  } catch {
-    /* Lens is best-effort; we fall back to text search below */
+  } catch (err) {
+    // Lens is best-effort and we fall back to text search below, but a silently-swallowed
+    // failure here is exactly what made past misses undiagnosable — log it.
+    console.error("[restyle/visual-search] Google Lens search failed:", err);
   } finally {
     if (shotUrl) { try { await del(shotUrl); } catch { /* leave it; non-fatal */ } }
   }
 
   // 2) Add keyword "similar" options when we didn't find enough renderable exact matches.
+  //    Identify off the ORIGINAL screenshot (not the crop) — listing screenshots usually carry
+  //    the literal product title/brand as legible text, which a keyword search can match far
+  //    more precisely than a generic color/material description for niche or branded items.
   let results = exact;
   if (exact.filter((r) => r.supported).length < 2) {
     try {
-      const parsed = await describeScreenshotForSearch({ imageBase64: buf.toString("base64"), mimeType });
-      const similar = await searchShopping(`${parsed.description} ${parsed.itemType}`.trim());
+      const parsed = await describeScreenshotForSearch({ imageBase64: rawBuf.toString("base64"), mimeType });
+      const query = parsed.productTitle || `${parsed.description} ${parsed.itemType}`.trim();
+      const similar = await searchShopping(query);
       const seen = new Set(exact.map((r) => titleKey(r.title)));
       results = [...exact, ...similar.filter((s) => !seen.has(titleKey(s.title)))];
     } catch (err) {
@@ -107,14 +114,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const idx = results.map((_, i) => i).filter((i) => thumbs[i]);
     if (idx.length) {
       const scores = await scoreImageMatches({
-        target: { base64: buf.toString("base64"), mimeType },
+        target: { base64: lensBuf.toString("base64"), mimeType },
         candidates: idx.map((i) => thumbs[i]!),
       });
       idx.forEach((i, k) => { if (scores[k] != null) results[i].score = scores[k]; });
       // Best visual match first; unscored fall to the back.
       results.sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
     }
-  } catch { /* scoring is best-effort */ }
+  } catch (err) { console.error("[restyle/visual-search] scoring failed:", err); /* best-effort */ }
 
   return NextResponse.json({ results });
 }
