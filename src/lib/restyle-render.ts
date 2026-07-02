@@ -79,18 +79,21 @@ export async function recompose(
     return cached.image_url;
   }
 
-  // Build the combined render from the original.
-  const baseBuf = await urlToBuf(restyle.original_url);
+  // Build the combined render from the original. Original + every reference photo fetch
+  // in parallel — this used to be a sequential for-loop, serializing N+1 network round-trips.
+  const [baseBuf, references] = await Promise.all([
+    urlToBuf(restyle.original_url),
+    Promise.all(active.map((e) => (e.reference_url ? urlToImage(e.reference_url) : undefined))),
+  ]);
   const meta = await sharp(baseBuf).metadata();
   const canonW = restyle.width ?? meta.width;
   const canonH = restyle.height ?? meta.height;
   const aspectRatio = canonW && canonH ? closestAspect(canonW, canonH) : undefined;
 
-  const composeInputs: ComposeEditInput[] = [];
-  for (const e of active) {
-    const reference = e.reference_url ? await urlToImage(e.reference_url) : undefined;
-    composeInputs.push({ kind: e.kind, targetLabel: e.target_label, instruction: e.instruction, reference, referenceDesc: e.reference_desc });
-  }
+  const composeInputs: ComposeEditInput[] = active.map((e, i) => ({
+    kind: e.kind, targetLabel: e.target_label, instruction: e.instruction,
+    reference: references[i], referenceDesc: e.reference_desc,
+  }));
 
   const result = await composeEdits({
     imageBase64: baseBuf.toString("base64"),

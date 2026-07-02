@@ -1,13 +1,13 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabase";
 import { uploadImage } from "@/lib/restyle-render";
 import { fetchProduct, ProductFetchError, type ProductInfo } from "@/lib/product";
 import { describeProductImages, describeScreenshotForSearch, locateProductPhoto } from "@/lib/gemini";
 import { resolveImmersiveToken } from "@/lib/shopping-search";
+import { editsFor, loadOwnedRestyle, stageEdit, type StagedProduct } from "@/lib/restyle-edits";
+import { supabaseAdmin } from "@/lib/supabase";
 import { fileToBuffer } from "@/lib/file-buf";
 import { cropToBox } from "@/lib/image-crop";
-import type { DetectedObject } from "@/types";
 
 // Amazon scrapes via Unwrangle can take 60–90s, plus Gemini gallery sizing afterward.
 export const maxDuration = 120;
@@ -22,39 +22,20 @@ async function urlToImagePart(url: string) {
   };
 }
 
-async function loadOwned(restyleId: string, userId: string) {
-  const { data } = await supabaseAdmin
-    .from("restyles").select("*").eq("id", restyleId).eq("user_id", userId).single();
-  return data;
-}
-
-async function editsFor(restyleId: string) {
-  const { data } = await supabaseAdmin
-    .from("restyle_edits").select("*").eq("restyle_id", restyleId).order("position", { ascending: true });
-  return data ?? [];
-}
-
-/** Find a detected object whose label overlaps the product's item type (→ replace it). */
-function matchDetected(objects: DetectedObject[] | null, itemType: string): string | null {
-  if (!objects?.length) return null;
-  const t = itemType.toLowerCase();
-  const hit = objects.find((o) => {
-    const l = o.label.toLowerCase();
-    return l === t || l.includes(t) || t.includes(l);
-  });
-  return hit?.label ?? null;
-}
-
 /** Build a reference edit from a product listing (URL or visual-search token). */
 async function fromListing(userId: string, info: ProductInfo): Promise<StagedProduct> {
-  // Copy the product image into our own Blob storage (stable, CDN-served).
+  // Copy the product image into our own Blob storage (stable, CDN-served). Reuse the same
+  // fetched bytes for both the Blob copy and the first gallery vision part below — no
+  // second fetch of the primary image.
+  let mainBuf: Buffer;
+  let mainMime: string;
   let referenceUrl: string;
   try {
     const res = await fetch(info.imageUrl);
     if (!res.ok) throw new Error("image fetch failed");
-    const buf = Buffer.from(await res.arrayBuffer());
-    const mime = res.headers.get("content-type") || "image/jpeg";
-    referenceUrl = await uploadImage(userId, buf, mime);
+    mainBuf = Buffer.from(await res.arrayBuffer());
+    mainMime = res.headers.get("content-type") || "image/jpeg";
+    referenceUrl = await uploadImage(userId, mainBuf, mainMime);
   } catch {
     throw new ProductFetchError("Couldn't load the product image.", 502);
   }
@@ -62,15 +43,14 @@ async function fromListing(userId: string, info: ProductInfo): Promise<StagedPro
   // Recover real dimensions + proportions from the gallery (which usually includes
   // a spec diagram) — retail APIs rarely return size as text, but accurate scale is
   // the whole point of "shop the look". Best-effort; falls back to the listing text.
+  // Fetched in parallel — this used to be a sequential for-loop over up to 5 images.
   let visionDesc = "";
   try {
-    const galleryUrls = [info.imageUrl, ...info.images]
-      .filter((u, i, a) => u && a.indexOf(u) === i)
-      .slice(0, 5);
-    const parts: { base64: string; mimeType: string }[] = [];
-    for (const u of galleryUrls) {
-      try { parts.push(await urlToImagePart(u)); } catch { /* skip unreadable image */ }
-    }
+    const otherUrls = info.images.filter((u, i, a) => u && u !== info.imageUrl && a.indexOf(u) === i).slice(0, 4);
+    const otherParts = await Promise.all(
+      otherUrls.map((u) => urlToImagePart(u).catch(() => null))
+    );
+    const parts = [{ base64: mainBuf.toString("base64"), mimeType: mainMime }, ...otherParts.filter((p) => p !== null)];
     visionDesc = await describeProductImages({ images: parts, label: info.itemType });
   } catch { /* best-effort — render still works without it */ }
 
@@ -86,13 +66,17 @@ async function fromListing(userId: string, info: ProductInfo): Promise<StagedPro
   };
 }
 
-/** Build a reference edit from a screenshot the user uploaded — just render it, nothing to buy. */
+/**
+ * Build a reference edit from a screenshot the user uploaded — just render it, nothing to buy.
+ * DEPRECATED as of the canvas-first editor: staging a screenshot now happens in
+ * POST /api/restyle/[id]/visual-search (stage=1), which shares the crop + identification
+ * the search already computed instead of redoing both here. Kept only so the legacy wizard
+ * (still live until it's replaced) keeps working; delete once that wizard is removed.
+ */
 async function fromUpload(userId: string, file: File): Promise<StagedProduct> {
   const rawBuf = await fileToBuffer(file);
   const mimeType = file.type || "image/jpeg";
 
-  // Identify off the ORIGINAL screenshot — listing screenshots often carry the literal
-  // product title/brand as legible text, a much stronger signal than a generic description.
   let identified: { itemType: string; description: string };
   try {
     identified = await describeScreenshotForSearch({ imageBase64: rawBuf.toString("base64"), mimeType });
@@ -100,8 +84,6 @@ async function fromUpload(userId: string, file: File): Promise<StagedProduct> {
     throw new ProductFetchError("Couldn't identify an item in that photo. Try a clearer image.", 422);
   }
 
-  // Full-page/app screenshots carry UI chrome (nav bars, price, buttons) that pollutes the
-  // render reference — crop to just the product photo before staging/rendering with it.
   let buf = rawBuf;
   try {
     const box = await locateProductPhoto({ imageBase64: rawBuf.toString("base64"), mimeType });
@@ -116,7 +98,6 @@ async function fromUpload(userId: string, file: File): Promise<StagedProduct> {
     throw new ProductFetchError("Couldn't save that photo. Try again.", 502);
   }
 
-  // Recover proportions/dimensions from the single photo for accurate scale.
   let visionDesc = "";
   try {
     visionDesc = await describeProductImages({ images: [{ base64, mimeType }], label: identified.itemType });
@@ -130,30 +111,23 @@ async function fromUpload(userId: string, file: File): Promise<StagedProduct> {
   };
 }
 
-interface StagedProduct {
-  referenceUrl: string;
-  referenceDesc: string;
-  itemType: string;
-  buyUrl: string | null;
-  productTitle: string | null;
-  productPrice: string | null;
-  retailer: string;
-}
-
 // POST — stage a product as a reference edit, then auto-decide replace-vs-add.
-// Three input shapes (Does NOT render — the client calls POST /generate when ready):
-//   - JSON { url }    : a pasted retailer product link
-//   - JSON { token }  : a visual-search candidate (Google Shopping immersive token → URL)
-//   - multipart image : the user's own screenshot — rendered directly, nothing to buy
+// Input shapes (Does NOT render — the client calls POST /generate when ready):
+//   - JSON { url }     : a pasted retailer product link
+//   - JSON { token }   : a visual-search candidate (Google Shopping immersive token → URL)
+//   - multipart image  : DEPRECATED — legacy wizard screenshot upload, see fromUpload().
+// `replaceEditId` — when picking a candidate that's replacing an already-staged photo/edit
+// for the same slot, deletes that edit in the same request instead of a separate round-trip.
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { userId } = await auth();
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { id } = await params;
-  const restyle = await loadOwned(id, userId);
+  const restyle = await loadOwnedRestyle(id, userId);
   if (!restyle) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   let staged: StagedProduct;
   let forcedTarget: string | undefined;
+  let replaceEditId: string | undefined;
   try {
     if (req.headers.get("content-type")?.includes("multipart/form-data")) {
       const form = await req.formData();
@@ -163,10 +137,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       staged = await fromUpload(userId, file);
     } else {
       const body = await req.json().catch(() => ({}));
-      const { url: rawUrl, token, targetLabel: ft } = body as { url?: string; token?: string; targetLabel?: string };
+      const { url: rawUrl, token, targetLabel: ft, replaceEditId: re } = body as {
+        url?: string; token?: string; targetLabel?: string; replaceEditId?: string;
+      };
       forcedTarget = ft;
+      replaceEditId = re;
 
       // A visual-search candidate gives us a SerpApi immersive token, not a URL — resolve it.
+      // Most candidates arrive with a real productUrl already (visual-search resolves Wayfair
+      // tokens eagerly in the background), so this is only a fallback for picks made before
+      // that resolution lands.
       let url = rawUrl;
       if (!url && token) {
         const resolved = await resolveImmersiveToken(token);
@@ -185,48 +165,20 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({ error: "Couldn't add that product." }, { status: 502 });
   }
 
-  // Replace a matching detected item, otherwise add it as something new.
-  // forcedTarget (from wizard) takes priority — the user explicitly chose which item.
-  let kind: "item" | "add";
-  let targetLabel: string;
-  if (forcedTarget) {
-    const inDetected = (restyle.detected_objects as Array<{ label: string }> | null)
-      ?.some(o => o.label.toLowerCase() === forcedTarget.toLowerCase());
-    kind = inDetected ? "item" : "add";
-    targetLabel = forcedTarget;
-  } else {
-    const matched = matchDetected(restyle.detected_objects, staged.itemType);
-    kind = matched ? "item" : "add";
-    targetLabel = matched ?? staged.itemType;
+  let result;
+  try {
+    result = await stageEdit(id, restyle, staged, forcedTarget);
+  } catch (err) {
+    return NextResponse.json({ error: err instanceof Error ? err.message : "DB error" }, { status: 500 });
   }
 
-  const existing = await editsFor(id);
-  const position = existing.length;
-
-  const { data: inserted, error } = await supabaseAdmin.from("restyle_edits").insert({
-    restyle_id: id, kind, target_label: targetLabel, instruction: null,
-    reference_url: staged.referenceUrl, reference_desc: staged.referenceDesc,
-    buy_url: staged.buyUrl, product_title: staged.productTitle, product_price: staged.productPrice,
-    active: true, position,
-  }).select().single();
-  if (error || !inserted) return NextResponse.json({ error: error?.message ?? "DB error" }, { status: 500 });
-
-  // Single active edit per target_label — a label is one conceptual slot in the room
-  // regardless of kind. This used to only cover kind "item" (a swap of a detected object),
-  // so staging a photo as an "add" (a custom item with no matching detected object, e.g.
-  // "canvas print") and later picking a real product for the SAME label left both edits
-  // active: the old photo reference never got deactivated. That's what caused the stale
-  // "still shows my old screenshot" thumbnail and the picked product going missing from
-  // "Shop this look" — the render/signature ended up carrying two conflicting edits for
-  // one slot. kind can also flip item⇄add via the PATCH toggle, so match on label across
-  // both kinds, not just the kind of the edit we just inserted.
-  if (targetLabel) {
-    await supabaseAdmin.from("restyle_edits").update({ active: false })
-      .eq("restyle_id", id).eq("target_label", targetLabel).in("kind", ["item", "add"]).neq("id", inserted.id);
+  // Delete the edit being replaced (e.g. a staged photo now superseded by a real pick) in
+  // the same request — used to be a separate client-side DELETE round-trip after this POST.
+  let edits = result.edits;
+  if (replaceEditId && replaceEditId !== result.added.id) {
+    await supabaseAdmin.from("restyle_edits").delete().eq("id", replaceEditId).eq("restyle_id", id);
+    edits = await editsFor(id);
   }
 
-  return NextResponse.json({
-    edits: await editsFor(id),
-    added: { id: inserted.id, kind, target_label: targetLabel, retailer: staged.retailer },
-  });
+  return NextResponse.json({ edits, added: result.added });
 }

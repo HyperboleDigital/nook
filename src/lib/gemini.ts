@@ -99,18 +99,45 @@ interface GeminiResponse {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function geminiPost(model: string, body: unknown, attempt = 0): Promise<GeminiResponse> {
+// Every Gemini call used to have no fetch timeout at all — bounded only by the route's
+// maxDuration, so a single slow call could silently eat the whole budget. Vision calls
+// (detect/describe/locate/score) get a tight budget since they're one small JSON response;
+// image generation gets a much larger one since it's the actual long-pole render.
+const VISION_TIMEOUT_MS = 20_000;
+const IMAGE_TIMEOUT_MS = 90_000;
+
+async function geminiPost(
+  model: string,
+  body: unknown,
+  opts: { timeoutMs?: number; maxRetries?: number } = {},
+  attempt = 0
+): Promise<GeminiResponse> {
+  // Default retry budget is capped at 1 (2 attempts total) — this default is what every
+  // vision call (detect/describe/locate/score) uses since they don't override maxRetries.
+  // Image-gen calls explicitly pass maxRetries: 0 (see imageOpts below).
+  const { timeoutMs = VISION_TIMEOUT_MS, maxRetries = 1 } = opts;
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("GEMINI_API_KEY is not set");
-  const res = await fetch(`${GEMINI_BASE}/models/${model}:generateContent?key=${apiKey}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${GEMINI_BASE}/models/${model}:generateContent?key=${apiKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (err) {
+    // A timed-out/aborted request is transient just like a 503 — retry the same way.
+    if (attempt < maxRetries) {
+      await sleep(1200 * 2 ** attempt);
+      return geminiPost(model, body, opts, attempt + 1);
+    }
+    throw err;
+  }
   // 503 (overloaded) / 500 are transient — retry with exponential backoff.
-  if ((res.status === 503 || res.status === 500) && attempt < 3) {
+  if ((res.status === 503 || res.status === 500) && attempt < maxRetries) {
     await sleep(1200 * 2 ** attempt);
-    return geminiPost(model, body, attempt + 1);
+    return geminiPost(model, body, opts, attempt + 1);
   }
   if (!res.ok) {
     const text = await res.text();
@@ -156,12 +183,16 @@ export async function restyleRoom(
     : params.model === "flash" ? GEMINI_IMAGE_MODEL
     : params.reference ? GEMINI_IMAGE_PRO_MODEL
     : GEMINI_IMAGE_MODEL;
+  // No internal retry here — a Pro→Flash model fallback is effectively one retry already,
+  // and stacking geminiPost's own backoff on top of two 90s model attempts risks blowing
+  // well past the route's maxDuration.
+  const imageOpts = { timeoutMs: IMAGE_TIMEOUT_MS, maxRetries: 0 };
   let data: GeminiResponse;
   try {
-    data = await geminiPost(preferred, body);
+    data = await geminiPost(preferred, body, imageOpts);
   } catch (err) {
     if (preferred !== GEMINI_IMAGE_MODEL) {
-      data = await geminiPost(GEMINI_IMAGE_MODEL, body);
+      data = await geminiPost(GEMINI_IMAGE_MODEL, body, imageOpts);
     } else {
       throw err;
     }
@@ -189,11 +220,12 @@ async function generateImage(
     : opts.model === "flash" ? GEMINI_IMAGE_MODEL
     : opts.preferPro ? GEMINI_IMAGE_PRO_MODEL
     : GEMINI_IMAGE_MODEL;
+  const imageOpts = { timeoutMs: IMAGE_TIMEOUT_MS, maxRetries: 0 };
   let data: GeminiResponse;
   try {
-    data = await geminiPost(preferred, body);
+    data = await geminiPost(preferred, body, imageOpts);
   } catch (err) {
-    if (preferred !== GEMINI_IMAGE_MODEL) data = await geminiPost(GEMINI_IMAGE_MODEL, body);
+    if (preferred !== GEMINI_IMAGE_MODEL) data = await geminiPost(GEMINI_IMAGE_MODEL, body, imageOpts);
     else throw err;
   }
   const part = data.candidates?.[0]?.content?.parts?.find((p) => p.inlineData?.data);

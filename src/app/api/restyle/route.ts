@@ -1,15 +1,22 @@
 import { auth, currentUser } from "@clerk/nextjs/server";
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import sharp from "sharp";
 import { supabaseAdmin } from "@/lib/supabase";
 import { uploadImage } from "@/lib/restyle-render";
 import { fileToBuffer } from "@/lib/file-buf";
+import { detectObjects } from "@/lib/gemini";
 
 // Cap the working resolution; every render is normalized to the canonical dims.
 const MAX_DIM = 1536;
 
-// POST /api/restyle — create a restyle project from a room photo. No Gemini call:
-// the project starts showing the original; changes are added as toggleable edits.
+// Detection can take a few seconds on top of the create itself — give after() room
+// under the route's own maxDuration (Vercel bounds after() work to it).
+export const maxDuration = 60;
+
+// POST /api/restyle — create a restyle project from a room photo. Detection runs
+// in the background via after() using the canonical buffer already in memory, so
+// chips are typically ready by the time the editor mounts instead of the client
+// having to trigger + wait for a separate detect call after the page loads.
 export async function POST(req: Request) {
   const { userId } = await auth();
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -50,6 +57,15 @@ export async function POST(req: Request) {
       })
       .select().single();
     if (error || !created) return NextResponse.json({ error: error?.message ?? "DB error" }, { status: 500 });
+
+    // Fire-and-forget: detect objects from the buffer we already have in memory (no
+    // refetch) and persist once done. Doesn't block the response.
+    after(async () => {
+      try {
+        const objects = await detectObjects({ imageBase64: canonical.toString("base64"), mimeType: "image/jpeg" });
+        await supabaseAdmin.from("restyles").update({ detected_objects: objects }).eq("id", created.id);
+      } catch { /* the client falls back to POST /api/restyle/detect if this never lands */ }
+    });
 
     return NextResponse.json({ restyleId: created.id });
   } catch (err) {

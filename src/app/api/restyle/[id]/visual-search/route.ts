@@ -1,49 +1,62 @@
 import { auth } from "@clerk/nextjs/server";
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { del } from "@vercel/blob";
 import { supabaseAdmin } from "@/lib/supabase";
 import { uploadImage } from "@/lib/restyle-render";
-import { describeScreenshotForSearch, locateProductPhoto, scoreImageMatches } from "@/lib/gemini";
+import { describeProductImages, describeScreenshotForSearch, locateProductPhoto, scoreImageMatches } from "@/lib/gemini";
 import { resolveTokenUrls, searchByImage, searchShopping, ShoppingSearchError, type ShoppingResult } from "@/lib/shopping-search";
 import { fileToBuffer } from "@/lib/file-buf";
 import { cropToBox } from "@/lib/image-crop";
+import { loadOwnedRestyle, stageEdit, type StagedProduct } from "@/lib/restyle-edits";
 
-// Google Lens visual match + (fallback) Gemini identify + four parallel SerpApi searches.
+// Google Lens visual match + Gemini identify (parallel) + four parallel SerpApi searches.
+// Scoring + Wayfair token resolution happen in after() once the response is already sent.
 export const maxDuration = 90;
-
-async function loadOwned(restyleId: string, userId: string) {
-  const { data } = await supabaseAdmin
-    .from("restyles").select("id").eq("id", restyleId).eq("user_id", userId).single();
-  return data;
-}
 
 const titleKey = (t: string) => t.toLowerCase().replace(/\s+/g, " ").slice(0, 40);
 
-// POST — screenshot → find the actual product (Google Lens) across retailers, falling back to
-// keyword "similar" search when no real match is found. Does NOT render; client calls
-// POST /api/restyle/[id]/product when the user picks one.
+async function upsertSearch(restyleId: string, label: string, fields: { query?: string | null; results: ShoppingResult[]; scored: boolean }) {
+  await supabaseAdmin.from("restyle_searches").upsert(
+    { restyle_id: restyleId, label, query: fields.query ?? null, results: fields.results, scored: fields.scored, updated_at: new Date().toISOString() },
+    { onConflict: "restyle_id,label" },
+  );
+}
+
+// POST — screenshot (or text query) → find the actual product (Google Lens + keyword search)
+// across supported retailers. Responds fast with unscored results, then refines scoring +
+// resolves Wayfair links in the background (after()) and persists the final set so a later
+// GET /api/restyle/[id]/searches?label= — or a reload — sees the same results without
+// re-running the whole pipeline. `stage=1` additionally creates the reference edit from the
+// uploaded image in this same request, sharing the crop + identification already computed
+// here instead of the client making a second round-trip that redoes both.
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { userId } = await auth();
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { id } = await params;
-  const restyle = await loadOwned(id, userId);
+  const restyle = await loadOwnedRestyle(id, userId);
   if (!restyle) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const form = await req.formData();
   const file = form.get("image") as File | null;
   const query = (form.get("query") as string | null)?.trim();
+  const label = ((form.get("label") as string | null) ?? "").trim().toLowerCase();
+  const stage = form.get("stage") === "1";
+  const forcedTarget = (form.get("targetLabel") as string | null) ?? undefined;
 
   // Text-only path (from "Describe it"): keyword search, no Lens/scoring (no target image).
   if (!file && query) {
     try {
       const all = await searchShopping(query);
-      // Never surface "not shoppable" results — a link/price is the whole point.
       const supported = all.filter((r) => r.supported);
       if (supported.length === 0) {
         return NextResponse.json({ error: "No shoppable products found. Try a different search." }, { status: 404 });
       }
-      const results = await resolveTokenUrls(supported);
-      return NextResponse.json({ results });
+      await upsertSearch(id, label, { query, results: supported, scored: false });
+      after(async () => {
+        const resolved = await resolveTokenUrls(supported);
+        await upsertSearch(id, label, { query, results: resolved, scored: true });
+      });
+      return NextResponse.json({ results: supported, scored: false });
     } catch (err) {
       if (err instanceof ShoppingSearchError) return NextResponse.json({ error: err.message }, { status: err.status });
       return NextResponse.json({ error: "Product search failed." }, { status: 502 });
@@ -55,90 +68,102 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   const rawBuf = await fileToBuffer(file);
   const mimeType = file.type || "image/jpeg";
+  const rawBase64 = rawBuf.toString("base64");
 
-  // Full-page/app screenshots carry UI chrome (nav bars, price, buttons) that pollutes Lens
-  // visual matching — crop to just the product photo before the visual search/scoring.
+  // Full-page/app screenshots carry UI chrome (nav bars, price, buttons) that pollutes both
+  // Lens visual matching and identification — locate the product photo and identify the item
+  // in parallel (independent Gemini calls over the same bytes; used to run serially, and
+  // separately duplicated again in the product route for the same screenshot).
+  const [box, identified] = await Promise.all([
+    locateProductPhoto({ imageBase64: rawBase64, mimeType }).catch(() => null),
+    describeScreenshotForSearch({ imageBase64: rawBase64, mimeType }).catch(() => null),
+  ]);
+  if (!identified && !box) {
+    return NextResponse.json({ error: "Couldn't identify an item in that image. Try a clearer screenshot." }, { status: 422 });
+  }
+
   let lensBuf = rawBuf;
-  try {
-    const box = await locateProductPhoto({ imageBase64: rawBuf.toString("base64"), mimeType });
-    if (box) lensBuf = await cropToBox(rawBuf, box);
-  } catch { /* best-effort — fall back to the full screenshot */ }
+  if (box) { try { lensBuf = await cropToBox(rawBuf, box); } catch { /* best-effort */ } }
+  const lensBase64 = lensBuf.toString("base64");
 
-  // 1) Exact match via Google Lens — needs a public image URL, so upload then delete it.
-  let exact: ShoppingResult[] = [];
+  // Upload once — reused for both the Lens search and (if staging) the edit's reference photo.
   let shotUrl: string | null = null;
   try {
     shotUrl = await uploadImage(userId, lensBuf, mimeType);
-    exact = await searchByImage(shotUrl);
-  } catch (err) {
-    // Lens is best-effort and we fall back to text search below, but a silently-swallowed
-    // failure here is exactly what made past misses undiagnosable — log it.
-    console.error("[restyle/visual-search] Google Lens search failed:", err);
-  } finally {
-    if (shotUrl) { try { await del(shotUrl); } catch { /* leave it; non-fatal */ } }
-  }
+  } catch { /* Lens + staging both degrade gracefully without a hosted copy */ }
 
-  // 2) Add keyword "similar" options when we didn't find enough renderable exact matches.
-  //    Identify off the ORIGINAL screenshot (not the crop) — listing screenshots usually carry
-  //    the literal product title/brand as legible text, which a keyword search can match far
-  //    more precisely than a generic color/material description for niche or branded items.
-  let results = exact;
-  if (exact.filter((r) => r.supported).length < 2) {
-    try {
-      const parsed = await describeScreenshotForSearch({ imageBase64: rawBuf.toString("base64"), mimeType });
-      // Combine, don't replace: a literal title narrows the search, but a generic/guessed
-      // title (e.g. just "wall art") with nothing else loses the descriptive keywords
-      // (color, material, subject) that were doing real work before.
-      const query = [parsed.productTitle, parsed.description, parsed.itemType].filter(Boolean).join(" ").trim();
-      const similar = await searchShopping(query);
-      const seen = new Set(exact.map((r) => titleKey(r.title)));
-      results = [...exact, ...similar.filter((s) => !seen.has(titleKey(s.title)))];
-    } catch (err) {
-      if (exact.length === 0) {
-        if (err instanceof ShoppingSearchError) return NextResponse.json({ error: err.message }, { status: err.status });
-        return NextResponse.json(
-          { error: "Couldn't identify an item in that image. Try a clearer screenshot." },
-          { status: 422 },
-        );
-      }
-      /* keep the exact matches we already have */
-    }
-  }
+  const searchQuery = identified
+    ? [identified.productTitle, identified.description, identified.itemType].filter(Boolean).join(" ").trim()
+    : "";
 
-  // Never surface "not shoppable" results — a link/price is the whole point, and a greyed-out
-  // card the user can't act on is just noise.
-  results = results.filter((r) => r.supported);
+  // Always run both — this used to gate the keyword fallback behind "<2 exact matches",
+  // which serialized it after Lens instead of overlapping the two independent searches.
+  const [exact, keyword] = await Promise.all([
+    shotUrl ? searchByImage(shotUrl).catch((err) => { console.error("[visual-search] Lens failed:", err); return []; }) : Promise.resolve([] as ShoppingResult[]),
+    searchQuery ? searchShopping(searchQuery).catch((err) => { console.error("[visual-search] keyword search failed:", err); return []; }) : Promise.resolve([] as ShoppingResult[]),
+  ]);
+
+  if (!stage && shotUrl) { try { await del(shotUrl); } catch { /* leave it; non-fatal */ } }
+
+  const seen = new Set(exact.map((r) => titleKey(r.title)));
+  let results = [...exact, ...keyword.filter((r) => !seen.has(titleKey(r.title)))];
+
+  // Never surface "not shoppable" results — a link/price is the whole point.
+  results = results.filter((r) => r.supported).slice(0, 8);
   if (results.length === 0) {
     return NextResponse.json({ error: "No matching products found. Try a clearer screenshot." }, { status: 404 });
   }
 
-  // Grade each candidate 0–10 against the uploaded photo (Lens's "exact" is just relevance).
-  results = results.slice(0, 8);
-  try {
-    const thumbs = await Promise.all(results.map(async (r) => {
-      if (!r.thumbnail) return null;
+  await upsertSearch(id, label, { query: searchQuery, results, scored: false });
+
+  // Stage the reference edit now, reusing the crop/identify/upload already done above instead
+  // of the client making a second round-trip (POST /product) that redoes both Gemini calls.
+  let staged: { edits: Awaited<ReturnType<typeof stageEdit>>["edits"]; added: Awaited<ReturnType<typeof stageEdit>>["added"] } | null = null;
+  if (stage && shotUrl && identified) {
+    try {
+      let visionDesc = "";
       try {
-        const tr = await fetch(r.thumbnail, { signal: AbortSignal.timeout(6_000) });
-        if (!tr.ok) return null;
-        return { base64: Buffer.from(await tr.arrayBuffer()).toString("base64"), mimeType: tr.headers.get("content-type") || "image/jpeg" };
-      } catch { return null; }
-    }));
-    const idx = results.map((_, i) => i).filter((i) => thumbs[i]);
-    if (idx.length) {
-      const scores = await scoreImageMatches({
-        target: { base64: lensBuf.toString("base64"), mimeType },
-        candidates: idx.map((i) => thumbs[i]!),
-      });
-      idx.forEach((i, k) => { if (scores[k] != null) results[i].score = scores[k]; });
-      // Best visual match first; unscored fall to the back.
-      results.sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
+        visionDesc = await describeProductImages({ images: [{ base64: lensBase64, mimeType }], label: identified.itemType });
+      } catch { /* best-effort */ }
+      const staging: StagedProduct = {
+        referenceUrl: shotUrl,
+        referenceDesc: (visionDesc || identified.description).slice(0, 900),
+        itemType: identified.itemType,
+        buyUrl: null, productTitle: null, productPrice: null, retailer: "",
+      };
+      staged = await stageEdit(id, restyle, staging, forcedTarget || label || undefined);
+    } catch (err) {
+      console.error("[visual-search] stage failed:", err);
     }
-  } catch (err) { console.error("[restyle/visual-search] scoring failed:", err); /* best-effort */ }
+  }
 
-  // Wayfair candidates from the Google Shopping engine carry only an immersiveToken (no
-  // direct URL) until resolved — do that now so "View on Wayfair" shows immediately instead
-  // of only appearing after the user commits to a pick.
-  results = await resolveTokenUrls(results);
+  // Scoring (Gemini) + Wayfair token resolution happen after the response is sent — the
+  // client already has unscored results to show; this just re-ranks/enriches them in place.
+  const resultsForScoring = results;
+  after(async () => {
+    let final = resultsForScoring;
+    try {
+      const thumbs = await Promise.all(final.map(async (r) => {
+        if (!r.thumbnail) return null;
+        try {
+          const tr = await fetch(r.thumbnail, { signal: AbortSignal.timeout(6_000) });
+          if (!tr.ok) return null;
+          return { base64: Buffer.from(await tr.arrayBuffer()).toString("base64"), mimeType: tr.headers.get("content-type") || "image/jpeg" };
+        } catch { return null; }
+      }));
+      const idx = final.map((_, i) => i).filter((i) => thumbs[i]);
+      if (idx.length) {
+        const scores = await scoreImageMatches({
+          target: { base64: lensBase64, mimeType },
+          candidates: idx.map((i) => thumbs[i]!),
+        });
+        idx.forEach((i, k) => { if (scores[k] != null) final[i].score = scores[k]; });
+        final = [...final].sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
+      }
+    } catch (err) { console.error("[visual-search] scoring failed:", err); }
+    final = await resolveTokenUrls(final);
+    await upsertSearch(id, label, { query: searchQuery, results: final, scored: true });
+  });
 
-  return NextResponse.json({ results });
+  return NextResponse.json({ results, scored: false, ...(staged ? { edits: staged.edits, added: staged.added } : {}) });
 }
