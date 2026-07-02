@@ -176,8 +176,10 @@ export function useRestyleWorkspace(id: string) {
     }
   }, [id]);
 
-  // stage=true also creates the reference edit from this image in the same request (the
-  // photo becomes the render reference immediately; picking a real match later replaces it).
+  // stage=true also creates the reference edit from this image in the same request. Not
+  // used by the photo tab anymore (see stagePhoto below — uploading is just inspo now,
+  // search is deferred to after generate) but kept working for any caller that wants the
+  // combined stage+search behavior back.
   const runVisualSearch = async (file: File, label: string, opts?: { stage?: boolean }) => {
     setSearchState(label, { status: "loading", scored: false });
     const fd = new FormData();
@@ -194,6 +196,24 @@ export function useRestyleWorkspace(id: string) {
           ? { ...s, stagedEditId: data.added?.id ?? s.stagedEditId, lastStaged: { title: data.added?.target_label ?? label, retailer: "" } }
           : s);
       }
+      if (!data.scored) pollScored(label);
+    } catch (err) {
+      setSearchState(label, { status: "error", error: err instanceof Error ? err.message : "Search failed" });
+    }
+  };
+
+  // Search using a photo that's ALREADY staged (its reference_url) rather than a fresh
+  // upload — used after generate to look up buyable options for inspo-only items that made
+  // it into the render, without re-cropping/re-hosting an image we already have.
+  const runVisualSearchByUrl = async (imageUrl: string, label: string) => {
+    setSearchState(label, { status: "loading", scored: false });
+    const fd = new FormData();
+    fd.append("imageUrl", imageUrl); fd.append("label", label);
+    try {
+      const r = await fetch(`/api/restyle/${id}/visual-search`, { method: "POST", body: fd });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error ?? "Couldn't search for that item");
+      setSearchState(label, { status: "ready", scored: !!data.scored, results: data.results ?? [] });
       if (!data.scored) pollScored(label);
     } catch (err) {
       setSearchState(label, { status: "error", error: err instanceof Error ? err.message : "Search failed" });
@@ -241,12 +261,39 @@ export function useRestyleWorkspace(id: string) {
     }
   };
 
+  // Stage an inspo photo — just a reference for the render, nothing to buy. No shopping
+  // search runs here anymore: that used to fire the moment a photo was picked (an API call —
+  // and a token cost — the user might not even want yet, since they could still be deciding).
+  // It's deferred to after generate(), which looks up options for whatever inspo photos
+  // actually made it into the render (see the search kickoff there).
+  const stagePhoto = async (file: File, label: string) => {
+    const replaceEditId = sourcing?.label === label ? sourcing.stagedEditId ?? undefined : undefined;
+    setStagingLink(true); setError(null);
+    const fd = new FormData();
+    fd.append("image", file); fd.append("targetLabel", label);
+    if (replaceEditId) fd.append("replaceEditId", replaceEditId);
+    try {
+      const r = await fetch(`/api/restyle/${id}/product`, { method: "POST", body: fd });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error ?? "Couldn't add that photo");
+      updateEdits(data.edits);
+      setSourcing((s) => s && s.label === label
+        ? { ...s, stagedEditId: data.added.id, lastStaged: { title: data.added.target_label ?? label, retailer: "" } }
+        : s);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't add that photo");
+    } finally {
+      setStagingLink(false);
+    }
+  };
+
   // Optimistic: the picked candidate appears staged immediately (thumbnail/title/price from
   // the search result itself — no need to wait on the network for what the user already sees
   // on screen); reconciled with the server's real edit list on success, rolled back on failure.
-  const pickCandidate = async (c: ShoppingResult, label: string, key: string) => {
+  // replaceEditId is explicit (not derived from `sourcing`) because this is also called from
+  // "Shop this look" after generate, where there's no open sourcing panel to read it from.
+  const pickCandidate = async (c: ShoppingResult, label: string, key: string, replaceEditId?: string) => {
     if (!c.supported || (!c.immersiveToken && !c.productUrl)) return;
-    const replaceEditId = sourcing?.label === label ? sourcing.stagedEditId ?? undefined : undefined;
     const optimisticId = `${OPTIMISTIC_PREFIX}${Date.now()}`;
     const prevEdits = restyle?.edits ?? [];
     const optimisticEdit: RestyleEdit = {
@@ -286,6 +333,16 @@ export function useRestyleWorkspace(id: string) {
       if (!r.ok) throw new Error(data.error ?? "Generate failed");
       setRestyle((prev) => prev ? { ...prev, current_url: data.url, edits: data.edits } : prev);
       if (data.renders) setRenders(data.renders);
+
+      // Now that the room is actually generated, look up buyable options for any inspo-only
+      // items (uploaded photos with no product link yet) that ended up in this render — this
+      // is the deferred half of "upload a photo": staging it earlier didn't search, so search
+      // happens now against whatever actually made it into the picture.
+      const inspo = (data.edits as RestyleEdit[]).filter(
+        (e) => e.active && e.reference_url && !e.buy_url && e.target_label,
+      );
+      for (const e of inspo) runVisualSearchByUrl(e.reference_url!, e.target_label!.toLowerCase());
+
       return true;
     } catch (err) { setError(err instanceof Error ? err.message : "Generate failed"); return false; }
     finally { setGenerating(false); }
@@ -372,14 +429,19 @@ export function useRestyleWorkspace(id: string) {
     : displayedRender ? new Set(displayedRender.signature.split(","))
     : null;
   const productEdits = edits.filter((e) => e.buy_url && (shownProductIds ? shownProductIds.has(e.id) : e.active));
+  // Inspo-only items in the current render — staged from a photo, no product link yet.
+  // "Shop this look" looks up buyable options for these once a render exists.
+  const inspoEdits = edits.filter((e) =>
+    e.reference_url && !e.buy_url && e.target_label && (shownProductIds ? shownProductIds.has(e.id) : e.active),
+  );
 
   return {
     id, restyle, renders, objects: objects ?? [], customItems: restyle?.custom_items ?? [], detecting, loading,
     busy, generating, error, setError,
     titleDraft, setTitleDraft, saveTitle,
     sourcing, openSourcing, closeSourcing,
-    searches, runVisualSearch, runTextSearch, pickCandidate, pickingKey,
-    stageProductLink, stagingLink,
+    searches, runVisualSearch, runVisualSearchByUrl, runTextSearch, pickCandidate, pickingKey,
+    stagePhoto, stageProductLink, stagingLink,
     // slider
     compare, imgWrapRef, sliderHandlers,
     // preview
@@ -387,7 +449,7 @@ export function useRestyleWorkspace(id: string) {
     // handlers
     addEdit, toggle, remove, addCustomItem, removeCustomItem, generate, emptyRoom, downloadImage,
     // derived
-    edits, activeEdits, stagedItems, displayUrl, showSlider, canGenerate, atMaxCustom, productEdits,
+    edits, activeEdits, stagedItems, displayUrl, showSlider, canGenerate, atMaxCustom, productEdits, inspoEdits,
   };
 }
 

@@ -45,7 +45,10 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
     setPendingFile(null);
     setPendingPreview((prev) => { if (prev) URL.revokeObjectURL(prev); return null; });
     const small = await downscaleImage(f);
-    ws.runVisualSearch(small, label.toLowerCase(), { stage: true });
+    // Just stages the photo as inspo — no shopping search here. Search (and its API cost)
+    // is deferred until generate, scoped to whatever inspo photos actually made it into the
+    // render, surfaced in "Shop this look" instead of mid-composition.
+    ws.stagePhoto(small, label.toLowerCase());
   };
 
   const staged = !!sourcing.lastStaged;
@@ -102,7 +105,7 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
                   </p>
                 )}
                 <Button size="sm" variant="primary" disabled={ws.pickingKey != null}
-                  onClick={() => ws.pickCandidate(c as ShoppingResult, label, key)} className="mt-1">
+                  onClick={() => ws.pickCandidate(c as ShoppingResult, label, key, sourcing.stagedEditId ?? undefined)} className="mt-1">
                   {picking ? <><Spinner size="xs" className="text-current" /> Adding…</> : "Use this in the room"}
                 </Button>
                 {picking && (
@@ -135,11 +138,11 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
       {srcMode === "photo" && (
         <div className="border border-[var(--border)] bg-white p-4 space-y-2.5"
           onPaste={(e) => { const f = Array.from(e.clipboardData.files).find((f) => f.type.startsWith("image/")); if (f) pickPending(f); }}>
-          <p className="text-[11px] text-[var(--muted-foreground)]">Upload a photo or screenshot of the product. We&apos;ll place it in your room and look for matches to buy.</p>
+          <p className="text-[11px] text-[var(--muted-foreground)]">Upload a photo or screenshot for inspiration — we&apos;ll place it in your room. Buyable options are found for you after you generate.</p>
           <input ref={fileRef} type="file" accept="image/*" className="hidden"
             onChange={(e) => { const f = e.target.files?.[0]; if (f) pickPending(f); e.target.value = ""; }} />
 
-          {pendingFile && search.status !== "loading" ? (
+          {pendingFile && !ws.stagingLink ? (
             <div className="space-y-2">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={pendingPreview ?? ""} alt="Selected" className="w-full max-h-44 object-contain border border-[var(--border)] bg-[var(--muted)]" />
@@ -149,9 +152,9 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
               </div>
             </div>
           ) : (
-            <button type="button" disabled={search.status === "loading"} onClick={() => fileRef.current?.click()}
+            <button type="button" disabled={ws.stagingLink} onClick={() => fileRef.current?.click()}
               className="w-full border border-dashed border-[var(--border)] py-3 text-xs text-[var(--muted-foreground)] hover:border-[var(--foreground)] hover:text-[var(--foreground)] transition-colors disabled:opacity-40 flex items-center justify-center gap-2">
-              {search.status === "loading" ? <><Spinner size="sm" /> Placing it in your room…</> : "Choose or paste a photo"}
+              {ws.stagingLink ? <><Spinner size="sm" /> Placing it in your room…</> : "Choose or paste a photo"}
             </button>
           )}
         </div>

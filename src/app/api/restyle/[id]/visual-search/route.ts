@@ -22,13 +22,20 @@ async function upsertSearch(restyleId: string, label: string, fields: { query?: 
   );
 }
 
-// POST — screenshot (or text query) → find the actual product (Google Lens + keyword search)
-// across supported retailers. Responds fast with unscored results, then refines scoring +
-// resolves Wayfair links in the background (after()) and persists the final set so a later
-// GET /api/restyle/[id]/searches?label= — or a reload — sees the same results without
-// re-running the whole pipeline. `stage=1` additionally creates the reference edit from the
-// uploaded image in this same request, sharing the crop + identification already computed
-// here instead of the client making a second round-trip that redoes both.
+// POST — screenshot, an already-hosted image, or a text query → find the actual product
+// (Google Lens + keyword search) across supported retailers. Responds fast with unscored
+// results, then refines scoring + resolves Wayfair links in the background (after()) and
+// persists the final set so a later GET /api/restyle/[id]/searches?label= — or a reload —
+// sees the same results without re-running the whole pipeline.
+//   - `image` (file) + `stage=1`: uploading fresh inspo — also creates the reference edit in
+//     this same request, sharing the crop + identification already computed here instead of
+//     a second round-trip. (In practice this path isn't hit anymore — uploading a photo only
+//     stages it now, see product/route.ts's fromUpload; search is deferred. Kept working in
+//     case a caller wants stage+search combined again.)
+//   - `imageUrl`: search using a photo that's already staged (already cropped, already
+//     hosted) — used after generate to look up buyable options for inspo-only items that
+//     ended up in the render. Never stages (there's nothing to stage, it already is).
+//   - `query` only: text search (from "Describe it"), no Lens/scoring.
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { userId } = await auth();
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -38,13 +45,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   const form = await req.formData();
   const file = form.get("image") as File | null;
+  const imageUrl = (form.get("imageUrl") as string | null)?.trim() || undefined;
   const query = (form.get("query") as string | null)?.trim();
   const label = ((form.get("label") as string | null) ?? "").trim().toLowerCase();
   const stage = form.get("stage") === "1";
   const forcedTarget = (form.get("targetLabel") as string | null) ?? undefined;
 
   // Text-only path (from "Describe it"): keyword search, no Lens/scoring (no target image).
-  if (!file && query) {
+  if (!file && !imageUrl && query) {
     try {
       const all = await searchShopping(query);
       const supported = all.filter((r) => r.supported);
@@ -63,11 +71,24 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     }
   }
 
-  if (!file) return NextResponse.json({ error: "An image is required." }, { status: 400 });
-  if (!file.type.startsWith("image/")) return NextResponse.json({ error: "That file isn't an image." }, { status: 400 });
+  if (!file && !imageUrl) return NextResponse.json({ error: "An image is required." }, { status: 400 });
+  if (file && !file.type.startsWith("image/")) return NextResponse.json({ error: "That file isn't an image." }, { status: 400 });
 
-  const rawBuf = await fileToBuffer(file);
-  const mimeType = file.type || "image/jpeg";
+  let rawBuf: Buffer;
+  let mimeType: string;
+  // An imageUrl is an already-staged edit's reference photo — already cropped to just the
+  // product, already hosted — so skip the crop step and reuse it as the Lens/scoring image
+  // directly instead of re-uploading a copy.
+  const alreadyCropped = !!imageUrl;
+  if (file) {
+    rawBuf = await fileToBuffer(file);
+    mimeType = file.type || "image/jpeg";
+  } else {
+    const res = await fetch(imageUrl!);
+    if (!res.ok) return NextResponse.json({ error: "Couldn't load that image." }, { status: 502 });
+    rawBuf = Buffer.from(await res.arrayBuffer());
+    mimeType = res.headers.get("content-type") || "image/jpeg";
+  }
   const rawBase64 = rawBuf.toString("base64");
 
   // Full-page/app screenshots carry UI chrome (nav bars, price, buttons) that pollutes both
@@ -75,7 +96,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   // in parallel (independent Gemini calls over the same bytes; used to run serially, and
   // separately duplicated again in the product route for the same screenshot).
   const [box, identified] = await Promise.all([
-    locateProductPhoto({ imageBase64: rawBase64, mimeType }).catch(() => null),
+    alreadyCropped ? Promise.resolve(null) : locateProductPhoto({ imageBase64: rawBase64, mimeType }).catch(() => null),
     describeScreenshotForSearch({ imageBase64: rawBase64, mimeType }).catch(() => null),
   ]);
   if (!identified && !box) {
@@ -86,11 +107,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (box) { try { lensBuf = await cropToBox(rawBuf, box); } catch { /* best-effort */ } }
   const lensBase64 = lensBuf.toString("base64");
 
-  // Upload once — reused for both the Lens search and (if staging) the edit's reference photo.
-  let shotUrl: string | null = null;
-  try {
-    shotUrl = await uploadImage(userId, lensBuf, mimeType);
-  } catch { /* Lens + staging both degrade gracefully without a hosted copy */ }
+  // Upload once — reused for the Lens search and (if staging) the edit's reference photo.
+  // Skipped when we already have a hosted URL (the imageUrl path).
+  let shotUrl: string | null = imageUrl ?? null;
+  if (!shotUrl) {
+    try {
+      shotUrl = await uploadImage(userId, lensBuf, mimeType);
+    } catch { /* Lens + staging both degrade gracefully without a hosted copy */ }
+  }
 
   const searchQuery = identified
     ? [identified.productTitle, identified.description, identified.itemType].filter(Boolean).join(" ").trim()
@@ -103,7 +127,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     searchQuery ? searchShopping(searchQuery).catch((err) => { console.error("[visual-search] keyword search failed:", err); return []; }) : Promise.resolve([] as ShoppingResult[]),
   ]);
 
-  if (!stage && shotUrl) { try { await del(shotUrl); } catch { /* leave it; non-fatal */ } }
+  // Only delete a blob we uploaded ourselves in this request — an imageUrl is someone else's
+  // permanent asset (the staged edit's own reference photo), never ours to clean up.
+  if (!stage && !imageUrl && shotUrl) { try { await del(shotUrl); } catch { /* leave it; non-fatal */ } }
 
   const seen = new Set(exact.map((r) => titleKey(r.title)));
   let results = [...exact, ...keyword.filter((r) => !seen.has(titleKey(r.title)))];

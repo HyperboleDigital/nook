@@ -67,11 +67,13 @@ async function fromListing(userId: string, info: ProductInfo): Promise<StagedPro
 }
 
 /**
- * Build a reference edit from a screenshot the user uploaded — just render it, nothing to buy.
- * DEPRECATED as of the canvas-first editor: staging a screenshot now happens in
- * POST /api/restyle/[id]/visual-search (stage=1), which shares the crop + identification
- * the search already computed instead of redoing both here. Kept only so the legacy wizard
- * (still live until it's replaced) keeps working; delete once that wizard is removed.
+ * Build a reference edit from a photo the user uploaded — just inspiration, nothing to buy
+ * yet. Uploading a photo no longer triggers a shopping search immediately: that used to run
+ * (and cost tokens/API calls) the moment someone picked a photo, even if they were still
+ * deciding. Now it's deferred until the room is actually generated — POST /generate then
+ * looks up buyable options for whatever inspo photos made it into the render, surfaced in
+ * "Shop this look" instead of mid-composition. Pasting a product link is unaffected — that's
+ * already a confirmed real product, nothing to search for.
  */
 async function fromUpload(userId: string, file: File): Promise<StagedProduct> {
   const rawBuf = await fileToBuffer(file);
@@ -111,13 +113,15 @@ async function fromUpload(userId: string, file: File): Promise<StagedProduct> {
   };
 }
 
-// POST — stage a product as a reference edit, then auto-decide replace-vs-add.
+// POST — stage a product/photo as a reference edit, then auto-decide replace-vs-add.
 // Input shapes (Does NOT render — the client calls POST /generate when ready):
-//   - JSON { url }     : a pasted retailer product link
-//   - JSON { token }   : a visual-search candidate (Google Shopping immersive token → URL)
-//   - multipart image  : DEPRECATED — legacy wizard screenshot upload, see fromUpload().
-// `replaceEditId` — when picking a candidate that's replacing an already-staged photo/edit
-// for the same slot, deletes that edit in the same request instead of a separate round-trip.
+//   - JSON { url }         : a pasted retailer product link — a confirmed real product
+//   - JSON { token }       : a visual-search candidate (Google Shopping immersive token → URL)
+//   - multipart image      : an inspo photo — staged as a reference with no buy link;
+//                            shopping options are looked up later, after generate.
+// `targetLabel` force-targets a specific slot (the chip/hotspot the user tapped) instead of
+// relying on auto-detection. `replaceEditId` — when this staging supersedes an already-staged
+// edit for the same slot, deletes that edit in the same request instead of a separate round-trip.
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { userId } = await auth();
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -134,6 +138,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       const file = form.get("image") as File | null;
       if (!file) return NextResponse.json({ error: "An image is required." }, { status: 400 });
       if (!file.type.startsWith("image/")) return NextResponse.json({ error: "That file isn't an image." }, { status: 400 });
+      forcedTarget = (form.get("targetLabel") as string | null) || undefined;
+      replaceEditId = (form.get("replaceEditId") as string | null) || undefined;
       staged = await fromUpload(userId, file);
     } else {
       const body = await req.json().catch(() => ({}));
