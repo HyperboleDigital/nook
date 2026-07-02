@@ -1,24 +1,55 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Columns2, Download, Share2, Check, ArrowLeftRight } from "lucide-react";
 import type { RestyleWorkspace } from "./useRestyleWorkspace";
+import type { RestyleEdit } from "@/types";
 import { IconButton, ProgressOverlay } from "./ui";
 import ObjectHotspots from "./ObjectHotspots";
+import HotspotPopover from "./HotspotPopover";
 
 /**
- * The room photo — centerpiece of the editor. Shows hotspots over the original photo
- * (boxes only map to that image), or a render with a before/after compare slider once one
- * exists. Generate progress overlays right here instead of a separate result screen.
+ * The room photo — centerpiece of the editor. Shows hotspots over the original photo (real
+ * detected positions), or over a render (approximated from each swapped item's original
+ * position — "added" items have no known position and rely on the shop list below instead).
+ * Tapping a hotspot for something already staged shows a quick product popover first; tapping
+ * an empty slot opens the sourcing panel directly. Generate progress overlays right here
+ * instead of a separate result screen.
  */
 export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
   const { restyle, generating, compare, imgWrapRef, sliderHandlers, displayUrl, previewUrl } = ws;
   const [showCompare, setShowCompare] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [openHotspot, setOpenHotspot] = useState<{ label: string; cx: number; cy: number; edit: RestyleEdit | null } | null>(null);
+
+  // The popover's coordinates are meaningless once the displayed image changes (switching
+  // between original/render/an earlier version) — close it rather than leave it floating
+  // over the wrong photo.
+  useEffect(() => {
+    let active = true;
+    Promise.resolve().then(() => { if (active) setOpenHotspot(null); });
+    return () => { active = false; };
+  }, [displayUrl]);
 
   if (!restyle) return null;
   const viewingOriginal = displayUrl === restyle.original_url;
   const stagedLabels = new Set(ws.stagedItems.map((e) => e.target_label?.toLowerCase()).filter(Boolean) as string[]);
+
+  const findStagedEdit = (label: string) =>
+    ws.stagedItems.find((e) => e.target_label?.toLowerCase() === label.toLowerCase()) ?? null;
+
+  // A hotspot for something already staged shows the quick popover; an empty slot on the
+  // original photo goes straight to sourcing since there's nothing yet to preview.
+  const handleHotspotTap = (label: string, cx: number, cy: number) => {
+    const edit = findStagedEdit(label);
+    if (edit) setOpenHotspot({ label, cx, cy, edit });
+    else ws.openSourcing(label, "swap");
+  };
+  const showSimilarFromPopover = () => {
+    if (!openHotspot) return;
+    ws.openSourcing(openHotspot.label, "swap");
+    setOpenHotspot(null);
+  };
 
   const share = async () => {
     const url = `${window.location.origin}/r/${ws.id}`;
@@ -38,12 +69,28 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
             <img src={restyle.original_url} alt="Your room" className="block max-w-full max-h-[65dvh] md:max-h-[70vh] object-contain" />
             {ws.objects.length > 0 && (
               <ObjectHotspots objects={ws.objects} activeLabel={ws.sourcing?.label} stagedLabels={stagedLabels}
-                onSelect={(label) => ws.openSourcing(label, "swap")} />
+                onSelect={handleHotspotTap} />
+            )}
+            {openHotspot && (
+              <HotspotPopover edit={openHotspot.edit} label={openHotspot.label} cx={openHotspot.cx} cy={openHotspot.cy}
+                onShowSimilar={showSimilarFromPopover} onClose={() => setOpenHotspot(null)} />
             )}
           </div>
         ) : !showCompare ? (
-          /* eslint-disable-next-line @next/next/no-img-element */
-          <img src={displayUrl} alt="Restyled room" className="block max-w-full max-h-[65dvh] md:max-h-[70vh] object-contain" />
+          <div className="relative inline-block max-h-[65dvh] md:max-h-[70vh]">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={displayUrl} alt="Restyled room" className="block max-w-full max-h-[65dvh] md:max-h-[70vh] object-contain" />
+            {ws.renderHotspots.length > 0 && (
+              <ObjectHotspots
+                objects={ws.renderHotspots.map((h) => ({ label: h.label, box_2d: h.box_2d }))}
+                activeLabel={ws.sourcing?.label} stagedLabels={stagedLabels}
+                onSelect={handleHotspotTap} />
+            )}
+            {openHotspot && (
+              <HotspotPopover edit={openHotspot.edit} label={openHotspot.label} cx={openHotspot.cx} cy={openHotspot.cy}
+                onShowSimilar={showSimilarFromPopover} onClose={() => setOpenHotspot(null)} />
+            )}
+          </div>
         ) : (
           <div ref={imgWrapRef} className="relative select-none max-h-[65dvh] md:max-h-[70vh] inline-block touch-none" {...sliderHandlers}>
             {/* eslint-disable-next-line @next/next/no-img-element */}

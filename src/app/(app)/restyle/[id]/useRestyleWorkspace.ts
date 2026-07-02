@@ -21,6 +21,12 @@ export type Sourcing = {
 const EMPTY_SEARCH: SearchState = { status: "idle", scored: false, results: [] };
 const OPTIMISTIC_PREFIX = "optimistic-";
 
+// A wall isn't a furniture/decor item there's a product to swap it for — filter it out of
+// hotspots and the chip row entirely. Careful not to drop legitimate wall-mounted decor like
+// "wall art" or "wall mirror", which the detector also reports and IS swappable.
+const BARE_WALL = /^(the\s+)?(left|right|back|front|far)?\s*walls?$/i;
+const swappableObjects = (objs: DetectedObject[]) => objs.filter((o) => !BARE_WALL.test(o.label.trim()));
+
 /**
  * All restyle-workspace state, side effects, and API handlers in one place so the studio
  * shell, canvas, and sourcing panel share a single source of truth. Search results are keyed
@@ -89,7 +95,7 @@ export function useRestyleWorkspace(id: string) {
       }
 
       if (d.detected_objects && d.detected_objects.length > 0) {
-        if (active) setObjects(d.detected_objects);
+        if (active) setObjects(swappableObjects(d.detected_objects));
         return;
       }
 
@@ -102,7 +108,7 @@ export function useRestyleWorkspace(id: string) {
         if (!pr.ok) continue;
         const pd: Restyle = await pr.json();
         if (pd.detected_objects && pd.detected_objects.length > 0) {
-          if (active) { setObjects(pd.detected_objects); setRestyle((prev) => prev ? { ...prev, detected_objects: pd.detected_objects } : prev); setDetecting(false); }
+          if (active) { setObjects(swappableObjects(pd.detected_objects)); setRestyle((prev) => prev ? { ...prev, detected_objects: pd.detected_objects } : prev); setDetecting(false); }
           return;
         }
       }
@@ -113,7 +119,7 @@ export function useRestyleWorkspace(id: string) {
           body: JSON.stringify({ imageUrl: d.original_url, restyleId: id }),
         });
         const dj = await dr.json();
-        if (active) setObjects(dj.objects ?? []);
+        if (active) setObjects(swappableObjects(dj.objects ?? []));
       } catch {
         if (active) setObjects([]);
       } finally {
@@ -409,6 +415,19 @@ export function useRestyleWorkspace(id: string) {
     e.reference_url && !e.buy_url && e.target_label && (shownProductIds ? shownProductIds.has(e.id) : e.active),
   );
 
+  // Hotspot positions for shoppable items on a RENDER — we only ever detected positions on
+  // the original photo, so approximate by reusing the swapped-out object's original box_2d
+  // (a swap usually stays roughly where the original piece was). "add" items have no known
+  // original position and don't get a render hotspot; they still show in the shop list below.
+  const detectedByLabel = new Map((restyle?.detected_objects ?? []).map((o) => [o.label.toLowerCase(), o.box_2d]));
+  const renderHotspots = edits
+    .filter((e) => e.kind === "item" && e.target_label && (shownProductIds ? shownProductIds.has(e.id) : e.active))
+    .map((e) => {
+      const box = detectedByLabel.get((e.target_label as string).toLowerCase());
+      return box ? { label: e.target_label as string, box_2d: box, edit: e } : null;
+    })
+    .filter((h): h is { label: string; box_2d: DetectedObject["box_2d"]; edit: RestyleEdit } => h !== null);
+
   return {
     id, restyle, renders, objects: objects ?? [], customItems: restyle?.custom_items ?? [], detecting, loading,
     busy, generating, error, setError,
@@ -424,6 +443,7 @@ export function useRestyleWorkspace(id: string) {
     addEdit, toggle, remove, addCustomItem, removeCustomItem, generate, emptyRoom, downloadImage,
     // derived
     edits, activeEdits, stagedItems, displayUrl, showSlider, canGenerate, atMaxCustom, productEdits, inspoEdits,
+    renderHotspots,
   };
 }
 
