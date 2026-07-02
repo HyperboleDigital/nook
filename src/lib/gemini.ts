@@ -414,6 +414,9 @@ export async function describeScreenshotForSearch(params: {
     "retailer website. Ignore any social-media captions, watermarks, or background room — focus on the item itself. " +
     "If the screenshot shows a literal product title, listing name, or brand as text anywhere " +
     "(e.g. a listing page header), read it exactly as written — this is the most valuable signal for finding the exact product. " +
+    "Only fill in productTitle if you can actually read specific listing text (a real title, brand, or model name). " +
+    "Do NOT invent or paraphrase one from the image alone (e.g. never write something generic like \"Wall Art\" or " +
+    "\"Canvas Print\" as a title) — if no such text is legible, productTitle must be null. " +
     'Reply as JSON: {"itemType":"<short category noun, e.g. sofa, coffee table, floor lamp, area rug, tv stand>","description":"<one concise phrase for a shopping search: color, material, style, approximate size/proportions — written the way someone types into Google Shopping, no marketing language>","productTitle":"<the exact title/brand text visible on the screenshot, or null if none is legible>"}. ' +
     "JSON only, no preamble.";
   const data = await geminiPost(GEMINI_VISION_MODEL, {

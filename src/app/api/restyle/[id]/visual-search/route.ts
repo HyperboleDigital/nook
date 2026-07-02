@@ -80,7 +80,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (exact.filter((r) => r.supported).length < 2) {
     try {
       const parsed = await describeScreenshotForSearch({ imageBase64: rawBuf.toString("base64"), mimeType });
-      const query = parsed.productTitle || `${parsed.description} ${parsed.itemType}`.trim();
+      // Combine, don't replace: a literal title narrows the search, but a generic/guessed
+      // title (e.g. just "wall art") with nothing else loses the descriptive keywords
+      // (color, material, subject) that were doing real work before.
+      const query = [parsed.productTitle, parsed.description, parsed.itemType].filter(Boolean).join(" ").trim();
       const similar = await searchShopping(query);
       const seen = new Set(exact.map((r) => titleKey(r.title)));
       results = [...exact, ...similar.filter((s) => !seen.has(titleKey(s.title)))];
