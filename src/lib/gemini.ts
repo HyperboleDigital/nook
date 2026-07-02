@@ -368,14 +368,22 @@ export async function locateProductPhoto(params: {
       contents: [
         { parts: [{ text: prompt }, { inline_data: { mime_type: params.mimeType, data: params.imageBase64 } }] },
       ],
-      generationConfig: { responseMimeType: "application/json" },
+      // Bounding-box detection should be as repeatable as possible run-to-run — this feeds
+      // a crop that a mis-fire visibly wrecks, unlike free-text description where variance
+      // is harmless.
+      generationConfig: { responseMimeType: "application/json", temperature: 0 },
     });
     const text = data.candidates?.[0]?.content?.parts?.find((p) => p.text)?.text ?? "{}";
     const parsed = JSON.parse(text.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim());
     const box = parsed.box_2d;
-    return Array.isArray(box) && box.length === 4 && box.every((n: unknown) => typeof n === "number")
-      ? (box as [number, number, number, number])
-      : null;
+    if (!Array.isArray(box) || box.length !== 4 || !box.every((n: unknown) => typeof n === "number")) return null;
+    const [ymin, xmin, ymax, xmax] = box as [number, number, number, number];
+    // Reject implausible boxes outright — a bad detection (e.g. locking onto a thumbnail
+    // strip or icon) is worse than skipping the crop and using the full screenshot.
+    if (xmax <= xmin || ymax <= ymin) return null;
+    const areaFrac = ((xmax - xmin) * (ymax - ymin)) / (1000 * 1000);
+    if (areaFrac < 0.06) return null; // suspiciously tiny — likely mis-detected a UI element
+    return [ymin, xmin, ymax, xmax];
   } catch {
     return null; // best-effort — caller falls back to the full screenshot
   }

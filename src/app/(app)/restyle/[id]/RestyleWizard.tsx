@@ -446,9 +446,16 @@ export default function RestyleWizard({
                         {/* ── No options at all ── */}
                         {!hasOptions && !hasProduct && (
                           <div className="px-3 pb-3">
+                            {ws.searching && current?.label?.toLowerCase() === label.toLowerCase() ? (
+                              <p className="text-xs text-[var(--muted-foreground)] bg-white border border-[var(--border)] px-3 py-2 flex items-center gap-1.5">
+                                <span className="h-3.5 w-3.5 rounded-full border-2 border-slate-300 border-t-slate-700 animate-spin inline-block shrink-0" />
+                                Still searching for matches…
+                              </p>
+                            ) : (
                             <p className="text-xs text-[var(--muted-foreground)] bg-white border border-[var(--border)] px-3 py-2">
                               No product options were saved for this item. Search for one below.
                             </p>
+                            )}
                           </div>
                         )}
 
