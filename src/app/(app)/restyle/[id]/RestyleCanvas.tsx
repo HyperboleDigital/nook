@@ -12,9 +12,10 @@ import HotspotPopover from "./HotspotPopover";
  * The room photo — centerpiece of the editor. Shows hotspots over the original photo (real
  * detected positions), or over a render (approximated from each swapped item's original
  * position — "added" items have no known position and rely on the shop list below instead).
- * Tapping a hotspot for something already staged shows a quick product popover first; tapping
- * an empty slot opens the sourcing panel directly. Generate progress overlays right here
- * instead of a separate result screen.
+ * The floating "here's what's placed" popover only ever shows on the RENDER — the original
+ * photo hasn't actually changed yet, so a staged item there routes straight to Similar Items
+ * instead of a popup implying it's already visible in the photo. Generate progress overlays
+ * right here instead of a separate result screen.
  */
 export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
   const { restyle, generating, compare, imgWrapRef, sliderHandlers, displayUrl, previewUrl } = ws;
@@ -38,12 +39,19 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
   const findStagedEdit = (label: string) =>
     ws.stagedItems.find((e) => e.target_label?.toLowerCase() === label.toLowerCase()) ?? null;
 
-  // A hotspot for something already staged shows the quick popover; an empty slot on the
-  // original photo goes straight to sourcing since there's nothing yet to preview.
-  const handleHotspotTap = (label: string, cx: number, cy: number) => {
+  // Original photo: nothing is actually visually placed there yet (it's still the untouched
+  // photo), so a tap never shows the "here's what's placed" popover — an already-staged item
+  // goes straight to Similar items, an empty slot goes straight to sourcing.
+  const handleOriginalTap = (label: string) => {
+    const edit = findStagedEdit(label);
+    if (edit) ws.openSimilar(label, "swap", edit.id);
+    else ws.openSourcing(label, "swap");
+  };
+  // Render: the item genuinely IS in the photo at this position, so the quick preview popover
+  // (thumbnail, price, Show similar / Buy) makes sense here.
+  const handleRenderTap = (label: string, cx: number, cy: number) => {
     const edit = findStagedEdit(label);
     if (edit) setOpenHotspot({ label, cx, cy, edit });
-    else ws.openSourcing(label, "swap");
   };
   const showSimilarFromPopover = () => {
     if (!openHotspot) return;
@@ -69,11 +77,7 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
             <img src={restyle.original_url} alt="Your room" className="block max-w-full max-h-[65dvh] md:max-h-[70vh] object-contain" />
             {ws.objects.length > 0 && (
               <ObjectHotspots objects={ws.objects} activeLabel={ws.sourcing?.label} stagedLabels={stagedLabels}
-                onSelect={handleHotspotTap} />
-            )}
-            {openHotspot && (
-              <HotspotPopover edit={openHotspot.edit} label={openHotspot.label} cx={openHotspot.cx} cy={openHotspot.cy}
-                onShowSimilar={showSimilarFromPopover} onClose={() => setOpenHotspot(null)} />
+                onSelect={handleOriginalTap} />
             )}
           </div>
         ) : !showCompare ? (
@@ -84,7 +88,7 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
               <ObjectHotspots
                 objects={ws.renderHotspots.map((h) => ({ label: h.label, box_2d: h.box_2d }))}
                 activeLabel={ws.sourcing?.label} stagedLabels={stagedLabels}
-                onSelect={handleHotspotTap} />
+                onSelect={handleRenderTap} />
             )}
             {openHotspot && (
               <HotspotPopover edit={openHotspot.edit} label={openHotspot.label} cx={openHotspot.cx} cy={openHotspot.cy}

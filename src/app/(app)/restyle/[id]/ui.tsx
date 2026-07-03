@@ -304,8 +304,11 @@ export function SegmentedTabs<T extends string>({
 }
 
 // ── Sheet ─────────────────────────────────────────────────────────────────────
-// <md: fixed bottom sheet. md+: in-layout right side panel (not an overlay — the caller
-// lays it out next to the canvas). No drag-to-dismiss — X button + backdrop tap only.
+// Mobile-only fixed bottom sheet + backdrop. On desktop the caller docks a persistent right
+// column instead (see RestyleStudio) — the studio's right rail is always present there
+// (defaults to "Shop this look"), so a modal overlay doesn't fit; SheetChrome is exported so
+// that docked column can reuse the same title-bar + close-button styling.
+// No drag-to-dismiss — X button + backdrop tap only.
 export function Sheet({
   open, onClose, title, children,
 }: { open: boolean; onClose: () => void; title?: string; children: ReactNode }) {
@@ -318,25 +321,18 @@ export function Sheet({
 
   if (!open) return null;
   return (
-    <>
-      {/* Mobile: fixed bottom sheet + backdrop */}
-      <div className="md:hidden fixed inset-0 z-40 bg-black/40" onClick={onClose} />
-      <div className="md:hidden fixed inset-x-0 bottom-0 z-50 max-h-[85dvh] flex flex-col border-t border-[var(--foreground)] bg-white pb-[env(safe-area-inset-bottom)]">
+    <div className="md:hidden">
+      <div className="fixed inset-0 z-40 bg-black/40" onClick={onClose} />
+      <div className="fixed inset-x-0 bottom-0 z-50 max-h-[85dvh] flex flex-col border-t border-[var(--foreground)] bg-white pb-[env(safe-area-inset-bottom)]">
         <div className="flex justify-center pt-1.5 shrink-0"><span className="h-1 w-10 bg-[var(--border)]" /></div>
         <SheetChrome title={title} onClose={onClose} />
         <div className="overflow-y-auto px-4 pb-4">{children}</div>
       </div>
-
-      {/* Desktop: in-layout right panel */}
-      <div className="hidden md:flex md:flex-col md:w-[400px] md:shrink-0 md:border-l md:border-[var(--border)] md:bg-white md:h-full md:overflow-y-auto">
-        <SheetChrome title={title} onClose={onClose} />
-        <div className="px-4 pb-4">{children}</div>
-      </div>
-    </>
+    </div>
   );
 }
 
-function SheetChrome({ title, onClose }: { title?: string; onClose: () => void }) {
+export function SheetChrome({ title, onClose }: { title?: string; onClose: () => void }) {
   return (
     <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)] shrink-0">
       {title ? <h3 className="text-sm font-semibold tracking-tight">{title}</h3> : <span />}
