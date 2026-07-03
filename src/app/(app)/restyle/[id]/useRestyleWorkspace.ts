@@ -406,7 +406,8 @@ export function useRestyleWorkspace(id: string) {
   const activeEdits = edits.filter((e) => e.active);
   const stagedItems = activeEdits.filter((e) => e.kind === "item" || e.kind === "add");
   const displayUrl = previewUrl ?? restyle?.current_url ?? "";
-  const showSlider = !previewUrl && !!restyle && displayUrl !== restyle.original_url;
+  const viewingOriginal = !!restyle && displayUrl === restyle.original_url;
+  const showSlider = !previewUrl && !!restyle && !viewingOriginal;
   const hasOptimistic = activeEdits.some((e) => e.id.startsWith(OPTIMISTIC_PREFIX));
   const canGenerate = activeEdits.length > 0 && !hasOptimistic;
   const atMaxCustom = (restyle?.custom_items?.length ?? 0) >= 5;
@@ -414,7 +415,7 @@ export function useRestyleWorkspace(id: string) {
   // "Shop this look" reflects only the product(s) in the image currently on screen.
   const displayedRender = renders.find((r) => r.image_url === displayUrl);
   const shownProductIds: Set<string> | null =
-    restyle && displayUrl === restyle.original_url ? new Set()
+    viewingOriginal ? new Set()
     : displayedRender ? new Set(displayedRender.signature.split(","))
     : null;
   const productEdits = edits.filter((e) => e.buy_url && (shownProductIds ? shownProductIds.has(e.id) : e.active));
@@ -451,7 +452,7 @@ export function useRestyleWorkspace(id: string) {
     // handlers
     addEdit, toggle, remove, addCustomItem, removeCustomItem, generate, emptyRoom, downloadImage,
     // derived
-    edits, activeEdits, stagedItems, displayUrl, showSlider, canGenerate, atMaxCustom, productEdits, inspoEdits,
+    edits, activeEdits, stagedItems, displayUrl, viewingOriginal, showSlider, canGenerate, atMaxCustom, productEdits, inspoEdits,
     renderHotspots,
   };
 }

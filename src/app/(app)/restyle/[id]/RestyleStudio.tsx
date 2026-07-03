@@ -8,14 +8,16 @@ import SourcePanel from "./SourcePanel";
 import SimilarItemsPanel from "./SimilarItemsPanel";
 import GenerateBar from "./GenerateBar";
 import ShopLook from "./ShopLook";
+import QueuedChanges from "./QueuedChanges";
 import VersionsStrip from "./VersionsStrip";
 
 /**
  * The canvas-first editor. Room photo + chips/hotspots on the left; a right-hand rail that
- * defaults to "Shop this look" (matching where the reference design docks "Similar items") and
- * swaps to the sourcing/similar-items panel while one is open. On mobile there's no room for a
- * persistent rail, so Shop-this-look stays inline below the canvas and sourcing uses the
- * bottom sheet overlay instead.
+ * defaults to either "Queued changes" (viewing the original — nothing's been generated into
+ * the photo yet, so this is what WILL be there) or "Shop this look" (viewing a render — what's
+ * actually IN it), and swaps to the sourcing/similar-items panel while one is open. On mobile
+ * there's no room for a persistent rail, so the same queued/shop content stays inline below
+ * the canvas and sourcing uses the bottom sheet overlay instead.
  */
 export default function RestyleStudio({ ws }: { ws: RestyleWorkspace }) {
   const hasRender = ws.renders.length > 0;
@@ -27,8 +29,10 @@ export default function RestyleStudio({ ws }: { ws: RestyleWorkspace }) {
         <div className="p-3 md:p-4 space-y-3 flex-1">
           <RestyleCanvas ws={ws} />
           <ChipRow ws={ws} />
-          {/* Mobile only — desktop shows this in the persistent right rail instead */}
-          {hasRender && <div className="md:hidden"><ShopLook ws={ws} /></div>}
+          {/* Mobile only — desktop shows these in the persistent right rail instead */}
+          <div className="md:hidden">
+            {ws.viewingOriginal ? <QueuedChanges ws={ws} /> : hasRender ? <ShopLook ws={ws} /> : null}
+          </div>
           <VersionsStrip ws={ws} />
           {ws.error && !ws.sourcing && (
             <p className="text-xs text-red-600">{ws.error}</p>
@@ -48,7 +52,7 @@ export default function RestyleStudio({ ws }: { ws: RestyleWorkspace }) {
           </>
         ) : (
           <div className="p-4">
-            {hasRender ? <ShopLook ws={ws} /> : (
+            {ws.viewingOriginal ? <QueuedChanges ws={ws} /> : hasRender ? <ShopLook ws={ws} /> : (
               <p className="text-xs text-[var(--muted-foreground)]">
                 Nothing to shop yet — tap an item to swap it, then generate to see it here.
               </p>

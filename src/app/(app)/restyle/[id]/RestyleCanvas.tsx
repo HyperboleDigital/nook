@@ -33,7 +33,7 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
   }, [displayUrl]);
 
   if (!restyle) return null;
-  const viewingOriginal = displayUrl === restyle.original_url;
+  const { viewingOriginal } = ws;
   const stagedLabels = new Set(ws.stagedItems.map((e) => e.target_label?.toLowerCase()).filter(Boolean) as string[]);
 
   const findStagedEdit = (label: string) =>
