@@ -20,7 +20,7 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
   const { restyle, generating, compare, imgWrapRef, sliderHandlers, displayUrl, previewUrl } = ws;
   const [showCompare, setShowCompare] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [openHotspot, setOpenHotspot] = useState<{ label: string; cx: number; cy: number; edit: RestyleEdit | null } | null>(null);
+  const [openHotspot, setOpenHotspot] = useState<{ label: string; cx: number; cy: number; edit: RestyleEdit } | null>(null);
 
   // The popover's coordinates are meaningless once the displayed image changes (switching
   // between original/render/an earlier version) — close it rather than leave it floating
@@ -47,7 +47,7 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
   };
   const showSimilarFromPopover = () => {
     if (!openHotspot) return;
-    ws.openSourcing(openHotspot.label, "swap");
+    ws.openSimilar(openHotspot.label, "swap", openHotspot.edit.id);
     setOpenHotspot(null);
   };
 

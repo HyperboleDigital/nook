@@ -20,13 +20,21 @@ export default function ChipRow({ ws }: { ws: RestyleWorkspace }) {
     );
   }
 
+  // A chip for something already staged opens the clean "similar items" list; an empty slot
+  // goes straight to the link/photo/describe sourcing form since there's nothing to preview.
+  const tap = (label: string) => {
+    const edit = ws.stagedItems.find((e) => e.target_label?.toLowerCase() === label.toLowerCase());
+    if (edit) ws.openSimilar(label, "swap", edit.id);
+    else ws.openSourcing(label, "swap");
+  };
+
   return (
     <div className="flex gap-2 overflow-x-auto pb-1">
       {ws.objects.map((o) => (
         <Chip key={o.label} size="md"
           variant={ws.sourcing?.label === o.label ? "active" : "default"}
           staged={stagedLabels.has(o.label.toLowerCase())}
-          onClick={() => ws.openSourcing(o.label, "swap")}>
+          onClick={() => tap(o.label)}>
           {o.label}
         </Chip>
       ))}
@@ -34,7 +42,7 @@ export default function ChipRow({ ws }: { ws: RestyleWorkspace }) {
         <Chip key={label} size="md"
           variant={ws.sourcing?.label === label ? "active" : "default"}
           staged={stagedLabels.has(label.toLowerCase())}
-          onClick={() => ws.openSourcing(label, "swap")}>
+          onClick={() => tap(label)}>
           {label}
         </Chip>
       ))}

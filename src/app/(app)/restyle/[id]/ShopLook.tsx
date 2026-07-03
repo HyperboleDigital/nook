@@ -55,7 +55,7 @@ export default function ShopLook({ ws }: { ws: RestyleWorkspace }) {
               price={e.product_price}
               viewUrl={e.buy_url}>
               <Button size="sm" variant="subtle" className="mt-1"
-                onClick={() => ws.openSourcing(e.target_label ?? "item", e.kind === "add" ? "add" : "swap")}>
+                onClick={() => ws.openSimilar(e.target_label ?? "item", e.kind === "add" ? "add" : "swap", e.id)}>
                 <Replace className="h-3.5 w-3.5" /> Replace
               </Button>
             </ProductCard>

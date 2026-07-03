@@ -14,6 +14,9 @@ export type SearchState = {
 export type Sourcing = {
   label: string;           // "" until the AI identifies an unlabeled "add" item
   mode: "swap" | "add";
+  // "similar" = a clean product-card list for an already-placed item (find an alternative);
+  // "compose" = the link/photo/describe sourcing form for an empty slot.
+  view: "similar" | "compose";
   stagedEditId: string | null;
   lastStaged?: { title: string; retailer: string };
 } | null;
@@ -145,7 +148,12 @@ export function useRestyleWorkspace(id: string) {
   const updateEdits = (edits: RestyleEdit[]) => setRestyle((prev) => prev ? { ...prev, edits } : prev);
 
   // ── Sourcing panel open/close ──
-  const openSourcing = (label: string, mode: "swap" | "add") => setSourcing({ label, mode, stagedEditId: null });
+  // Compose: the link/photo/describe form, for sourcing an empty slot from scratch.
+  const openSourcing = (label: string, mode: "swap" | "add") => setSourcing({ label, mode, view: "compose", stagedEditId: null });
+  // Similar: a clean product-card list for a slot that already has something placed —
+  // matches the "Show similar" flow from a hotspot/chip/shop-list item, not a blank compose.
+  const openSimilar = (label: string, mode: "swap" | "add", stagedEditId: string | null) =>
+    setSourcing({ label, mode, view: "similar", stagedEditId });
   const closeSourcing = () => setSourcing(null);
 
   // Text-only edit with no product — "just go with my description".
@@ -433,7 +441,7 @@ export function useRestyleWorkspace(id: string) {
     id, restyle, renders, objects: objects ?? [], customItems: restyle?.custom_items ?? [], detecting, loading,
     busy, generating, error, setError,
     titleDraft, setTitleDraft, saveTitle,
-    sourcing, openSourcing, closeSourcing,
+    sourcing, openSourcing, openSimilar, closeSourcing,
     searches, runVisualSearchByUrl, runTextSearch, pickCandidate, pickingKey,
     stagePhoto, stageProductLink, stagingLink,
     // slider

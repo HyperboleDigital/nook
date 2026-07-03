@@ -6,6 +6,7 @@ import RestyleCanvas from "./RestyleCanvas";
 import ChipRow from "./ChipRow";
 import StagedStrip from "./StagedStrip";
 import SourcePanel from "./SourcePanel";
+import SimilarItemsPanel from "./SimilarItemsPanel";
 import GenerateBar from "./GenerateBar";
 import ShopLook from "./ShopLook";
 import VersionsStrip from "./VersionsStrip";
@@ -36,8 +37,8 @@ export default function RestyleStudio({ ws }: { ws: RestyleWorkspace }) {
       </div>
 
       <Sheet open={!!ws.sourcing} onClose={ws.closeSourcing}
-        title={ws.sourcing?.mode === "swap" ? "Swap item" : "Add item"}>
-        <SourcePanel ws={ws} />
+        title={ws.sourcing?.view === "similar" ? "Similar items" : ws.sourcing?.mode === "swap" ? "Swap item" : "Add item"}>
+        {ws.sourcing?.view === "similar" ? <SimilarItemsPanel ws={ws} /> : <SourcePanel ws={ws} />}
       </Sheet>
     </div>
   );
