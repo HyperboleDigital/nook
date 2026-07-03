@@ -6,6 +6,7 @@ import type { RestyleWorkspace } from "./useRestyleWorkspace";
 import type { ShoppingResult } from "@/lib/shopping-search";
 import { downscaleImage } from "@/lib/image-client";
 import { Button, Input, ProductCard, SegmentedTabs, SkeletonProductCard, Spinner, StatusBanner, matchWord } from "./ui";
+import CroppedThumb from "./CroppedThumb";
 
 type SrcMode = "link" | "photo" | "describe";
 
@@ -34,6 +35,11 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
   if (!sourcing) return null;
   const label = sourcing.label;
   const search = ws.searches[label.toLowerCase()] ?? { status: "idle" as const, scored: false, results: [] };
+  // The actual item being replaced, cropped from the original photo — so "Replacing the
+  // ceiling fan" isn't just a label, you can see exactly which fixture it means.
+  const matchedObject = sourcing.mode === "swap"
+    ? ws.objects.find((o) => o.label.toLowerCase() === label.toLowerCase())
+    : undefined;
 
   const pickPending = (f: File | undefined) => {
     if (!f || !f.type.startsWith("image/")) return;
@@ -58,9 +64,15 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
 
   return (
     <div className="space-y-3">
-      <p className="text-sm font-medium capitalize">
-        {sourcing.mode === "swap" ? `Replacing the ${label}` : label ? `Adding ${label}` : "Adding a new piece"}
-      </p>
+      <div className="flex items-center gap-3">
+        {matchedObject && ws.restyle && (
+          <CroppedThumb imageUrl={ws.restyle.original_url} box_2d={matchedObject.box_2d}
+            className="h-14 w-14 border border-[var(--border)] bg-[var(--muted)] shrink-0" />
+        )}
+        <p className="text-sm font-medium capitalize">
+          {sourcing.mode === "swap" ? `Replacing the ${label}` : label ? `Adding ${label}` : "Adding a new piece"}
+        </p>
+      </div>
 
       {staged && (
         <StatusBanner variant="success" icon={<Check className="h-3.5 w-3.5" />}>

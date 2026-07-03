@@ -32,9 +32,15 @@ export default function SimilarItemsPanel({ ws }: { ws: RestyleWorkspace }) {
 
   return (
     <div className="space-y-3">
-      <p className="text-xs text-[var(--muted-foreground)]">
-        Recommended based on <span className="font-medium text-[var(--foreground)] capitalize">{stagedEdit?.product_title ?? label}</span>
-      </p>
+      <div className="flex items-center gap-3">
+        {stagedEdit?.reference_url && (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img src={stagedEdit.reference_url} alt="" className="h-14 w-14 object-cover border border-[var(--border)] bg-[var(--muted)] shrink-0" />
+        )}
+        <p className="text-xs text-[var(--muted-foreground)]">
+          Recommended based on <span className="font-medium text-[var(--foreground)] capitalize">{stagedEdit?.product_title ?? label}</span>
+        </p>
+      </div>
 
       {search.status === "loading" && (
         <div className="space-y-2"><SkeletonProductCard /><SkeletonProductCard /><SkeletonProductCard /></div>
