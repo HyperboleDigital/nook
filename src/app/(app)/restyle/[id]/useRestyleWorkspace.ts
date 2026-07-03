@@ -24,11 +24,12 @@ export type Sourcing = {
 const EMPTY_SEARCH: SearchState = { status: "idle", scored: false, results: [] };
 const OPTIMISTIC_PREFIX = "optimistic-";
 
-// Walls and a bare ceiling aren't furniture/decor items there's a product to swap them for —
-// filter them out of hotspots and the chip row entirely. Careful not to drop legitimate
-// swappable items that share the word, like "wall art"/"wall mirror" or "ceiling fan"/
-// "ceiling light".
-const NOT_SWAPPABLE = /^(the\s+)?(left|right|back|front|far)?\s*(walls?|ceiling)$/i;
+// Walls, a bare ceiling, and a bare floor aren't furniture/decor items there's a product to
+// swap them for — filter them out of hotspots and the chip row entirely. Careful not to drop
+// legitimate swappable items that share the word, like "wall art"/"wall mirror", "ceiling fan"/
+// "ceiling light", or "floor lamp" (the trailing word after floor/wall/ceiling means it won't
+// match this anchored pattern).
+const NOT_SWAPPABLE = /^(the\s+)?(left|right|back|front|far)?\s*(walls?|ceiling|floors?)$/i;
 const swappableObjects = (objs: DetectedObject[]) => objs.filter((o) => !NOT_SWAPPABLE.test(o.label.trim()));
 
 /**
