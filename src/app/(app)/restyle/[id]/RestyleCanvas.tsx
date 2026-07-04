@@ -4,18 +4,20 @@ import { useEffect, useState } from "react";
 import { Columns2, Download, Share2, Check, ArrowLeftRight } from "lucide-react";
 import type { RestyleWorkspace } from "./useRestyleWorkspace";
 import type { RestyleEdit } from "@/types";
-import { IconButton, ProgressOverlay } from "./ui";
+import { IconButton, ProgressOverlay, ShopSummaryPill } from "./ui";
 import ObjectHotspots from "./ObjectHotspots";
 import HotspotPopover from "./HotspotPopover";
+import PinPlacementLayer from "./PinPlacementLayer";
 
 /**
  * The room photo — centerpiece of the editor. Shows hotspots over the original photo (real
  * detected positions), or over a render (approximated from each swapped item's original
- * position — "added" items have no known position and rely on the shop list below instead).
- * The floating "here's what's placed" popover only ever shows on the RENDER — the original
- * photo hasn't actually changed yet, so a staged item there routes straight to Similar Items
- * instead of a popup implying it's already visible in the photo. Generate progress overlays
- * right here instead of a separate result screen.
+ * position; "added" items use their placed pin instead — see renderHotspots). The floating
+ * "here's what's placed" popover only ever shows on the RENDER — the original photo hasn't
+ * actually changed yet, so a staged item there routes straight to Similar Items instead of a
+ * popup implying it's already visible in the photo. Generate progress overlays right here
+ * instead of a separate result screen. `ws.pinRequest` overlays a tap-to-place layer on the
+ * original photo right after a new "add" item stages, ahead of everything else.
  */
 export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
   const { restyle, generating, compare, imgWrapRef, sliderHandlers, displayUrl, previewUrl } = ws;
@@ -70,7 +72,7 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
 
   return (
     <div className="space-y-2">
-      <div className="relative bg-[var(--muted)] border border-[var(--border)] flex items-center justify-center p-2 min-h-[40vh]">
+      <div className="relative bg-[var(--muted)] border border-[var(--border)] rounded-3xl overflow-hidden flex items-center justify-center p-2 min-h-[40vh]">
         {viewingOriginal ? (
           <div className="relative inline-block max-h-[65dvh] md:max-h-[70vh]">
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -78,6 +80,11 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
             {ws.objects.length > 0 && (
               <ObjectHotspots objects={ws.objects} activeLabel={ws.sourcing?.label} stagedLabels={stagedLabels}
                 onSelect={handleOriginalTap} />
+            )}
+            {ws.pinRequest && (
+              <PinPlacementLayer label={ws.pinRequest.label}
+                onPlace={(x, y, note) => ws.setPlacement(ws.pinRequest!.editId, { x, y, note })}
+                onCancel={ws.cancelPin} />
             )}
           </div>
         ) : !showCompare ? (
@@ -104,19 +111,25 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
               className="absolute inset-0 h-full w-full object-contain"
               style={{ clipPath: `inset(0 ${100 - compare}% 0 0)` }} />
             <div className="absolute top-0 bottom-0 w-0.5 bg-white pointer-events-none" style={{ left: `${compare}%` }}>
-              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-8 w-8 bg-white border border-[var(--border)] flex items-center justify-center text-[var(--foreground)]">
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-8 w-8 rounded-full bg-white border border-[var(--border)] shadow-[var(--shadow-soft)] flex items-center justify-center text-[var(--foreground)]">
                 <ArrowLeftRight className="h-3.5 w-3.5" />
               </div>
             </div>
-            <span className="absolute bottom-3 left-3 text-[10px] px-2 py-1 bg-black/60 text-white">Before</span>
-            <span className="absolute bottom-3 right-3 text-[10px] px-2 py-1 bg-black/60 text-white">After</span>
+            <span className="absolute bottom-3 left-3 text-[10px] px-2 py-1 rounded-full bg-black/60 text-white">Before</span>
+            <span className="absolute bottom-3 right-3 text-[10px] px-2 py-1 rounded-full bg-black/60 text-white">After</span>
           </div>
         )}
 
         {generating && <ProgressOverlay status="Generating your room…" subtext="Usually 20–60 seconds" />}
 
+        {!viewingOriginal && !generating && !showCompare && ws.productEdits.length > 0 && (
+          <div className="absolute bottom-3 left-3 hidden md:block">
+            <ShopSummaryPill edits={ws.productEdits} />
+          </div>
+        )}
+
         <div className="absolute top-3 right-3 flex items-center gap-2">
-          {copied && <span className="text-[11px] px-2 py-1 bg-[var(--foreground)] text-[var(--background)]">Link copied</span>}
+          {copied && <span className="text-[11px] px-2 py-1 rounded-full bg-[var(--foreground)] text-[var(--background)]">Link copied</span>}
           {!viewingOriginal && (
             <IconButton onClick={() => setShowCompare((v) => !v)} aria-label="Compare before / after"
               className={showCompare ? "bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)] hover:text-[var(--background)]" : ""}>
@@ -132,7 +145,9 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
         </div>
       </div>
       <p className="text-[11px] text-[var(--muted-foreground)] text-center">
-        {viewingOriginal ? "Tap an item to swap it, or add something new" : previewUrl ? "Viewing an earlier version" : "Your restyled room"}
+        {ws.pinRequest ? "Tap the photo to choose where it goes"
+          : viewingOriginal ? "Tap an item to swap it, or add something new"
+          : previewUrl ? "Viewing an earlier version" : "Your restyled room"}
       </p>
     </div>
   );

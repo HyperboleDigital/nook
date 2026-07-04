@@ -1,36 +1,44 @@
 @import "tailwindcss";
 
-/* ── Swiss Minimalism Design System ─────────────────────────────────────────
-   One accent. Zero shadows. Sharp corners. Mathematical spacing.
+/* ── Nook Warm Modern Design System ──────────────────────────────────────────
+   Warm off-white surfaces. Near-black primary, forest-green accent.
+   Pill buttons, 16–24px card radii, soft diffuse shadows.
    ─────────────────────────────────────────────────────────────────────────── */
 
 :root {
   /* Base surfaces */
-  --background: #ffffff;
-  --foreground: #0f172a;
-  --card: #fafafa;
-  --card-foreground: #0f172a;
+  --background: #faf9f6;
+  --foreground: #1c1c1a;
+  --card: #ffffff;
+  --card-foreground: #1c1c1a;
 
   /* Muted / secondary surfaces */
-  --muted: #f5f5f5;
-  --muted-foreground: #64748b;
+  --muted: #f1efe9;
+  --muted-foreground: #6f6d66;
 
-  /* Brand — violet primary, cyan accent (use sparingly) */
-  --primary: #7c3aed;
+  /* Brand — near-black primary (pills/CTAs), forest-green accent (product/buy actions) */
+  --primary: #1c1c1a;
   --primary-foreground: #ffffff;
-  --accent: #0891b2;
+  --accent: #354733;
   --accent-foreground: #ffffff;
+  --accent-soft: #e6ede3;
+  --accent-soft-foreground: #2c3b2a;
 
   /* Structure */
-  --border: #e2e8f0;
-  --input: #e2e8f0;
-  --ring: #7c3aed;
+  --border: #e6e3da;
+  --input: #e6e3da;
+  --ring: #1c1c1a;
   --destructive: #dc2626;
   --destructive-foreground: #ffffff;
 
-  /* Swiss: sharp corners, no shadows */
-  --radius: 0px;
-  --shadow: none;
+  /* Radii — sm for inputs/thumbs, default for cards, lg for hero surfaces; pills use rounded-full */
+  --radius-sm: 10px;
+  --radius: 16px;
+  --radius-lg: 24px;
+
+  /* Soft diffuse shadows */
+  --shadow-soft: 0 1px 2px rgb(28 28 26 / 0.04), 0 4px 16px rgb(28 28 26 / 0.08);
+  --shadow-pop: 0 2px 6px rgb(28 28 26 / 0.06), 0 12px 32px rgb(28 28 26 / 0.14);
 
   /* 8px spacing base */
   --space-1: 4px;
@@ -59,7 +67,7 @@ body {
   line-height: 1.5;
 }
 
-/* Swiss typography — tight tracking on headings */
+/* Tight tracking on headings */
 h1, h2, h3, h4, h5, h6 {
   letter-spacing: -0.02em;
   line-height: 1.25;
@@ -69,6 +77,13 @@ h1, h2, h3, h4, h5, h6 {
 *, *::before, *::after {
   transition-duration: 150ms;
   transition-timing-function: cubic-bezier(0, 0, 0.2, 1);
+}
+
+/* Hotspot pulse — expanding, fading halo ring (ObjectHotspots) */
+@keyframes hotspot-pulse {
+  0%   { transform: scale(1);   opacity: 0.7; }
+  70%  { transform: scale(2.2); opacity: 0; }
+  100% { transform: scale(2.2); opacity: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {

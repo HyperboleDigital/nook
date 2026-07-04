@@ -3,12 +3,7 @@
 import { ShoppingBag, Replace } from "lucide-react";
 import type { RestyleWorkspace } from "./useRestyleWorkspace";
 import type { ShoppingResult } from "@/lib/shopping-search";
-import { Button, ProductCard, SkeletonProductCard, Spinner, StatusBanner, matchWord, storeName } from "./ui";
-
-const parsePrice = (p: string | null | undefined) => {
-  const n = Number(String(p ?? "").replace(/[^0-9.]/g, ""));
-  return Number.isFinite(n) ? n : 0;
-};
+import { Button, ProductCard, SkeletonProductCard, Spinner, StatusBanner, matchWord, shopSummary, storeName } from "./ui";
 
 /**
  * Shoppable items in the current render, plus buyable options for any inspo-only items
@@ -17,12 +12,11 @@ const parsePrice = (p: string | null | undefined) => {
  */
 export default function ShopLook({ ws }: { ws: RestyleWorkspace }) {
   const { productEdits, inspoEdits } = ws;
-  const total = productEdits.reduce((s, e) => s + parsePrice(e.product_price), 0);
-  const pricedCount = productEdits.filter((e) => e.product_price).length;
+  const { total, priced: pricedCount } = shopSummary(productEdits);
 
   if (productEdits.length === 0 && inspoEdits.length === 0) {
     return (
-      <div className="border border-[var(--border)] bg-white p-4 space-y-3">
+      <div className="rounded-2xl border border-[var(--border)] bg-white p-4 space-y-3">
         <div className="flex items-center gap-2">
           <ShoppingBag className="h-4 w-4 text-[var(--foreground)]" />
           <p className="text-sm font-semibold">Shop this look</p>
@@ -35,7 +29,7 @@ export default function ShopLook({ ws }: { ws: RestyleWorkspace }) {
   }
 
   return (
-    <div className="border border-[var(--border)] bg-white p-4 space-y-3">
+    <div className="rounded-2xl border border-[var(--border)] bg-white p-4 space-y-3">
       <div className="flex items-center gap-2">
         <ShoppingBag className="h-4 w-4 text-[var(--foreground)]" />
         <p className="text-sm font-semibold">Shop this look</p>
@@ -85,7 +79,7 @@ export default function ShopLook({ ws }: { ws: RestyleWorkspace }) {
                   image={c.thumbnail} title={c.title} retailer={c.retailer} price={c.price}
                   viewUrl={c.productUrl ?? c.alternates?.[0]?.url ?? null}
                   badge={matchWord(c.score, c.exact)}>
-                  <Button size="sm" variant="primary" disabled={ws.pickingKey != null}
+                  <Button size="sm" variant="accent" disabled={ws.pickingKey != null}
                     onClick={() => ws.pickCandidate(c as ShoppingResult, e.target_label ?? "", key, e.id)} className="mt-1">
                     {picking ? <><Spinner size="xs" className="text-current" /> Using…</> : "Use this instead"}
                   </Button>

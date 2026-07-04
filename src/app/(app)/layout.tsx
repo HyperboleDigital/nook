@@ -27,7 +27,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           key={item.href}
           href={item.href}
           onClick={() => setOpen(false)}
-          className={`flex items-center gap-2.5 px-3 py-2 text-sm transition-colors ${
+          className={`flex items-center gap-2.5 px-3 py-2 rounded-full text-sm transition-colors ${
             isActive(item.href)
               ? "bg-[var(--foreground)] text-[var(--background)] font-medium"
               : "text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)]"
@@ -98,7 +98,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       {open && (
         <div className="lg:hidden fixed inset-0 z-40">
           <div className="absolute inset-0 bg-black/40" onClick={() => setOpen(false)} />
-          <aside className="absolute inset-y-0 left-0 w-64 max-w-[80vw] bg-[var(--card)] border-r border-[var(--border)] flex flex-col shadow-xl">
+          <aside className="absolute inset-y-0 left-0 w-64 max-w-[80vw] bg-[var(--card)] border-r border-[var(--border)] flex flex-col shadow-[var(--shadow-pop)]">
             {sidebarInner}
           </aside>
         </div>

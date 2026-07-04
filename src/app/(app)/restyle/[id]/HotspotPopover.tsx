@@ -24,7 +24,7 @@ export default function HotspotPopover({
 
   return (
     <div
-      className="absolute z-10 w-72 max-w-[85vw] border border-[var(--foreground)] bg-white"
+      className="absolute z-10 w-72 max-w-[85vw] rounded-2xl border border-[var(--border)] bg-white shadow-[var(--shadow-pop)]"
       style={{
         left: `${Math.min(Math.max(cx, 18), 82)}%`,
         top: `${Math.min(cy + 6, 88)}%`,
@@ -34,7 +34,7 @@ export default function HotspotPopover({
       <div className="flex items-start gap-3 p-3 pb-2">
         {edit.reference_url && (
           /* eslint-disable-next-line @next/next/no-img-element */
-          <img src={edit.reference_url} alt="" className="h-16 w-16 object-cover border border-[var(--border)] shrink-0" />
+          <img src={edit.reference_url} alt="" className="h-16 w-16 object-cover rounded-xl border border-[var(--border)] shrink-0" />
         )}
         <div className="min-w-0 flex-1 space-y-0.5">
           <p className="text-sm font-semibold capitalize leading-snug">{edit.product_title ?? label}</p>
@@ -57,12 +57,12 @@ export default function HotspotPopover({
       )}
 
       <div className="flex gap-2 p-3 pt-0">
-        <Button size="sm" variant="outline" className="flex-1" onClick={onShowSimilar}>
+        <Button size="sm" variant="accentSoft" className="flex-1" onClick={onShowSimilar}>
           <Search className="h-3.5 w-3.5" /> Show similar
         </Button>
         {hasProduct && (
           <a href={edit.buy_url!} target="_blank" rel="noopener noreferrer" className="flex-1">
-            <Button size="sm" variant="primary" className="w-full">
+            <Button size="sm" variant="accent" className="w-full">
               <ShoppingCart className="h-3.5 w-3.5" /> Buy
             </Button>
           </a>

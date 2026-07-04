@@ -38,7 +38,7 @@ export default function GenerateBar({ ws }: { ws: RestyleWorkspace }) {
           <MoreHorizontal className="h-4 w-4" />
         </IconButton>
         {menuOpen && (
-          <div className="absolute bottom-full left-0 mb-2 w-56 border border-[var(--border)] bg-white shadow-none">
+          <div className="absolute bottom-full left-0 mb-2 w-56 rounded-2xl border border-[var(--border)] bg-white shadow-[var(--shadow-pop)] overflow-hidden">
             <button type="button" onClick={emptyRoom}
               className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left hover:bg-[var(--muted)] transition-colors">
               <Eraser className="h-4 w-4 text-[var(--muted-foreground)]" /> Empty the room
@@ -53,7 +53,7 @@ export default function GenerateBar({ ws }: { ws: RestyleWorkspace }) {
       <Button variant="primary" size="lg" className="flex-1" disabled={!ws.canGenerate || ws.generating} onClick={() => ws.generate()}>
         {ws.generating
           ? <>Generating…</>
-          : <>Generate{ws.activeEdits.length > 0 && <span className="ml-1 bg-white/20 text-[10px] font-bold px-1.5 py-0.5">{ws.activeEdits.length}</span>}</>}
+          : <>Generate{ws.activeEdits.length > 0 && <span className="ml-1 rounded-full bg-white/20 text-[10px] font-bold px-1.5 py-0.5">{ws.activeEdits.length}</span>}</>}
       </Button>
     </div>
   );

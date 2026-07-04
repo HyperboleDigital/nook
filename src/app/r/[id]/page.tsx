@@ -59,7 +59,7 @@ export default async function PublicRestylePage({ params }: { params: Promise<{ 
         <div className="flex flex-col lg:flex-row gap-5 lg:items-start">
           {/* Room */}
           <div className="w-full lg:flex-1 min-w-0">
-            <div className="rounded-2xl overflow-hidden bg-[var(--muted)] border border-[var(--border)] flex items-center justify-center p-2">
+            <div className="rounded-2xl overflow-hidden bg-[var(--muted)] border border-[var(--border)] shadow-[var(--shadow-soft)] flex items-center justify-center p-2">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={restyle.current_url} alt={restyle.title ?? "Room design"} className="block max-w-full max-h-[74vh] object-contain rounded-lg" />
             </div>
@@ -67,7 +67,7 @@ export default async function PublicRestylePage({ params }: { params: Promise<{ 
 
           {/* Shop this look */}
           <div className="w-full lg:w-96 lg:shrink-0">
-            <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-4 space-y-3">
+            <div className="bg-[var(--card)] border border-[var(--border)] rounded-2xl shadow-[var(--shadow-soft)] p-4 space-y-3">
               <div className="flex items-center gap-2">
                 <ShoppingBag className="h-4 w-4 text-slate-700" />
                 <p className="text-sm font-semibold text-slate-800">Shop this look</p>
@@ -81,7 +81,7 @@ export default async function PublicRestylePage({ params }: { params: Promise<{ 
                   <div className="space-y-2">
                     {products.map((e) => (
                       <a key={e.id} href={e.buy_url ?? "#"} target="_blank" rel="noopener noreferrer"
-                        className="flex gap-3 p-2.5 rounded-xl border border-[var(--border)] bg-white hover:border-slate-400 transition-colors">
+                        className="flex gap-3 p-2.5 rounded-xl border border-[var(--border)] bg-white shadow-[var(--shadow-soft)] hover:shadow-[var(--shadow-pop)] transition-shadow">
                         {e.reference_url && (
                           /* eslint-disable-next-line @next/next/no-img-element */
                           <img src={e.reference_url} alt="" className="h-16 w-16 rounded-lg object-cover border border-[var(--border)] shrink-0 bg-[var(--muted)]" />

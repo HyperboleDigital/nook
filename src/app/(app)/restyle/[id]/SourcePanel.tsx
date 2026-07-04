@@ -67,7 +67,7 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
       <div className="flex items-center gap-3">
         {matchedObject && ws.restyle && (
           <CroppedThumb imageUrl={ws.restyle.original_url} box_2d={matchedObject.box_2d}
-            className="h-14 w-14 border border-[var(--border)] bg-[var(--muted)] shrink-0" />
+            className="h-14 w-14 rounded-xl overflow-hidden border border-[var(--border)] bg-[var(--muted)] shrink-0" />
         )}
         <p className="text-sm font-medium capitalize">
           {sourcing.mode === "swap" ? `Replacing the ${label}` : label ? `Adding ${label}` : "Adding a new piece"}
@@ -130,7 +130,7 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
       )}
 
       {srcMode === "link" && (
-        <div className="border border-[var(--border)] bg-white p-4 space-y-2">
+        <div className="rounded-2xl border border-[var(--border)] bg-white p-4 space-y-2">
           <p className="text-[11px] text-[var(--muted-foreground)]">Preferred — paste a Wayfair, Amazon, Walmart or Home Depot product link.</p>
           <div className="flex gap-2">
             <Input type="url" value={productUrl} onChange={(e) => setProductUrl(e.target.value)}
@@ -148,7 +148,7 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
       )}
 
       {srcMode === "photo" && (
-        <div className="border border-[var(--border)] bg-white p-4 space-y-2.5"
+        <div className="rounded-2xl border border-[var(--border)] bg-white p-4 space-y-2.5"
           onPaste={(e) => { const f = Array.from(e.clipboardData.files).find((f) => f.type.startsWith("image/")); if (f) pickPending(f); }}>
           <p className="text-[11px] text-[var(--muted-foreground)]">Upload a photo or screenshot for inspiration — we&apos;ll place it in your room. Buyable options are found for you after you generate.</p>
           <input ref={fileRef} type="file" accept="image/*" className="hidden"
@@ -157,7 +157,7 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
           {pendingFile && !ws.stagingLink ? (
             <div className="space-y-2">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={pendingPreview ?? ""} alt="Selected" className="w-full max-h-44 object-contain border border-[var(--border)] bg-[var(--muted)]" />
+              <img src={pendingPreview ?? ""} alt="Selected" className="w-full max-h-44 object-contain rounded-xl border border-[var(--border)] bg-[var(--muted)]" />
               <div className="flex gap-2">
                 <Button variant="primary" className="flex-1" onClick={confirmPending}>Use this photo</Button>
                 <Button variant="outline" onClick={() => { setPendingFile(null); fileRef.current?.click(); }}>Choose different</Button>
@@ -165,7 +165,7 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
             </div>
           ) : (
             <button type="button" disabled={ws.stagingLink} onClick={() => fileRef.current?.click()}
-              className="w-full border border-dashed border-[var(--border)] py-3 text-xs text-[var(--muted-foreground)] hover:border-[var(--foreground)] hover:text-[var(--foreground)] transition-colors disabled:opacity-40 flex items-center justify-center gap-2">
+              className="w-full rounded-2xl border border-dashed border-[var(--border)] py-3 text-xs text-[var(--muted-foreground)] hover:border-[var(--foreground)] hover:text-[var(--foreground)] transition-colors disabled:opacity-40 flex items-center justify-center gap-2">
               {ws.stagingLink ? <><Spinner size="sm" /> Placing it in your room…</> : "Choose or paste a photo"}
             </button>
           )}
@@ -173,7 +173,7 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
       )}
 
       {srcMode === "describe" && (
-        <div className="border border-[var(--border)] bg-white p-4 space-y-2.5">
+        <div className="rounded-2xl border border-[var(--border)] bg-white p-4 space-y-2.5">
           <p className="text-[11px] text-[var(--muted-foreground)]">No link or photo? Describe it — color, material, style.</p>
           <div className="flex gap-2">
             <Input type="text" value={descText} onChange={(e) => setDescText(e.target.value)}

@@ -15,7 +15,7 @@ export default function ChipRow({ ws }: { ws: RestyleWorkspace }) {
   if (ws.detecting && ws.objects.length === 0) {
     return (
       <div className="flex gap-2 overflow-x-auto pb-1">
-        {[0, 1, 2].map((i) => <Skeleton key={i} className="h-10 w-24 shrink-0" />)}
+        {[0, 1, 2].map((i) => <Skeleton key={i} className="h-10 w-24 shrink-0 rounded-full" />)}
       </div>
     );
   }

@@ -6,7 +6,7 @@
 Nook is a SaaS for real estate agents. Three core features:
 1. **3D Tours** — agent uploads a property walkthrough video → GPU processes it into a Gaussian Splat (.ply) → agent shares a 3D walkthrough link with clients
 2. **Reels** — agent generates a cinematic 9:16 social media video from a property photo (via Higgsfield AI)
-3. **Room Restyle** — agent uploads a room photo → AI (Gemini "Nano Banana" image model) restages it with new furniture/decor → each swapped item is matched to a real, buyable product ("shop the look") via Google Lens + retailer APIs → agent shares a client link. This is the feature under active development.
+3. **Room Restyle** — agent uploads a room photo → taps a detected item (or a "+ Add" chip) on a canvas-first editor → sources it via a pasted retailer link, an inspo photo, or a description → AI (Gemini "Nano Banana" image model) restages the room → each swapped item is matched to a real, buyable product ("shop the look") via Google Lens + retailer APIs, searched only AFTER generate (not the moment a photo is uploaded) → agent shares a client link. This is the feature under active development.
 
 Live app: https://nook-lime.vercel.app  
 GitHub: https://github.com/HyperboleDigital/nook
@@ -34,16 +34,20 @@ All three pipelines are wired and deployed. **Room Restyle is the feature under 
 - Clerk auth with route protection via `src/proxy.ts`
 - 3D Tours: two-step upload (browser → Vercel Blob CDN → Modal worker), polling, SuperSplat viewer, `public_slug` share link
 - Higgsfield Reels confirmed working
-- Room Restyle: full wizard flow (upload room → pick item → find/pick product → AI recompose → shop-the-look result with buy links + running total), Swiss-Minimalism design system, clipboard paste, auto-search on item select, expandable staged items with saved options, shareable client link
+- Room Restyle: canvas-first editor (room photo is the centerpiece, tap a hotspot/chip to source), server-persisted product search deferred until after generate, "Similar items" + "Shop this look" + "Queued changes" panels, shareable client link. See the dedicated section below — this was substantially rebuilt in the most recent session (step wizard → canvas editor).
 
 **Not yet tested end-to-end:**
 - Full video upload → Modal job → PLY → viewer flow (pipeline is wired but no real test upload completed yet)
+- The canvas-first Restyle editor has not been click-tested in a real browser by Claude (no auth available in that session) — verified only via typecheck/lint/build/dev-server smoke tests. Exercise the real flow before assuming it's fully correct.
 
 **Pending / known issues:**
 - Clerk keys are still `pk_test_` (dev mode) — needs production keys before real users
 - Supabase Storage bucket `nook-uploads` still exists but is no longer used
 - No usage/quota enforcement on free plan yet
-- Restyle: hotspot dots on the render deferred (detection boxes are from the original image, don't line up with the re-rendered room)
+- **`supabase/migrations/013_restyle_searches.sql` needs to be applied manually** (no Supabase CLI is configured in this project — migrations are pasted into the Supabase SQL editor by hand). Until it's run, `GET /api/restyle/[id]/searches` 500s harmlessly (the client swallows the error and just starts with an empty search cache) — search/pick still works, results just won't persist across reloads.
+- **`supabase/migrations/014_restyle_room_type.sql` also needs manual application.** Adds a nullable `room_type` column to `restyles`, set by the capture wizard's room-type picker (`/restyle/new`). The insert in `POST /api/restyle` only includes `room_type` when a value was actually picked, so uploads work fine even before this migration is applied — the field is just silently dropped until then.
+- **`supabase/migrations/015_restyle_placement.sql` also needs manual application — BEFORE deploying the pin-placement code.** Adds `restyle_edits.placement` jsonb (`{x, y, note}`, 0–1000 box_2d space, set by the add-item tap-to-place pin) and drops the dead `restyle_versions` table. Unlike 014, this one is not optional-at-runtime: `PATCH /api/restyle/[id]/edits` writes the `placement` column directly and will 500 on an unknown column.
+- Restyle hotspots on a *render* are an approximation, not real detection: object positions are only ever detected on the original photo (`restyles.detected_objects`), so a hotspot on the styled result reuses that item's ORIGINAL box_2d position. Correct for the common case (a swap usually stays roughly where the original piece was) but can drift if Nano Banana repositions/resizes furniture significantly. "Added" items have no original position and never get a render hotspot — they still show in the shop panel.
 
 ---
 
@@ -73,36 +77,49 @@ All three pipelines are wired and deployed. **Room Restyle is the feature under 
 - Secrets in Modal: `MODAL_WEBHOOK_SECRET`, `NOOK_APP_URL`, `BLOB_READ_WRITE_TOKEN`
 
 ### Room Restyle — API routes (`src/app/api/restyle/`)
-- `route.ts` — POST, create a restyle project from a room photo. `sharp` canonicalizes (EXIF-rotate + downscale to 1536px), uploads original to Blob, inserts `restyles` row. No AI call at create.
-- `detect/route.ts` — POST, Gemini detects editable objects in the room (JSON `{imageUrl,restyleId}` or multipart). Caches `detected_objects` on the project (detection is non-deterministic, so it's persisted for a stable item list).
-- `[id]/product/route.ts` — POST, stage a product as a reference edit. 3 input shapes: JSON `{url}` (pasted retailer link), JSON `{token}` (SerpApi immersive token → resolved URL), or multipart image (user's own screenshot). `targetLabel` in the body force-targets a specific detected item (the wizard sends this so "Use this in the room" replaces the right object). Auto-decides replace-vs-add. Does NOT render.
-- `[id]/visual-search/route.ts` — POST, screenshot → find the actual product via Google Lens, falling back to keyword "similar" search; Gemini scores candidates 0–10 against the photo. Text-only path (`query`) for "Describe it". Does NOT render.
+- `route.ts` — POST, create a restyle project from a room photo. `sharp` canonicalizes (EXIF-rotate + downscale to 1536px), uploads original to Blob, inserts `restyles` row, then fires object detection in the background via Next's `after()` using the buffer already in memory (no refetch) — chips are usually ready by the time the editor loads instead of a separate client-triggered detect call.
+- `detect/route.ts` — legacy/fallback path: Gemini detects editable objects in the room (JSON `{imageUrl,restyleId}` or multipart). The client only calls this if the background detection from `route.ts` hasn't landed after ~20s of polling. Caches `detected_objects` on the project (detection is non-deterministic, so it's persisted for a stable item list).
+- `[id]/product/route.ts` — POST, stage a product/photo as a reference edit. Input shapes: JSON `{url}` (pasted retailer link — a confirmed real product), JSON `{token}` (SerpApi immersive token → resolved URL), or multipart image (an inspo photo — staged as a reference with **no buy link yet**; search is deferred, see below). `targetLabel` force-targets a specific slot; `replaceEditId` deletes a superseded edit (e.g. an inspo photo now replaced by a real pick) in the same request. Auto-decides replace-vs-add via `matchDetected`. Does NOT render. Shared staging logic (insert + single-active-per-label dedupe) lives in `src/lib/restyle-edits.ts`'s `stageEdit()`.
+- `[id]/visual-search/route.ts` — POST, find buyable products via Google Lens + keyword search, Gemini-scored against the target image. Three input shapes: `image` (file), `imageUrl` (an already-staged/cropped photo — used for the deferred post-generate search, see below), or `query` (text, from "Describe it"). Responds fast with unscored results, then finishes Gemini scoring + resolves Wayfair immersive tokens in the background via `after()`, persisting the final set to `restyle_searches` (see DB tables). Does NOT render.
+- `[id]/searches/route.ts` — GET, the persisted search results for a project (optional `?label=`). Replaces what used to be a client-side localStorage cache.
 - `[id]/edits/route.ts` — POST add / PATCH toggle / DELETE a change layer (multipart). Does NOT render.
-- `[id]/generate/route.ts` — POST, renders the current ACTIVE edit set (calls `recompose`).
-- `[id]/items/route.ts` — item list helper.
+- `[id]/generate/route.ts` — POST, renders the current ACTIVE edit set (calls `recompose`). **This is also when shopping search actually happens for inspo-only items** — see "Deferred search" below.
+- `[id]/items/route.ts` — item list helper (custom/not-detected items).
 - `restyles/route.ts`, `restyles/[id]/route.ts` — list/read restyle projects (plural — the gallery/index endpoints).
 
 ### Room Restyle — pages/components (`src/app/(app)/restyle/`)
 - `page.tsx` — restyle projects gallery.
-- `new/page.tsx` — upload/paste a room photo (clipboard paste supported; "Take a photo" only on phones, "Choose a photo" on desktop).
-- `[id]/page.tsx` — project shell; renders wizard or result.
-- `[id]/RestyleWizard.tsx` — the editing wizard: pick a detected item, source a product (auto-search on select, photo/describe tabs, always-visible candidate list), expandable staged items showing current pick + saved options + replace/remove.
-- `[id]/RestyleResult.tsx` — canvas + "Shop this look" product panel (cards with image/retailer/price/buy link, running total), compare slider, download, options strip, Edit actions.
-- `[id]/useRestyleWorkspace.ts` — client workspace hook (search, pickCandidate, staging, generate). `candidatesByLabel` cache lives in localStorage (`nook-restyle-${id}`, 24h TTL).
-- `[id]/ui.tsx` — restyle UI primitives: `Button`, `IconButton`, `ProductCard` (cva + lucide-react icons, Swiss-Minimalism style).
-- `[id]/shared.ts` — restyle tokens/helpers.
+- `new/page.tsx` — upload/paste a room photo (clipboard paste supported; "Take a photo" only on phones, "Choose a photo" on desktop). Client-side `downscaleImage()` before upload (see `src/lib/image-client.ts`).
+- `[id]/page.tsx` — thin shell: header (back link, title input) + `<RestyleStudio>`. No more wizard/result fork — one screen, `displayUrl` decides what the canvas shows.
+- `[id]/useRestyleWorkspace.ts` — the single state hook everything else reads from. Key concepts: `sourcing` (the item currently being sourced — `{label, mode: "swap"|"add", view: "compose"|"similar", stagedEditId, lastStaged?}`, cleared entirely on panel close so stale banners can't outlive the item they describe), `searches` (per-label search state hydrated from `GET /searches` and updated in place as scoring finishes), `renderHotspots`/`viewingOriginal`/`stagedItems`/`productEdits`/`inspoEdits` (derived — see gotchas for what each one filters by). Picking a candidate (`pickCandidate`) is optimistic: the edit appears staged immediately using the search result's own thumbnail/title/price, reconciled or rolled back once the server responds.
+- `[id]/RestyleStudio.tsx` — layout owner. Desktop: canvas+chips on the left, a **persistent right rail** that defaults to `QueuedChanges` (viewing the original — nothing generated yet) or `ShopLook` (viewing a render), and swaps to `SourcePanel`/`SimilarItemsPanel` while `sourcing` is open. Mobile: same content stacks inline below the canvas; sourcing uses a bottom-sheet overlay instead (no room for a persistent rail).
+- `[id]/RestyleCanvas.tsx` — the room photo. Hotspots + `HotspotPopover` (thumbnail/price/Show-similar/Buy — only shown on a RENDER, since the original hasn't visually changed yet, see gotchas), compare slider, share/download.
+- `[id]/ObjectHotspots.tsx` — circular tap targets from `box_2d`, positioned as percentages. Solid white backing disc under every marker (a plain small dot disappears against a photo).
+- `[id]/ChipRow.tsx` — detected/custom item chips + "+ Add"; routes to `openSimilar` if the tapped item is already staged, `openSourcing` (compose form) if the slot is empty.
+- `[id]/SourcePanel.tsx` — the link/photo/describe sourcing form, for an EMPTY slot only. Shows a `CroppedThumb` of the actual item being replaced next to the label.
+- `[id]/SimilarItemsPanel.tsx` — clean product-card list ("Recommended based on X") for a slot that already has something placed — the "Show similar" destination. No tabs; auto-triggers a search against the staged item's own reference photo if one hasn't run yet.
+- `[id]/CroppedThumb.tsx` — crops a region out of a full photo using CSS position/size math only (no canvas/server round-trip) — used to show "here's the actual item" next to a label instead of just text.
+- `[id]/QueuedChanges.tsx` — right-rail default while viewing the original: pending swaps/adds, explicitly framed as "not in the photo yet" (do not conflate with `ShopLook` — see gotchas, this distinction fixed a real bug).
+- `[id]/ShopLook.tsx` — right-rail default while viewing a render: what's actually shoppable in the CURRENT image, plus inline search results for inspo-only items still being searched.
+- `[id]/GenerateBar.tsx` — sticky bottom bar; overflow menu (⋯) for "Empty the room" / "Start from original".
+- `[id]/VersionsStrip.tsx` — render-history thumbnails.
+- `[id]/ui.tsx` — Warm Modern primitives (cva + lucide-react): `Button` (variants include `accent`/`accentSoft` for buy/product actions), `IconButton`, `ProductCard`, `Sheet`/`SheetChrome` (mobile bottom-sheet; desktop docking is custom-built in `RestyleStudio`, not `Sheet`'s job anymore), `Chip`, `Spinner`, `Input`, `StatusBanner`, `Skeleton`/`SkeletonProductCard`, `ProgressOverlay`, `SegmentedTabs`, `SectionLabel`, `shopSummary`/`ShopSummaryPill` (the "n items · from $X" total, shared by `ShopLook` and the canvas's floating pill).
 
 ### Room Restyle — libraries (`src/lib/`)
-- `gemini.ts` — Gemini client. Key exports: `restyleRoom`, `composeEdits` (multi-edit compositor), `detectObjects`, `describeProduct`/`describeProductImages` (recover dimensions/proportions for accurate scale), `describeScreenshotForSearch`, `scoreImageMatches`. Models: `GEMINI_IMAGE_MODEL` = `gemini-2.5-flash-image`, `GEMINI_IMAGE_PRO_MODEL` = `gemini-3-pro-image-preview`, `GEMINI_VISION_MODEL` = `gemini-2.5-flash`.
-- `restyle-render.ts` — `uploadImage` (Blob upload chokepoint — see SharedArrayBuffer gotcha), `recompose` (caches renders per active-edit signature in `restyle_renders`), `closestAspect`.
+- `gemini.ts` — Gemini client. Every call now has a real fetch timeout (`AbortSignal.timeout`, 20s vision / 90s image-gen) — previously unbounded, relying only on the route's `maxDuration`. Key exports: `restyleRoom`, `composeEdits` (multi-edit compositor), `detectObjects`, `describeProduct`/`describeProductImages` (recover dimensions/proportions for accurate scale), `describeScreenshotForSearch` (also extracts a literal product title/brand if legible text is visible — stronger search signal than a generic description for niche/branded items), `locateProductPhoto` (crops UI chrome out of a screenshot before it pollutes Lens matching), `scoreImageMatches`. Models: `GEMINI_IMAGE_MODEL` = `gemini-2.5-flash-image`, `GEMINI_IMAGE_PRO_MODEL` = `gemini-3-pro-image-preview`, `GEMINI_VISION_MODEL` = `gemini-2.5-flash`.
+- `restyle-edits.ts` — shared "stage a reference edit" logic (`loadOwnedRestyle`, `editsFor`, `matchDetected`, `stageEdit`) used by both the product route and (historically) visual-search's stage mode, so the insert+dedupe logic doesn't drift between callers.
+- `restyle-render.ts` — `uploadImage` (Blob upload chokepoint — see SharedArrayBuffer gotcha), `recompose` (caches renders per active-edit signature in `restyle_renders`; original + every reference photo fetch in parallel), `closestAspect`.
 - `product.ts` — retailer product detail (Unwrangle for Wayfair/Walmart/Home Depot, Rainforest for Amazon).
-- `shopping-search.ts` — SerpApi Google Lens visual match + Google Shopping/Amazon/Walmart/HD keyword search; `resolveImmersiveToken`.
+- `shopping-search.ts` — SerpApi Google Lens visual match + Google Shopping/Amazon/Walmart/HD keyword search (always run in parallel, not gated behind a match-count threshold); `resolveImmersiveToken`/`resolveTokenUrls` (eagerly resolves Wayfair tokens to real URLs so "View on Wayfair" shows without waiting for a pick). Results are filtered to `supported` only before ever reaching the client — an unshoppable card is just noise.
+- `image-crop.ts` — `cropToBox` (sharp-based crop from a Gemini box_2d, used server-side for screenshot cleanup).
+- `image-client.ts` — `downscaleImage` (browser-side canvas resize before upload — phone photos routinely exceed Vercel's 4.5MB body limit).
 - `file-buf.ts` — `fileToBuffer` (stream-read a File/Blob) and `toUnsharedBuffer` (strip SharedArrayBuffer backing before a fetch/Blob-put body — see gotcha).
 
 ### Restyle DB tables (Supabase)
-- `restyles` — project (original_url, current_url, width/height, detected_objects, title, user_id, public_slug)
-- `restyle_edits` — change layers (kind `item`/`add`, target_label, reference_url/desc, buy_url, product_title/price, active, position)
+- `restyles` — project (original_url, current_url, width/height, detected_objects, custom_items, title, user_id, public_slug)
+- `restyle_edits` — change layers (kind `item`/`add`/`style`/`remove`/`refine`, target_label, reference_url/desc, buy_url, product_title/price, active, position)
 - `restyle_renders` — cached renders keyed by `signature` (comma-joined active edit ids) for instant toggle-back
+- `restyle_searches` (013_restyle_searches.sql, **needs manual application** — see "Pending / known issues") — persisted product-search results per `(restyle_id, label)`: `query`, `results` (jsonb `ShoppingResult[]`), `scored` (bool — false until Gemini scoring + Wayfair token resolution finish in the background). Replaces the old client-side localStorage cache.
 
 ---
 
@@ -146,12 +163,16 @@ NEXT_PUBLIC_APP_URL                 https://nook-lime.vercel.app
 ---
 
 ## Room Restyle flow (end-to-end)
-1. Agent goes to `/restyle/new`, uploads or pastes a room photo → `POST /api/restyle` (sharp canonicalizes, stores original, creates project) → redirect to `/restyle/[id]`.
-2. `POST /api/restyle/detect` finds editable objects; the item chips are cached on the project.
-3. Agent picks an item to swap/add. The wizard auto-searches for products (`visual-search` text path) or the agent uploads a photo / pastes a retailer link.
-4. Agent picks a product → `POST /api/restyle/[id]/product` stages it as a reference edit (with `targetLabel` so it replaces the right object). Staged items are expandable and keep their saved options.
-5. Agent hits generate → `POST /api/restyle/[id]/generate` → `recompose` composites all active edits with Gemini, uploads the render (cached per active-edit signature).
-6. Result screen shows the restyled room + a "Shop this look" panel: each swapped item as a card with retailer, price, and buy link, plus a running total. Compare slider + download. Shareable client link via `public_slug`.
+1. Agent goes to `/restyle/new`, uploads or pastes a room photo → `POST /api/restyle` (sharp canonicalizes, stores original, creates project, fires detection in the background) → redirect to `/restyle/[id]`.
+2. Canvas-first editor loads: room photo with tappable hotspot circles (real detected positions) + a chip row underneath. Right rail shows "Queued changes" (empty at first).
+3. Agent taps a hotspot/chip. Sourcing panel opens (side panel on desktop, bottom sheet on mobile):
+   - **Paste a link** → `POST /api/restyle/[id]/product` `{url}` stages it immediately as a confirmed real product (buy link known right away, no search needed).
+   - **Upload a photo** → `POST /api/restyle/[id]/product` (multipart) stages it as **inspo only** — no shopping search runs yet. This is deliberate: search used to fire the instant a photo was picked, spending API/token cost before the user had even seen the room or decided the item was worth shopping for.
+   - **Describe it** → manual "Find" triggers `POST /api/restyle/[id]/visual-search` (text `query`).
+4. Agent hits Generate → `POST /api/restyle/[id]/generate` → `recompose` composites all active edits with Gemini, uploads the render (cached per active-edit signature). **This is also when deferred search happens**: for every active edit that's inspo-only (a reference photo, no buy_url), the client calls `visual-search` with `imageUrl` (the already-staged, already-cropped photo) to find real buyable matches — scoped to whatever actually made it into the render, not everything ever staged.
+5. Canvas now shows the render. Hotspots reappear (positions approximated from each swapped item's ORIGINAL detected box — see gotchas) with a popover (thumbnail/price/Show-similar/Buy) on tap. Right rail switches to "Shop this look": shoppable items as cards (retailer/price/buy link/running total) plus inline search results for anything still resolving.
+6. "Show similar" (from a hotspot popover, a chip, or Shop-this-look's Replace button) opens `SimilarItemsPanel` — a clean product-card list to swap in an alternative, reusing the search that already ran rather than re-prompting for a link/photo.
+7. Compare slider + download on the canvas. Shareable client link via `public_slug`.
 
 ---
 
@@ -162,5 +183,8 @@ NEXT_PUBLIC_APP_URL                 https://nook-lime.vercel.app
 - The `supabase` pip package is no longer in the Modal worker (removed when switching to Vercel Blob).
 - Vercel body size limit is 4.5 MB — all large file operations must go direct to Vercel Blob from the browser.
 - **"SharedArrayBuffer is not allowed" on Vercel is an undici/fetch error, NOT a sharp error.** It's thrown by undici's fetch body validation (`allowShared:false`) when a Buffer whose `.buffer` is a genuine SharedArrayBuffer is used as a fetch body. Vercel Blob's `put()` sends the body via fetch, and on Vercel's Linux runtime `sharp`'s `toBuffer()` output is backed by a SharedArrayBuffer (libvips memory pool). It never reproduces on macOS. **Fix:** wrap any sharp-derived (or pool-backed) buffer in `toUnsharedBuffer()` (`src/lib/file-buf.ts`) before passing it to `put()`/fetch. Already applied at the single chokepoint `uploadImage()` in `src/lib/restyle-render.ts`. Do NOT chase this in sharp's *inputs* — that's the wrong layer. (`src/app/api/reels/route.ts` has the same latent pattern if it ever uploads a sharp-derived buffer.)
-- Restyle design system is **Swiss Minimalism**: `--primary: #7C3AED` (violet), `--radius: 0px` (sharp corners), no shadows (border-only depth), 8px grid, tight `letter-spacing: -0.02em` headings, single accent. Tokens in `src/app/globals.css`. Use `lucide-react` icons, never emoji. UI primitives (`Button`/`IconButton`/`ProductCard`) live in `src/app/(app)/restyle/[id]/ui.tsx` and use `cva`. `cn()` helper in `src/lib/utils.ts`.
+- Design system is **Warm Modern** (app-wide, not just restyle — replaced the earlier "Swiss Minimalism" system in a July 2026 reskin): `--primary: #1c1c1a` near-black (pills/CTAs), `--accent: #354733` forest green (buy/product actions — use the `accent`/`accentSoft` `Button` variants), warm off-white `--background: #faf9f6`, white `--card`. All buttons/chips/inputs/tabs are pill-shaped (`rounded-full`); cards/popovers/sheets use `rounded-2xl`/`rounded-3xl`. Depth comes from `shadow-[var(--shadow-soft)]` (resting) and `shadow-[var(--shadow-pop)]` (floating/hover) — `rounded-none` and `shadow-none` must not appear anywhere (grep-gated). 8px grid, tight `letter-spacing: -0.02em` headings. Tokens in `src/app/globals.css`. Use `lucide-react` icons, never emoji. Full primitive set lives in `src/app/(app)/restyle/[id]/ui.tsx` (see the pages/components list above) and uses `cva`. `cn()` helper in `src/lib/utils.ts`. `shared.ts` (old rounded-corner style constants) was deleted along with the wizard — nothing in the restyle tree should import styling from anywhere but `ui.tsx` now. A hotspot pulse animation (`@keyframes hotspot-pulse` in globals.css) is disabled for everyone by the existing `prefers-reduced-motion` block — don't add a second guard around it.
 - Detection is non-deterministic — always read the item list from the persisted `restyles.detected_objects`, never re-detect on each load (the chips would change every time).
+- **"Placed" UI (the hotspot popover, buy links, price) must never show on the ORIGINAL photo** — only on a render, where the item is genuinely visible. A past bug (`StagedStrip`, since deleted) showed full product cards for anything queued to generate regardless of whether the currently-displayed image reflected it, which reads as "the app is lying about what's in my room." The fix pattern: gate on `ws.viewingOriginal` (or the render's `signature`-derived `shownProductIds`, which `productEdits`/`inspoEdits`/`renderHotspots` all filter through) — never on "is something staged" alone. `QueuedChanges` is the deliberately-different "pending, not real yet" view for while `viewingOriginal` is true.
+- Deferred search cost note: this was a direct product decision (see the "Room Restyle flow" step 4) — don't reintroduce an automatic search-on-photo-upload without checking with the user first, since removing it was explicitly to avoid spending API/token cost before the user has committed to generating.
+- `next/server`'s `after()` is used twice in restyle: object detection at project-create time, and Gemini scoring / Wayfair token resolution in `visual-search`. On Vercel, `after()` work runs within the route's own `maxDuration` (via `waitUntil`) — if you extend either of those background jobs, check the route's `maxDuration` covers it.

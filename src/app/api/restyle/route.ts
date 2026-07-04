@@ -9,6 +9,8 @@ import { detectObjects } from "@/lib/gemini";
 // Cap the working resolution; every render is normalized to the canonical dims.
 const MAX_DIM = 1536;
 
+const ROOM_TYPES = ["living_room", "bedroom", "dining", "home_office", "multi_use", "other"] as const;
+
 // Detection can take a few seconds on top of the create itself — give after() room
 // under the route's own maxDuration (Vercel bounds after() work to it).
 export const maxDuration = 60;
@@ -26,6 +28,8 @@ export async function POST(req: Request) {
     const photo = form.get("photo") as File | null;
     if (!photo) return NextResponse.json({ error: "A room photo is required" }, { status: 400 });
     const title = (form.get("title") as string | null)?.trim() || "Untitled room";
+    const roomTypeRaw = (form.get("room_type") as string | null)?.trim();
+    const roomType = ROOM_TYPES.includes(roomTypeRaw as (typeof ROOM_TYPES)[number]) ? roomTypeRaw : null;
 
     // Canonicalize the original: EXIF-rotate + downscale to MAX_DIM (keeps aspect).
     // Copy into a fresh (non-shared) buffer — a view over a SharedArrayBuffer is rejected downstream.
@@ -54,6 +58,7 @@ export async function POST(req: Request) {
         current_url: originalUrl,
         width: meta.width ?? null,
         height: meta.height ?? null,
+        ...(roomType ? { room_type: roomType } : {}),
       })
       .select().single();
     if (error || !created) return NextResponse.json({ error: error?.message ?? "DB error" }, { status: 500 });

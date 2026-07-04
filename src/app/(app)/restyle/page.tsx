@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plus, Sofa, Trash2 } from "lucide-react";
+import { ArrowUpRight, Plus, Trash2, UploadCloud } from "lucide-react";
 import { Button, IconButton, Skeleton, Spinner } from "./[id]/ui";
 
 interface RestyleCard {
@@ -57,23 +57,26 @@ export default function RestyleHistoryPage() {
 
       {items === null ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-          {[0, 1, 2].map((i) => <Skeleton key={i} className="aspect-[4/3]" />)}
+          {[0, 1, 2].map((i) => <Skeleton key={i} className="aspect-[4/3] rounded-3xl" />)}
         </div>
       ) : items.length === 0 ? (
-        <div className="border border-dashed border-[var(--border)] p-16 text-center">
-          <Sofa className="h-8 w-8 mx-auto mb-3 text-[var(--muted-foreground)]" strokeWidth={1.5} />
+        <Link href="/restyle/new" className="block rounded-3xl border-2 border-dashed border-[var(--border)] p-16 text-center hover:border-[var(--foreground)] transition-colors">
+          <UploadCloud className="h-8 w-8 mx-auto mb-3 text-[var(--muted-foreground)]" strokeWidth={1.5} />
           <p className="text-sm text-[var(--muted-foreground)] mb-4">No restyles yet.</p>
-          <Link href="/restyle/new">
-            <Button variant="primary" size="sm">Start your first one →</Button>
-          </Link>
-        </div>
+          <Button variant="primary" size="sm">Start your first one →</Button>
+        </Link>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
           {items.map((r) => (
-            <div key={r.id} className="group relative border border-[var(--border)] hover:border-[var(--foreground)] transition-colors">
+            <div key={r.id} className="group relative rounded-3xl overflow-hidden bg-[var(--card)] shadow-[var(--shadow-soft)] hover:shadow-[var(--shadow-pop)] transition-shadow">
               <Link href={`/restyle/${r.id}`} className="block">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={r.current_url} alt={r.title ?? "Restyle"} className="aspect-[4/3] w-full object-cover bg-[var(--muted)]" />
+                <div className="relative">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={r.current_url} alt={r.title ?? "Restyle"} className="aspect-[4/3] w-full object-cover bg-[var(--muted)]" />
+                  <span className="absolute bottom-2 right-2 h-9 w-9 rounded-full bg-white/90 shadow-[var(--shadow-soft)] flex items-center justify-center">
+                    <ArrowUpRight className="h-4 w-4 text-[var(--foreground)]" />
+                  </span>
+                </div>
                 <div className="p-3">
                   <div className="text-sm font-medium truncate">{r.title ?? "Untitled"}</div>
                   <div className="text-xs text-[var(--muted-foreground)]">{new Date(r.updated_at).toLocaleDateString()}</div>

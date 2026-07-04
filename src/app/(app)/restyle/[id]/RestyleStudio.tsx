@@ -24,7 +24,7 @@ export default function RestyleStudio({ ws }: { ws: RestyleWorkspace }) {
   const sourcingTitle = ws.sourcing?.view === "similar" ? "Similar items" : ws.sourcing?.mode === "swap" ? "Swap item" : "Add item";
 
   return (
-    <div className="flex flex-col md:flex-row md:items-start md:gap-0 md:border md:border-[var(--border)] md:h-[calc(100dvh-140px)]">
+    <div className="flex flex-col md:flex-row md:items-start md:gap-0 md:border md:border-[var(--border)] md:rounded-3xl md:overflow-hidden md:h-[calc(100dvh-140px)]">
       <div className="flex-1 min-w-0 flex flex-col md:h-full md:overflow-y-auto">
         <div className="p-3 md:p-4 space-y-3 flex-1">
           <RestyleCanvas ws={ws} />
