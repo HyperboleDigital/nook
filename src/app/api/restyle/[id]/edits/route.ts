@@ -62,7 +62,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   return NextResponse.json({ edits: await editsFor(id) });
 }
 
-// PATCH — toggle active state. JSON: { editId, active } or { states: { [editId]: bool } }.
+// PATCH — toggle active state and/or set placement.
+// JSON: { editId, active?, kind?, placement? } or { states: { [editId]: bool } }.
+// placement is {x, y, note?} in 0–1000 box_2d space, or null to clear.
 // Does NOT recompose — call POST /generate to render the current active set.
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { userId } = await auth();
@@ -81,8 +83,33 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     const update: Record<string, unknown> = {};
     if (typeof body.active === "boolean") update.active = body.active;
     if (body.kind === "item" || body.kind === "add") update.kind = body.kind; // replace ⇄ add toggle
+    if (body.placement === null) {
+      update.placement = null;
+    } else if (body.placement && typeof body.placement === "object") {
+      const { x, y, note } = body.placement;
+      if (typeof x === "number" && typeof y === "number" && x >= 0 && x <= 1000 && y >= 0 && y <= 1000) {
+        update.placement = {
+          x: Math.round(x),
+          y: Math.round(y),
+          note: typeof note === "string" && note.trim() ? note.trim().slice(0, 200) : null,
+        };
+      }
+    }
     if (Object.keys(update).length) {
       await supabaseAdmin.from("restyle_edits").update(update).eq("id", body.editId).eq("restyle_id", id);
+    }
+
+    // Changing placement changes what this edit renders as, but the render cache is keyed
+    // by edit IDs only — so any cached render containing this edit is now stale. Delete the
+    // rows (not the blobs: current_url may still point at one; the image keeps displaying,
+    // and the next generate re-renders fresh instead of cache-hitting the old placement).
+    if (update.placement !== undefined) {
+      const { data: cachedRows } = await supabaseAdmin
+        .from("restyle_renders").select("id, signature").eq("restyle_id", id);
+      const stale = (cachedRows ?? []).filter((r) => r.signature.split(",").includes(body.editId));
+      if (stale.length) {
+        await supabaseAdmin.from("restyle_renders").delete().in("id", stale.map((r) => r.id));
+      }
     }
   }
 

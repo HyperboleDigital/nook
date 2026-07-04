@@ -1,0 +1,56 @@
+import type { DetectedObject } from "@/types";
+
+export interface PinPlacement {
+  x: number;
+  y: number;
+  note?: string | null;
+}
+
+// Same filter as the client's NOT_SWAPPABLE (useRestyleWorkspace.ts) — duplicated here
+// rather than imported so server code doesn't pull in a client hook module.
+const STRUCTURAL_LABEL = /^(the\s+)?(left|right|back|front|far)?\s*(walls?|ceiling|floors?)$/i;
+
+/**
+ * Convert a 0–1000 pin on the original photo into region-level natural language for the
+ * composeEdits "Place it …" prompt slot, e.g.
+ * "in the left part of the room, on or near the floor, near the sofa (the user specifies: "next to the window")".
+ *
+ * Deliberately coarse: the image model can honor thirds/bands and named neighbors, not
+ * pixel coordinates — image-thirds also aren't room-thirds under perspective, so anything
+ * more precise would be false confidence.
+ */
+export function describePlacement(pin: PinPlacement, detected: DetectedObject[] | null): string {
+  const horizontal =
+    pin.x < 333 ? "in the left part of the room"
+    : pin.x < 667 ? "in the middle of the room"
+    : "in the right part of the room";
+
+  const vertical =
+    pin.y > 650 ? "on or near the floor"
+    : pin.y < 350 ? "high up (wall or upper area)"
+    : "at mid height";
+
+  // Nearest detected objects: distance from the pin to the clamped nearest point of each
+  // box ([ymin, xmin, ymax, xmax], 0–1000). Zero inside the box.
+  const neighbors = (detected ?? [])
+    .filter((o) => !STRUCTURAL_LABEL.test(o.label.trim()))
+    .map((o) => {
+      const [ymin, xmin, ymax, xmax] = o.box_2d;
+      const dx = Math.max(xmin - pin.x, 0, pin.x - xmax);
+      const dy = Math.max(ymin - pin.y, 0, pin.y - ymax);
+      return { label: o.label, dist: Math.hypot(dx, dy) };
+    })
+    .filter((n) => n.dist < 250)
+    .sort((a, b) => a.dist - b.dist)
+    .slice(0, 2);
+
+  const near =
+    neighbors.length === 2 ? `near the ${neighbors[0].label} and the ${neighbors[1].label}`
+    : neighbors.length === 1 ? `near the ${neighbors[0].label}`
+    : "";
+
+  const note = pin.note?.trim();
+  const noteSuffix = note ? ` (the user specifies: "${note}")` : "";
+
+  return `${horizontal}, ${vertical}${near ? `, ${near}` : ""}${noteSuffix}`;
+}

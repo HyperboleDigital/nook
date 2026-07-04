@@ -1,8 +1,10 @@
-import { put } from "@vercel/blob";
+import { del, put } from "@vercel/blob";
 import sharp from "sharp";
 import { composeEdits, type ComposeEditInput } from "@/lib/gemini";
 import { supabaseAdmin } from "@/lib/supabase";
 import { toUnsharedBuffer } from "@/lib/file-buf";
+import { describePlacement } from "@/lib/placement";
+import type { DetectedObject } from "@/types";
 
 const SUPPORTED: [string, number][] = [
   ["1:1", 1], ["3:4", 0.75], ["4:3", 1.3333], ["2:3", 0.6667], ["3:2", 1.5],
@@ -42,6 +44,27 @@ interface RestyleRow {
   original_url: string;
   width: number | null;
   height: number | null;
+  detected_objects: DetectedObject[] | null;
+}
+
+// Keep only the newest MAX_RENDERS cached renders per restyle — the cache exists for
+// instant toggle-back, not as a permanent archive, and each row holds a Blob image.
+const MAX_RENDERS = 8;
+
+/** Prune renders beyond the cap. Never deletes the row backing current_url; blob deletion
+ *  is best-effort and never fails the render that triggered it. */
+async function pruneRenders(restyleId: string, currentUrl: string): Promise<void> {
+  const { data: rows } = await supabaseAdmin
+    .from("restyle_renders")
+    .select("id, image_url, created_at")
+    .eq("restyle_id", restyleId)
+    .order("created_at", { ascending: false });
+  const victims = (rows ?? []).slice(MAX_RENDERS).filter((r) => r.image_url !== currentUrl);
+  if (victims.length === 0) return;
+  await supabaseAdmin.from("restyle_renders").delete().in("id", victims.map((v) => v.id));
+  try {
+    await del(victims.map((v) => v.image_url));
+  } catch { /* orphaned blobs are cheaper than a failed render */ }
 }
 
 /**
@@ -93,6 +116,9 @@ export async function recompose(
   const composeInputs: ComposeEditInput[] = active.map((e, i) => ({
     kind: e.kind, targetLabel: e.target_label, instruction: e.instruction,
     reference: references[i], referenceDesc: e.reference_desc,
+    placement: e.kind === "add" && e.placement
+      ? describePlacement(e.placement, restyle.detected_objects)
+      : null,
   }));
 
   const result = await composeEdits({
@@ -110,5 +136,6 @@ export async function recompose(
 
   await supabaseAdmin.from("restyle_renders").insert({ restyle_id: restyle.id, signature, image_url: url });
   await supabaseAdmin.from("restyles").update({ current_url: url, updated_at: new Date().toISOString() }).eq("id", restyle.id);
+  await pruneRenders(restyle.id, url);
   return url;
 }

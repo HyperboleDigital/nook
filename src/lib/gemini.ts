@@ -239,6 +239,9 @@ export interface ComposeEditInput {
   instruction?: string | null;
   reference?: { base64: string; mimeType: string };
   referenceDesc?: string | null;
+  /** Already-derived placement language for an "add" edit (see src/lib/placement.ts) —
+   *  wins over `instruction` in the "Place it …" slot. */
+  placement?: string | null;
 }
 
 /**
@@ -275,7 +278,9 @@ export async function composeEdits(params: {
         return `${n}. Replace the ${label} in this room with the product shown in image ${refNum.get(e)}.${desc} Use the reference's real proportions — its width, height, and depth ratio — even if they are very different from the current ${label}; do not keep the old ${label}'s height or footprint, and do not just re-skin or recolor the existing one — build the new product from scratch. If real dimensions are given above, size it to those measurements, scaled accurately to the room using the ceiling height (~8–9 ft), doorways, and nearby furniture as references. You may adjust the immediate area so it looks natural and correctly proportioned: if the new ${label} is shorter or longer, reposition what sits on or near it (e.g. lower the TV, move décor) and fill in the wall or floor the old ${label} used to cover. Reproduce the reference's design, materials, color, and details accurately, and match the room's perspective, lighting, and shadows. Keep the rest of the room — walls, windows, flooring, and other furniture — consistent.${extra}`;
       }
       case "add": {
-        const placement = e.instruction?.trim() ? ` Place it ${e.instruction.trim()}.` : "";
+        // Derived pin language wins; a describe-flow add's free-text instruction is the fallback.
+        const placementText = e.placement?.trim() ?? e.instruction?.trim() ?? "";
+        const placement = placementText ? ` Place it ${placementText}.` : "";
         if (!e.reference)
           return `${n}. Add a ${label} to this room.${placement} Make it look naturally placed — match the room's perspective, scale, lighting, and shadows. Do not remove or change any existing furniture or decor.`;
         const desc = e.referenceDesc?.trim() ? ` The reference ${label} is: ${e.referenceDesc.trim()}.` : "";

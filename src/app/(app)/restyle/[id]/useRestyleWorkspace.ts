@@ -76,6 +76,10 @@ export function useRestyleWorkspace(id: string) {
   // History preview
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
+  // Tap-to-place pin for an "add" edit — offered right after it stages successfully.
+  // Optional: Skip/cancel leaves placement null and generate is never blocked on it.
+  const [pinRequest, setPinRequest] = useState<{ editId: string; label: string } | null>(null);
+
   // ── Load: project + persisted searches in parallel, then poll detection if pending ──
   useEffect(() => {
     let active = true;
@@ -156,6 +160,31 @@ export function useRestyleWorkspace(id: string) {
   const openSimilar = (label: string, mode: "swap" | "add", stagedEditId: string | null) =>
     setSourcing({ label, mode, view: "similar", stagedEditId });
   const closeSourcing = () => setSourcing(null);
+
+  // Offer to pin an add edit's location — forces the original photo into view (pins are
+  // captured in the same 0–1000 coordinate space as detected_objects) and closes any open
+  // sourcing panel so the pin layer has the canvas to itself.
+  const requestPin = (editId: string, label: string) => {
+    setSourcing(null);
+    if (restyle) setPreviewUrl(restyle.original_url);
+    setPinRequest({ editId, label });
+  };
+  const cancelPin = () => setPinRequest(null);
+
+  // Persist a pin (or clear it with null). Optimistic; the server also deletes any cached
+  // render whose signature contains this edit id, since its content just changed.
+  const setPlacement = async (editId: string, placement: { x: number; y: number; note?: string | null } | null) => {
+    updateEdits((restyle?.edits ?? []).map((e) => (e.id === editId ? { ...e, placement } : e)));
+    setPinRequest((p) => (p?.editId === editId ? null : p));
+    try {
+      const r = await fetch(`/api/restyle/${id}/edits`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ editId, placement }),
+      });
+      const data = await r.json();
+      if (r.ok) updateEdits(data.edits);
+    } catch { /* best effort — optimistic is already set */ }
+  };
 
   // Text-only edit with no product — "just go with my description".
   const addEdit = async (fields: Record<string, string>) => {
@@ -244,6 +273,9 @@ export function useRestyleWorkspace(id: string) {
       setSourcing((s) => s && s.label === label
         ? { ...s, stagedEditId: data.added.id, lastStaged: { title: data.added.target_label, retailer: data.added.retailer } }
         : s);
+      // stageEdit may reclassify a would-be add into a swap when the label matches a
+      // detected object — only offer a pin for a genuine, still-unplaced add.
+      if (data.added.kind === "add") requestPin(data.added.id, data.added.target_label ?? label);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't fetch that product");
     } finally {
@@ -270,6 +302,7 @@ export function useRestyleWorkspace(id: string) {
       setSourcing((s) => s && s.label === label
         ? { ...s, stagedEditId: data.added.id, lastStaged: { title: data.added.target_label ?? label, retailer: "" } }
         : s);
+      if (data.added.kind === "add") requestPin(data.added.id, data.added.target_label ?? label);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't add that photo");
     } finally {
@@ -291,6 +324,7 @@ export function useRestyleWorkspace(id: string) {
       instruction: null, reference_url: c.thumbnail || null, reference_desc: null,
       active: true, position: prevEdits.length, created_at: new Date().toISOString(),
       buy_url: c.productUrl, product_title: c.title, product_price: c.price,
+      placement: null,
     };
     updateEdits([...prevEdits.filter((e) => e.id !== replaceEditId), optimisticEdit]);
     setPickingKey(key); setError(null);
@@ -307,6 +341,7 @@ export function useRestyleWorkspace(id: string) {
       setSourcing((s) => s && s.label === label
         ? { ...s, stagedEditId: data.added.id, lastStaged: { title: data.added.target_label, retailer: data.added.retailer } }
         : s);
+      if (data.added.kind === "add") requestPin(data.added.id, data.added.target_label ?? label);
     } catch (err) {
       updateEdits(prevEdits); // roll back the optimistic edit
       setError(err instanceof Error ? err.message : "Couldn't fetch that product");
@@ -316,7 +351,7 @@ export function useRestyleWorkspace(id: string) {
   };
 
   const generate = async () => {
-    setGenerating(true); setError(null); setPreviewUrl(null);
+    setGenerating(true); setError(null); setPreviewUrl(null); setPinRequest(null);
     try {
       const r = await fetch(`/api/restyle/${id}/generate`, { method: "POST" });
       const data = await r.json();
@@ -359,6 +394,7 @@ export function useRestyleWorkspace(id: string) {
 
   const remove = async (editId: string) => {
     setBusy(true);
+    setPinRequest((p) => (p?.editId === editId ? null : p));
     try {
       const r = await fetch(`/api/restyle/${id}/edits?editId=${editId}`, { method: "DELETE" });
       const data = await r.json();
@@ -426,15 +462,24 @@ export function useRestyleWorkspace(id: string) {
     e.reference_url && !e.buy_url && e.target_label && (shownProductIds ? shownProductIds.has(e.id) : e.active),
   );
 
-  // Hotspot positions for shoppable items on a RENDER — we only ever detected positions on
-  // the original photo, so approximate by reusing the swapped-out object's original box_2d
-  // (a swap usually stays roughly where the original piece was). "add" items have no known
-  // original position and don't get a render hotspot; they still show in the shop list below.
+  // Hotspot positions for shoppable items on a RENDER. Swaps: we only ever detected positions
+  // on the original photo, so approximate by reusing the swapped-out object's original box_2d
+  // (a swap usually stays roughly where the original piece was). Adds: use the tap-to-place
+  // pin as a small synthesized box around it — an add with no pin still has no render hotspot
+  // and shows only in the shop list below.
   const detectedByLabel = new Map((restyle?.detected_objects ?? []).map((o) => [o.label.toLowerCase(), o.box_2d]));
+  const shownForHotspot = (e: RestyleEdit) => shownProductIds ? shownProductIds.has(e.id) : e.active;
   const renderHotspots = edits
-    .filter((e) => e.kind === "item" && e.target_label && (shownProductIds ? shownProductIds.has(e.id) : e.active))
+    .filter((e) => e.target_label && shownForHotspot(e) && (e.kind === "item" || (e.kind === "add" && e.placement)))
     .map((e) => {
-      const box = detectedByLabel.get((e.target_label as string).toLowerCase());
+      const box: DetectedObject["box_2d"] | undefined = e.kind === "item"
+        ? detectedByLabel.get((e.target_label as string).toLowerCase())
+        : e.placement
+          ? [
+              Math.max(0, e.placement.y - 40), Math.max(0, e.placement.x - 40),
+              Math.min(1000, e.placement.y + 40), Math.min(1000, e.placement.x + 40),
+            ]
+          : undefined;
       return box ? { label: e.target_label as string, box_2d: box, edit: e } : null;
     })
     .filter((h): h is { label: string; box_2d: DetectedObject["box_2d"]; edit: RestyleEdit } => h !== null);
@@ -444,6 +489,7 @@ export function useRestyleWorkspace(id: string) {
     busy, generating, error, setError,
     titleDraft, setTitleDraft, saveTitle,
     sourcing, openSourcing, openSimilar, closeSourcing,
+    pinRequest, requestPin, cancelPin, setPlacement,
     searches, runVisualSearchByUrl, runTextSearch, pickCandidate, pickingKey,
     stagePhoto, stageProductLink, stagingLink,
     // slider

@@ -55,18 +55,8 @@ export interface RestyleEdit {
   product_title: string | null;
   /** Product price string (e.g. "$899.00"), shown on the Buy button. */
   product_price: string | null;
-}
-
-export interface RestyleVersion {
-  id: string;
-  restyle_id: string;
-  image_url: string;
-  label: string | null;
-  /** Reference photo used for this edit, if any. */
-  reference_url: string | null;
-  /** Cached object detection for this image (tap-to-select editing). */
-  objects: DetectedObject[] | null;
-  created_at: string;
+  /** Pin for an "add" edit — 0–1000 coords in the original photo (box_2d space) + optional note. */
+  placement: { x: number; y: number; note?: string | null } | null;
 }
 
 export interface RestyleRender {
@@ -87,9 +77,10 @@ export interface Restyle {
   height: number | null;
   detected_objects: DetectedObject[] | null;
   custom_items: string[] | null;
+  /** Room type chosen at capture time (see /restyle/new) — nullable, set via migration 014. */
+  room_type: string | null;
   created_at: string;
   updated_at: string;
-  versions?: RestyleVersion[];
   edits?: RestyleEdit[];
   renders?: RestyleRender[];
 }
