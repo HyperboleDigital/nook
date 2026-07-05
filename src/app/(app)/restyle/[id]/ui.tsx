@@ -62,6 +62,37 @@ export function IconButton({ className, ...props }: ButtonHTMLAttributes<HTMLBut
   );
 }
 
+// ── Switch ────────────────────────────────────────────────────────────────────
+// A real on/off switch (not an icon button) — used for the per-item "turn this off, revert
+// to original" control on a placed hotspot/product card. `checked` is presentational only;
+// callers regenerate immediately on toggle rather than tracking a persistent off state.
+export function Switch({
+  checked, onChange, disabled, "aria-label": ariaLabel,
+}: { checked: boolean; onChange: () => void; disabled?: boolean; "aria-label": string }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={ariaLabel}
+      disabled={disabled}
+      onClick={onChange}
+      className={cn(
+        "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors cursor-pointer",
+        "disabled:opacity-40 disabled:cursor-not-allowed",
+        checked ? "bg-[var(--accent)]" : "bg-[var(--border)]",
+      )}
+    >
+      <span
+        className={cn(
+          "inline-block h-4 w-4 rounded-full bg-white shadow-[var(--shadow-soft)] transition-transform",
+          checked ? "translate-x-6" : "translate-x-1",
+        )}
+      />
+    </button>
+  );
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 export function storeName(url: string | null | undefined): string {
   if (!url) return "store";

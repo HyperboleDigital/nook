@@ -148,6 +148,7 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
             )}
             {openHotspot && (
               <HotspotPopover edit={openHotspot.edit} label={openHotspot.label} cx={openHotspot.cx} cy={openHotspot.cy}
+                canToggleOff={ws.productEdits.length + ws.inspoEdits.length > 1}
                 onShowSimilar={showSimilarFromPopover} onToggleOff={toggleOffFromPopover} onClose={() => setOpenHotspot(null)} />
             )}
           </div>

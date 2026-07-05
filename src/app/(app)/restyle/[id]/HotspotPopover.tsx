@@ -1,12 +1,12 @@
 "use client";
 
-import { X, Search, ShoppingCart, Power } from "lucide-react";
+import { X, Search, ShoppingCart } from "lucide-react";
 import type { RestyleEdit } from "@/types";
-import { Button, IconButton, storeName } from "./ui";
+import { Button, IconButton, Switch, storeName } from "./ui";
 
 /**
  * Floating product card anchored near a tapped "placed" hotspot: thumb, title, retailer +
- * "Link to product", price, a Power toggle to revert it to original, then a "Show similar" /
+ * "Link to product", price, an on/off switch to revert it to original, then a "Show similar" /
  * buy action pair. The caller (RestyleCanvas) only ever shows this for a `placed` canvasHotspot,
  * which by construction can't occur on the original photo (see useRestyleWorkspace's
  * `canvasHotspots`) — so this component never needs to worry about running on an unrendered
@@ -15,12 +15,16 @@ import { Button, IconButton, storeName } from "./ui";
  * bottom edge.
  */
 export default function HotspotPopover({
-  edit, label, cx, cy, onShowSimilar, onToggleOff, onClose,
+  edit, label, cx, cy, canToggleOff, onShowSimilar, onToggleOff, onClose,
 }: {
   edit: RestyleEdit; // caller only renders this when something IS staged at the slot
   label: string;
   cx: number;
   cy: number;
+  // false when this is the ONLY item currently in the picture — turning it off would collapse
+  // the whole render back to the plain original, which reads as "nothing happened" rather than
+  // "this one thing turned off." Disable the switch in that case instead of surprising anyone.
+  canToggleOff: boolean;
   onShowSimilar: () => void;
   onToggleOff: () => void; // flips this item off and regenerates right away
   onClose: () => void;
@@ -61,14 +65,17 @@ export default function HotspotPopover({
           )}
           {edit.product_price && <p className="text-sm font-bold">{edit.product_price}</p>}
         </div>
-        <div className="flex items-center gap-1 shrink-0 -mt-1 -mr-1">
-          <IconButton onClick={onToggleOff} aria-label="Turn off — revert to original" className="h-6 w-6">
-            <Power className="h-3.5 w-3.5" />
-          </IconButton>
-          <IconButton onClick={onClose} aria-label="Close" className="h-6 w-6">
-            <X className="h-3.5 w-3.5" />
-          </IconButton>
-        </div>
+        <IconButton onClick={onClose} aria-label="Close" className="h-6 w-6 shrink-0 -mt-1 -mr-1">
+          <X className="h-3.5 w-3.5" />
+        </IconButton>
+      </div>
+
+      <div className="flex items-center justify-between px-3 pb-2">
+        <span className="text-xs text-[var(--muted-foreground)]">
+          {canToggleOff ? "In your room" : "Only change — can't turn off"}
+        </span>
+        <Switch checked={true} disabled={!canToggleOff} onChange={onToggleOff}
+          aria-label={canToggleOff ? "Turn off — revert to original" : "Can't turn off the only active change"} />
       </div>
 
       <div className="flex gap-2 p-3 pt-0">

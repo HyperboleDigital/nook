@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { Search, ShoppingBag, Replace, Power } from "lucide-react";
+import { Search, ShoppingBag, Replace } from "lucide-react";
 import type { RestyleWorkspace } from "./useRestyleWorkspace";
-import { Button, ProductCard, Spinner, shopSummary, storeName } from "./ui";
+import { Button, ProductCard, Spinner, Switch, shopSummary, storeName } from "./ui";
 
 /**
  * Exactly what's actually IN the currently displayed image — real products with a buy link,
@@ -11,14 +11,18 @@ import { Button, ProductCard, Spinner, shopSummary, storeName } from "./ui";
  * is deliberately NOT a search-results list: alternatives for an inspo item live behind its
  * "Find buyable matches" button (opens SimilarItemsPanel, pre-populated from the deferred
  * post-generate search — see the search kickoff in generate()) so this panel always reads as
- * "here's your room," not "here's what we found." Each card also has a Power toggle — flips
+ * "here's your room," not "here's what we found." Each card also has an on/off switch — flips
  * that item off and regenerates right away (a previously-seen combination is an instant cache
- * hit; a new one pays the real render cost, shown via `ws.generating`).
+ * hit; a new one pays the real render cost, shown via `ws.generating`). The switch is disabled
+ * when it's the only item currently shown — turning off the last one would collapse the whole
+ * render back to the plain original, which reads as "nothing happened" rather than "this one
+ * thing turned off."
  */
 export default function ShopLook({ ws }: { ws: RestyleWorkspace }) {
   const { productEdits, inspoEdits } = ws;
   const { total, priced: pricedCount } = shopSummary(productEdits);
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const canToggleOff = productEdits.length + inspoEdits.length > 1;
 
   const toggleOff = async (editId: string) => {
     setTogglingId(editId);
@@ -64,14 +68,17 @@ export default function ShopLook({ ws }: { ws: RestyleWorkspace }) {
               retailer={e.buy_url ? storeName(e.buy_url) : null}
               price={e.product_price}
               viewUrl={e.buy_url}>
-              <div className="flex gap-2 mt-1">
+              <div className="flex items-center gap-2 mt-1">
                 <Button size="sm" variant="subtle" disabled={busy}
                   onClick={() => ws.openSimilar(e.target_label ?? "item", e.kind === "add" ? "add" : "swap", e.id)}>
                   <Replace className="h-3.5 w-3.5" /> Replace
                 </Button>
-                <Button size="sm" variant="subtle" aria-label="Turn off" disabled={busy} onClick={() => toggleOff(e.id)}>
-                  {togglingId === e.id ? <Spinner size="xs" className="text-current" /> : <Power className="h-3.5 w-3.5" />}
-                </Button>
+                {togglingId === e.id ? (
+                  <Spinner size="xs" className="text-[var(--muted-foreground)]" />
+                ) : (
+                  <Switch checked={true} disabled={busy || !canToggleOff} onChange={() => toggleOff(e.id)}
+                    aria-label={canToggleOff ? "Turn off — revert to original" : "Can't turn off the only active change"} />
+                )}
               </div>
             </ProductCard>
           ))}
@@ -85,14 +92,17 @@ export default function ShopLook({ ws }: { ws: RestyleWorkspace }) {
               image={e.reference_url}
               title={e.target_label ?? "Item"}
               retailer="From your photo">
-              <div className="flex gap-2 mt-1">
+              <div className="flex items-center gap-2 mt-1">
                 <Button size="sm" variant="accentSoft" disabled={busy}
                   onClick={() => ws.openSimilar(e.target_label ?? "item", e.kind === "add" ? "add" : "swap", e.id)}>
                   <Search className="h-3.5 w-3.5" /> Find buyable matches
                 </Button>
-                <Button size="sm" variant="subtle" aria-label="Turn off" disabled={busy} onClick={() => toggleOff(e.id)}>
-                  {togglingId === e.id ? <Spinner size="xs" className="text-current" /> : <Power className="h-3.5 w-3.5" />}
-                </Button>
+                {togglingId === e.id ? (
+                  <Spinner size="xs" className="text-[var(--muted-foreground)]" />
+                ) : (
+                  <Switch checked={true} disabled={busy || !canToggleOff} onChange={() => toggleOff(e.id)}
+                    aria-label={canToggleOff ? "Turn off — revert to original" : "Can't turn off the only active change"} />
+                )}
               </div>
             </ProductCard>
           ))}
