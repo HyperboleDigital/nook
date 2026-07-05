@@ -102,6 +102,34 @@ export default function NewRestylePage() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
+  // Object detection is fired in the background at project-create time (see POST /api/restyle)
+  // and usually takes several seconds to land. Wait for it HERE, on this screen's existing
+  // loader, instead of navigating immediately — navigating right after create used to swap to
+  // the editor's OWN "Setting up your room…" spinner, which read as switching to a second,
+  // unrelated loading screen rather than one continuous wait. Falls back to firing a
+  // synchronous detect call if the background job hasn't landed after ~20s (same fallback the
+  // editor itself has, just run before navigating instead of after).
+  const waitForDetection = async (restyleId: string) => {
+    let originalUrl: string | null = null;
+    for (let i = 0; i < 10; i++) {
+      await new Promise((r) => setTimeout(r, 2000));
+      try {
+        const r = await fetch(`/api/restyles/${restyleId}`);
+        if (!r.ok) continue;
+        const d = await r.json();
+        originalUrl = d.original_url ?? originalUrl;
+        if (d.detected_objects && d.detected_objects.length > 0) return;
+      } catch { /* keep polling */ }
+    }
+    if (!originalUrl) return;
+    try {
+      await fetch("/api/restyle/detect", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageUrl: originalUrl, restyleId }),
+      });
+    } catch { /* best effort — the editor page has its own fallback too */ }
+  };
+
   const confirm = async () => {
     if (!file) return;
     setLoading(true);
@@ -139,6 +167,7 @@ export default function NewRestylePage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Upload failed");
+      await waitForDetection(data.restyleId);
       router.push(`/restyle/${data.restyleId}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");

@@ -1,6 +1,6 @@
 import { supabaseAdmin } from "@/lib/supabase";
 import { describeScreenshotForSearch, scoreImageMatches } from "@/lib/gemini";
-import { resolveTokenUrls, searchByImage, searchShopping, type ShoppingResult } from "@/lib/shopping-search";
+import { searchByImage, searchShopping, type ShoppingResult } from "@/lib/shopping-search";
 
 const titleKey = (t: string) => t.toLowerCase().replace(/\s+/g, " ").slice(0, 40);
 
@@ -75,7 +75,12 @@ export async function searchProductByImageUrl(params: {
         final = [...final].sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
       }
     } catch (err) { console.error("[restyle-search] scoring failed:", err); }
-    final = await resolveTokenUrls(final);
+    // NOTE: we deliberately do NOT eagerly resolve Wayfair immersive tokens here anymore — that
+    // spent one SerpApi call per token-only candidate in the background, for candidates the user
+    // mostly never picks. Resolution is now LAZY: the product route resolves a token the moment
+    // it's actually picked (see product/route.ts's `{ token }` branch). The only cost is that a
+    // token-only card shows no pre-resolved "View on X" link until picked — a fair trade for not
+    // burning a SerpApi call on every candidate of every search.
     await upsertSearch(restyleId, label, { query: searchQuery, results: final, scored: true });
   };
 

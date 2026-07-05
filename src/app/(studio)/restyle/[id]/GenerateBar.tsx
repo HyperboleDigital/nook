@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { MoreHorizontal, Eraser, RotateCcw } from "lucide-react";
+import { MoreHorizontal, Eraser, RotateCcw, Loader2 } from "lucide-react";
 import type { RestyleWorkspace } from "./useRestyleWorkspace";
 import { Button, IconButton } from "./ui";
 import { cn } from "@/lib/utils";
@@ -36,35 +36,49 @@ export default function GenerateBar({ ws, variant = "sticky" }: { ws: RestyleWor
     ws.setPreviewUrl(ws.restyle.original_url);
   };
 
+  const confirming = ws.confirmingCount > 0;
+
   return (
     <div className={cn(
-      "flex items-center gap-2",
+      "flex flex-col gap-1.5",
       variant === "floating"
-        ? "rounded-full bg-white shadow-[var(--shadow-pop)] border border-[var(--border)] px-2 py-2"
+        ? "rounded-3xl bg-white shadow-[var(--shadow-pop)] border border-[var(--border)] px-2 py-2"
         : "sticky bottom-0 bg-white border-t border-[var(--border)] px-4 py-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)]",
     )}>
-      <div className="relative" ref={menuRef}>
-        <IconButton onClick={() => setMenuOpen((v) => !v)} aria-label="More actions">
-          <MoreHorizontal className="h-4 w-4" />
-        </IconButton>
-        {menuOpen && (
-          <div className="absolute bottom-full left-0 mb-2 w-56 rounded-2xl border border-[var(--border)] bg-white shadow-[var(--shadow-pop)] overflow-hidden">
-            <button type="button" onClick={emptyRoom}
-              className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left hover:bg-[var(--muted)] transition-colors">
-              <Eraser className="h-4 w-4 text-[var(--muted-foreground)]" /> Empty the room
-            </button>
-            <button type="button" onClick={startFromOriginal}
-              className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left hover:bg-[var(--muted)] transition-colors border-t border-[var(--border)]">
-              <RotateCcw className="h-4 w-4 text-[var(--muted-foreground)]" /> Start from original
-            </button>
-          </div>
-        )}
+      <div className="flex items-center gap-2">
+        <div className="relative" ref={menuRef}>
+          <IconButton onClick={() => setMenuOpen((v) => !v)} aria-label="More actions">
+            <MoreHorizontal className="h-4 w-4" />
+          </IconButton>
+          {menuOpen && (
+            <div className="absolute bottom-full left-0 mb-2 w-56 rounded-2xl border border-[var(--border)] bg-white shadow-[var(--shadow-pop)] overflow-hidden">
+              <button type="button" onClick={emptyRoom}
+                className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left hover:bg-[var(--muted)] transition-colors">
+                <Eraser className="h-4 w-4 text-[var(--muted-foreground)]" /> Empty the room
+              </button>
+              <button type="button" onClick={startFromOriginal}
+                className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left hover:bg-[var(--muted)] transition-colors border-t border-[var(--border)]">
+                <RotateCcw className="h-4 w-4 text-[var(--muted-foreground)]" /> Start from original
+              </button>
+            </div>
+          )}
+        </div>
+        <Button variant="primary" size="lg" className="flex-1" disabled={!ws.canGenerate || ws.generating} onClick={() => ws.generate()}>
+          {ws.generating
+            ? <>Generating…</>
+            : confirming
+            // Disabled-with-no-explanation used to look like a stuck app when a slow/degraded
+            // product lookup (Unwrangle/SerpApi) left an item optimistically staged for a while —
+            // spell out why Generate is greyed out instead of just greying it out silently.
+            ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Confirming {ws.confirmingCount} item{ws.confirmingCount === 1 ? "" : "s"}…</>
+            : <>Generate{ws.activeEdits.length > 0 && <span className="ml-1 rounded-full bg-white/20 text-[10px] font-bold px-1.5 py-0.5">{ws.activeEdits.length}</span>}</>}
+        </Button>
       </div>
-      <Button variant="primary" size="lg" className="flex-1" disabled={!ws.canGenerate || ws.generating} onClick={() => ws.generate()}>
-        {ws.generating
-          ? <>Generating…</>
-          : <>Generate{ws.activeEdits.length > 0 && <span className="ml-1 rounded-full bg-white/20 text-[10px] font-bold px-1.5 py-0.5">{ws.activeEdits.length}</span>}</>}
-      </Button>
+      {confirming && (
+        <p className="text-[11px] text-[var(--muted-foreground)] text-center px-1">
+          Fetching product details — this can take up to a minute.
+        </p>
+      )}
     </div>
   );
 }

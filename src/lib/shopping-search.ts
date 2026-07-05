@@ -291,10 +291,11 @@ export async function resolveImmersiveToken(token: string, timeoutMs = 30_000): 
 
 /**
  * Fill in a direct productUrl for supported-but-token-only results (Wayfair via Google
- * Shopping) so the UI can show a real "View on Wayfair" link and price at search time,
- * instead of only after the user commits to a pick. Best-effort and time-boxed — a
- * candidate that doesn't resolve in time just falls back to lazy resolution on pick,
- * same as before.
+ * Shopping). NO LONGER called in the normal search flow — it spent one SerpApi call per
+ * token-only candidate in the background, for candidates the user mostly never picks, so it
+ * was removed to cut SerpApi usage. Resolution is now lazy: the product route resolves a token
+ * only when that specific candidate is actually picked. Kept here for opt-in/eager use if a
+ * future flow genuinely needs pre-resolved links, but wire it in deliberately, not by default.
  */
 export async function resolveTokenUrls(results: ShoppingResult[]): Promise<ShoppingResult[]> {
   const targets = results.filter((r) => r.supported && !r.productUrl && r.immersiveToken);

@@ -3,7 +3,7 @@ import { NextResponse, after } from "next/server";
 import { del } from "@vercel/blob";
 import { uploadImage } from "@/lib/restyle-render";
 import { describeScreenshotForSearch, locateProductPhoto, scoreImageMatches } from "@/lib/gemini";
-import { resolveTokenUrls, searchByImage, searchShopping, ShoppingSearchError, type ShoppingResult } from "@/lib/shopping-search";
+import { searchByImage, searchShopping, ShoppingSearchError, type ShoppingResult } from "@/lib/shopping-search";
 import { fileToBuffer } from "@/lib/file-buf";
 import { cropToBox } from "@/lib/image-crop";
 import { loadOwnedRestyle } from "@/lib/restyle-edits";
@@ -38,6 +38,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const form = await req.formData();
   const file = form.get("image") as File | null;
   const imageUrl = (form.get("imageUrl") as string | null)?.trim() || undefined;
+  const box2dRaw = (form.get("box2d") as string | null) ?? null;
   const query = (form.get("query") as string | null)?.trim();
   const label = ((form.get("label") as string | null) ?? "").trim().toLowerCase();
 
@@ -49,23 +50,35 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       if (supported.length === 0) {
         return NextResponse.json({ error: "No shoppable products found. Try a different search." }, { status: 404 });
       }
-      await upsertSearch(id, label, { query, results: supported, scored: false });
-      after(async () => {
-        const resolved = await resolveTokenUrls(supported);
-        await upsertSearch(id, label, { query, results: resolved, scored: true });
-      });
-      return NextResponse.json({ results: supported, scored: false });
+      // Text search has no Lens scoring to defer and we no longer eagerly resolve tokens (lazy
+      // on pick — see restyle-search.ts), so these results are already final. Persist as scored.
+      await upsertSearch(id, label, { query, results: supported, scored: true });
+      return NextResponse.json({ results: supported, scored: true });
     } catch (err) {
       if (err instanceof ShoppingSearchError) return NextResponse.json({ error: err.message }, { status: err.status });
       return NextResponse.json({ error: "Product search failed." }, { status: 502 });
     }
   }
 
-  // An imageUrl (no fresh file) is an already-staged edit's reference photo — already cropped
-  // to just the product, already hosted — delegate entirely to the shared pipeline (also used
-  // server-side by generate's deferred inspo search) instead of duplicating the logic here.
+  // An imageUrl (no fresh file) is normally an already-staged edit's reference photo — already
+  // cropped to just the product, already hosted. But `box2d` means this is instead the ORIGINAL
+  // room photo plus a detected object's own box — "find similar" for an item that's never been
+  // touched at all (see SimilarItemsPanel), so it isn't gated behind swapping something first.
+  // Crop it down to just that item here, then delegate to the same shared pipeline either way.
   if (!file && imageUrl) {
-    const search = await searchProductByImageUrl({ restyleId: id, imageUrl, label });
+    let searchImageUrl = imageUrl;
+    if (box2dRaw) {
+      try {
+        const box2d = JSON.parse(box2dRaw) as [number, number, number, number];
+        const res = await fetch(imageUrl);
+        if (res.ok) {
+          const buf = Buffer.from(await res.arrayBuffer());
+          const cropped = await cropToBox(buf, box2d);
+          searchImageUrl = await uploadImage(userId, cropped, "image/jpeg");
+        }
+      } catch { /* fall back to searching the uncropped photo rather than failing outright */ }
+    }
+    const search = await searchProductByImageUrl({ restyleId: id, imageUrl: searchImageUrl, label });
     if (!search.ok) return NextResponse.json({ error: search.error }, { status: search.status });
     after(search.finish);
     return NextResponse.json({ results: search.results, scored: false });
@@ -148,7 +161,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         final = [...final].sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
       }
     } catch (err) { console.error("[visual-search] scoring failed:", err); }
-    final = await resolveTokenUrls(final);
+    // Wayfair immersive tokens are resolved LAZILY on pick now (see restyle-search.ts note), not
+    // eagerly for every candidate — that used to spend a SerpApi call per unpicked token result.
     await upsertSearch(id, label, { query: searchQuery, results: final, scored: true });
   });
 

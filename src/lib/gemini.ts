@@ -322,19 +322,31 @@ export interface DetectedObject {
   box_2d: [number, number, number, number];
 }
 
-/** Detect editable elements in a room (furniture, decor, fixtures, walls, floor). */
-export async function detectObjects(params: {
+/** The shared instruction for room furniture/decor detection — kept here so every provider
+ *  (Gemini, OpenAI) detects the same thing the same way and only the vendor call differs. */
+export const DETECT_PROMPT =
+  "Detect every distinct piece of FURNITURE and DECOR in this room — e.g. sofa, sectional, " +
+  "armchair, coffee table, side table, console/media unit, dining table, dining chair, bed, " +
+  "nightstand, dresser, bookshelf, desk, rug, floor lamp, table lamp, pendant/chandelier, " +
+  "ceiling fan, mirror, framed art, curtains/drapes, plant, ottoman, and similar movable or " +
+  "replaceable items. " +
+  "Do NOT detect architecture or the room shell: no walls, floor, ceiling, windows, doors, " +
+  "doorways, baseboards, or built-in trim. Also skip tiny utility fixtures (air vents, " +
+  "outlets, switches, handles, thermostats, smoke detectors). " +
+  "Box each item TIGHTLY around the item itself, not the surrounding area, and make sure each " +
+  "box actually surrounds the item its label names. " +
+  'Each item has "label" (a short human name, e.g. "sofa", "floor lamp") and "box_2d" ' +
+  "([ymin, xmin, ymax, xmax] as integers 0–1000, where 0,0 is the top-left of the image and " +
+  "1000,1000 is the bottom-right). No duplicates, at most 14 items.";
+
+/** Detect the swappable furniture & decor in a room via Gemini — deliberately NOT architecture
+ *  (see DETECT_PROMPT). Dispatched to from `src/lib/detect.ts`, which also offers an OpenAI
+ *  implementation for A/B comparison. */
+export async function detectObjectsGemini(params: {
   imageBase64: string;
   mimeType: string;
 }): Promise<DetectedObject[]> {
-  const prompt =
-    "Detect the major design-relevant elements in this room — the walls (e.g. \"left wall\", " +
-    "\"right wall\"), floor, ceiling, windows, doors, the ceiling fan and light fixtures, and any " +
-    "furniture, rugs, mirrors, or curtains. " +
-    "Do NOT include small utility fixtures: air vents, electrical outlets, light switches, " +
-    "baseboards, door handles, thermostats, or smoke detectors. " +
-    'Return a JSON array; each item has "label" (a short human name) and "box_2d" ' +
-    "([ymin, xmin, ymax, xmax] as integers 0–1000). No duplicates, at most 14 items.";
+  const prompt = DETECT_PROMPT + ' Return a JSON array of {"label","box_2d"}.';
 
   const data = await geminiPost(GEMINI_VISION_MODEL, {
     contents: [

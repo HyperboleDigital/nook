@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, ChevronUp, Eraser, MapPin, Plus, Replace, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Eraser, Loader2, MapPin, Plus, Replace, Search, X } from "lucide-react";
 import type { RestyleWorkspace } from "./useRestyleWorkspace";
 import { IconButton } from "./ui";
 
@@ -11,13 +11,13 @@ import { IconButton } from "./ui";
  * framed as "queued", not "placed": ShopLook is the source of truth for what's actually IN the
  * current image once a render exists; this is what WILL be in it after the next generate.
  *
- * Collapsed by default: each queued item already has a green-checkmark hotspot directly on the
- * canvas (tapping it opens the same Change/Remove teaser), so this list is a secondary "review
- * everything at once" view, not the primary way to see what's queued — expand it only when
- * wanted, via the "n queued" toggle.
+ * Expanded by default so it reads as an actual list under the photo, not just a hotspot on the
+ * canvas — collapsible via the "n queued" toggle if it's in the way. A confirming (optimistic,
+ * still round-tripping to the server) item shows a distinct spinner row rather than looking
+ * like a normal queued item — see the `isOptimistic` branch below.
  */
 export default function QueuedChanges({ ws }: { ws: RestyleWorkspace }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
 
   if (ws.stagedItems.length === 0) {
     return (
@@ -47,8 +47,7 @@ export default function QueuedChanges({ ws }: { ws: RestyleWorkspace }) {
           const isRemove = e.kind === "remove";
           return (
             <div key={e.id}
-              className={`flex items-center gap-3 p-2.5 rounded-2xl border border-[var(--border)] bg-white transition-colors ${isRemove ? "" : "cursor-pointer hover:border-[var(--foreground)]"}`}
-              onClick={isRemove ? undefined : () => ws.openSimilar(label, e.kind === "add" ? "add" : "swap", e.id)}>
+              className="flex items-center gap-3 p-2.5 rounded-2xl border border-[var(--border)] bg-white transition-colors">
               {!isRemove && e.reference_url ? (
                 /* eslint-disable-next-line @next/next/no-img-element */
                 <img src={e.reference_url} alt="" className="h-12 w-12 object-cover rounded-xl border border-[var(--border)] shrink-0" />
@@ -59,13 +58,19 @@ export default function QueuedChanges({ ws }: { ws: RestyleWorkspace }) {
               )}
               <div className="min-w-0 flex-1">
                 <p className="text-xs font-medium capitalize truncate">{isRemove ? label : e.product_title ?? label}</p>
-                <p className="text-[11px] text-[var(--muted-foreground)] capitalize">
-                  {isRemove ? "Removing" : e.kind === "add" ? "Adding" : "Swapping"}{!isRemove && label ? ` · ${label}` : ""}
-                  {e.product_price ? ` · ${e.product_price}` : ""}
-                </p>
+                {isOptimistic ? (
+                  <p className="text-[11px] text-[var(--muted-foreground)] flex items-center gap-1">
+                    <Loader2 className="h-3 w-3 animate-spin" /> Confirming — this can take a minute
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-[var(--muted-foreground)] capitalize">
+                    {isRemove ? "Removing" : e.kind === "add" ? "Adding" : "Swapping"}{!isRemove && label ? ` · ${label}` : ""}
+                    {e.product_price ? ` · ${e.product_price}` : ""}
+                  </p>
+                )}
                 {e.kind === "add" && (
                   <button type="button"
-                    onClick={(ev) => { ev.stopPropagation(); ws.requestPin(e.id, label); }}
+                    onClick={() => ws.requestPin(e.id, label)}
                     className="inline-flex items-center gap-1 text-[11px] text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors mt-0.5">
                     <MapPin className="h-3 w-3" />
                     {e.placement
@@ -73,10 +78,17 @@ export default function QueuedChanges({ ws }: { ws: RestyleWorkspace }) {
                       : "Choose a spot"}
                   </button>
                 )}
+                {!isOptimistic && !isRemove && (
+                  <button type="button"
+                    onClick={() => ws.openSimilar(label, e.kind === "add" ? "add" : "swap", e.id)}
+                    className="inline-flex items-center gap-1 text-[11px] text-[var(--accent)] hover:underline transition-colors mt-0.5">
+                    <Search className="h-3 w-3" /> Find similar
+                  </button>
+                )}
               </div>
               {!isOptimistic && (
                 <IconButton aria-label={isRemove ? "Keep it — don't remove" : "Remove"} className="h-7 w-7 shrink-0"
-                  onClick={(ev) => { ev.stopPropagation(); ws.remove(e.id); }}>
+                  onClick={() => ws.remove(e.id)}>
                   <X className="h-3.5 w-3.5" />
                 </IconButton>
               )}

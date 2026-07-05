@@ -10,10 +10,10 @@ import HotspotPopover from "./HotspotPopover";
 import QueuedHotspotPopover from "./QueuedHotspotPopover";
 import PinPlacementLayer from "./PinPlacementLayer";
 
-// Mobile fallback (and the brief window before the desktop box below is measured): the image
-// lays out at its natural aspect (block, full width, height follows) since the page just
-// scrolls there — no gutters are possible or needed.
-const FALLBACK_WRAP = "relative block w-full";
+// Fallback for the brief window before the frame/image have been measured (or if width/height
+// are ever unknown): natural aspect, full width, height follows. Rounded + shadowed like the
+// measured box below, so the photo reads as a floating card over the blurred backdrop either way.
+const FALLBACK_WRAP = "relative block w-full rounded-3xl overflow-hidden shadow-[var(--shadow-pop)]";
 const FALLBACK_IMG = "block w-full h-auto max-h-[85dvh] object-contain";
 
 /**
@@ -34,16 +34,20 @@ const FALLBACK_IMG = "block w-full h-auto max-h-[85dvh] object-contain";
  * composites from, not a state a user picks; download/share always reflect whatever's
  * currently displayed (the live render with its current on/off toggle state).
  *
- * Desktop (md+) sits inside RestyleStudio's fixed-height immersive stage, so a portrait photo
- * can't fill both axes the way a simple `w-full h-auto` can on mobile's scrolling column. CSS
- * percentage-height shrink-wrapping (`max-h-full` on an auto-sized wrapper) is genuinely
- * ambiguous per spec when the wrapper's own height comes from its content — so instead this
- * measures the stage (ResizeObserver) and computes the contained image's exact pixel box from
- * `restyle.width`/`height` (the canonical dimensions every displayed image already shares,
- * guaranteed by upload-time canonicalization + recompose's fixed-size output). The wrapper is
- * then pinned to that exact pixel box, so object-cover fills it perfectly with no letterboxing
- * math needed, and every %-positioned hotspot/popover still lands correctly since the wrapper
- * IS the image's true rendered box, in pixels, not a CSS approximation.
+ * The stage has a FIXED height on every breakpoint (a viewport-relative height on mobile since
+ * the page scrolls, `flex-1` filling the immersive column on desktop), so a portrait photo
+ * can't fill both axes the way a simple `w-full h-auto` box could. CSS percentage-height
+ * shrink-wrapping (`max-h-full` on an auto-sized wrapper) is genuinely ambiguous per spec when
+ * the wrapper's own height comes from its content — so instead this measures the stage
+ * (ResizeObserver) and computes the contained image's exact pixel box from `restyle.width`/
+ * `height` (the canonical dimensions every displayed image already shares, guaranteed by
+ * upload-time canonicalization + recompose's fixed-size output). The wrapper is then pinned to
+ * that exact pixel box, so object-cover fills it perfectly with no letterboxing math needed, and
+ * every %-positioned hotspot/popover still lands correctly since the wrapper IS the image's true
+ * rendered box, in pixels, not a CSS approximation. A blurred, darkened copy of the same image
+ * fills the stage edge-to-edge behind it (no rounding, no shadow — it's just backdrop) while the
+ * sharp photo floats on top as a rounded, shadowed card (`imgWrapClass`) — the stage itself has
+ * no rounding/border, only the photo does.
  */
 export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
   const { restyle, generating, displayUrl, previewUrl } = ws;
@@ -52,17 +56,19 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
   const [openHotspot, setOpenHotspot] = useState<{ label: string; cx: number; cy: number; edit: NonNullable<CanvasHotspot["edit"]> } | null>(null);
   const [queuedPreview, setQueuedPreview] = useState<{ label: string; cx: number; cy: number; edit: NonNullable<CanvasHotspot["edit"]> } | null>(null);
 
-  // Desktop image-box measurement (see doc comment above).
+  // Desktop image-box measurement (see doc comment above). `naturalSize` is measured directly
+  // off the actual rendered <img> (onLoad) rather than trusted solely from `restyle.width`/
+  // `height` — that DB column is normally correct, but hotspot placement is precise enough that
+  // any drift between it and the real bytes on screen (a stale value, a legacy row from before
+  // the column existed) would visibly misalign every pin. The DB value is still used as an
+  // instant first-paint fallback before the image has finished loading.
   const frameRef = useRef<HTMLDivElement>(null);
-  const [isDesktop, setIsDesktop] = useState(false);
   const [frameSize, setFrameSize] = useState({ w: 0, h: 0 });
-  useEffect(() => {
-    const mq = window.matchMedia("(min-width: 768px)");
-    const update = () => setIsDesktop(mq.matches);
-    update();
-    mq.addEventListener("change", update);
-    return () => mq.removeEventListener("change", update);
-  }, []);
+  const [naturalSize, setNaturalSize] = useState<{ w: number; h: number } | null>(null);
+  const onImgLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
+    const t = e.currentTarget;
+    if (t.naturalWidth && t.naturalHeight) setNaturalSize({ w: t.naturalWidth, h: t.naturalHeight });
+  };
   useEffect(() => {
     const el = frameRef.current;
     if (!el) return;
@@ -115,19 +121,20 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
   const { viewingOriginal } = ws;
   const backdropSrc = viewingOriginal ? restyle.original_url : displayUrl;
 
-  const natW = restyle.width ?? 0;
-  const natH = restyle.height ?? 0;
+  const natW = naturalSize?.w || restyle.width || 0;
+  const natH = naturalSize?.h || restyle.height || 0;
   let imgBoxStyle: CSSProperties | undefined;
-  if (isDesktop && natW && natH && frameSize.w && frameSize.h) {
+  if (natW && natH && frameSize.w && frameSize.h) {
     const scale = Math.min(frameSize.w / natW, frameSize.h / natH);
     const w = natW * scale, h = natH * scale;
     imgBoxStyle = { position: "absolute", left: (frameSize.w - w) / 2, top: (frameSize.h - h) / 2, width: w, height: h };
   }
-  const imgWrapClass = imgBoxStyle ? "relative" : FALLBACK_WRAP;
+  const imgWrapClass = imgBoxStyle ? "relative rounded-3xl overflow-hidden shadow-[var(--shadow-pop)]" : FALLBACK_WRAP;
   const imgClass = imgBoxStyle ? "block w-full h-full object-cover" : FALLBACK_IMG;
 
   const handleTap = (h: CanvasHotspot, cx: number, cy: number) => {
     if (h.state === "idle") { ws.openSourcing(h.label, "swap"); return; }
+    if (h.state === "confirming") return; // still round-tripping to the server — nothing to act on yet
     if (h.state === "queued") { setQueuedPreview({ label: h.label, cx, cy, edit: h.edit! }); setOpenHotspot(null); return; }
     setOpenHotspot({ label: h.label, cx, cy, edit: h.edit! }); setQueuedPreview(null);
   };
@@ -164,17 +171,17 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
 
   return (
     <div className="h-full w-full md:flex md:flex-col">
-      <div ref={frameRef} className="relative bg-[var(--muted)] border border-[var(--border)] rounded-3xl min-h-[40vh] overflow-hidden md:border-0 md:rounded-none md:min-h-0 md:flex-1 md:flex md:items-center md:justify-center">
-        {/* Desktop-only: a blurred, darkened cover fill behind a portrait photo so the gutters
-            either side of the shrink-wrapped sharp image read as an intentional frame, not a
-            broken letterbox (a portrait room can't fill a landscape stage on both axes). */}
+      <div ref={frameRef} className="relative bg-[var(--muted)] overflow-hidden flex items-center justify-center h-[65dvh] md:h-auto md:flex-1">
+        {/* A blurred, darkened cover fill behind a portrait (or otherwise mismatched-aspect)
+            photo so the gutters beside the shrink-wrapped sharp image read as an intentional
+            frame, not a broken letterbox. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={backdropSrc} alt="" aria-hidden className="hidden md:block absolute inset-0 h-full w-full object-cover blur-2xl brightness-50 scale-110" />
+        <img src={backdropSrc} alt="" aria-hidden className="absolute inset-0 h-full w-full object-cover blur-2xl brightness-50 scale-110" />
 
         {viewingOriginal ? (
           <div className={imgWrapClass} style={imgBoxStyle}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={restyle.original_url} alt="Your room" className={imgClass} />
+            <img src={restyle.original_url} alt="Your room" className={imgClass} onLoad={onImgLoad} />
             {ws.canvasHotspots.length > 0 && (
               <ObjectHotspots hotspots={ws.canvasHotspots} activeLabel={ws.sourcing?.label} onSelect={handleTap} />
             )}
@@ -187,15 +194,17 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
                 onClose={() => setQueuedPreview(null)} />
             )}
             {ws.pinRequest && (
-              <PinPlacementLayer label={ws.pinRequest.label}
-                onPlace={(x, y, note) => ws.setPlacement(ws.pinRequest!.editId, { x, y, note })}
-                onCancel={ws.cancelPin} />
+              <PinPlacementLayer label={ws.pinRequest.label || "this item"}
+                onPlace={(x, y, note) => ws.pinRequest!.editId
+                  ? ws.setPlacement(ws.pinRequest!.editId, { x, y, note })
+                  : ws.placeAddLocation(x, y, note)}
+                onCancel={() => (ws.pinRequest!.editId ? ws.cancelPin() : ws.skipAddLocation())} />
             )}
           </div>
         ) : !showCompare ? (
           <div className={imgWrapClass} style={imgBoxStyle}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={displayUrl} alt="Restyled room" className={imgClass} />
+            <img src={displayUrl} alt="Restyled room" className={imgClass} onLoad={onImgLoad} />
             {ws.canvasHotspots.length > 0 && (
               <ObjectHotspots hotspots={ws.canvasHotspots} activeLabel={ws.sourcing?.label} onSelect={handleTap} />
             )}
@@ -216,7 +225,7 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
         ) : (
           <div ref={imgWrapRef} className={`${imgWrapClass} select-none touch-none`} style={imgBoxStyle} {...sliderHandlers}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={displayUrl} alt="After" className={imgClass} draggable={false} />
+            <img src={displayUrl} alt="After" className={imgClass} draggable={false} onLoad={onImgLoad} />
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={restyle.original_url} alt="Before" draggable={false}
               className="absolute inset-0 h-full w-full object-cover"
@@ -244,7 +253,7 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
         {!generating && !showCompare && !ws.pinRequest && (
           <div className="absolute bottom-3 right-3">
             <Button variant="primary" size="sm" className="shadow-[var(--shadow-pop)]"
-              onClick={() => ws.openSourcing("", "add")}>
+              onClick={() => ws.startAddFlow()}>
               <Plus className="h-3.5 w-3.5" /> Add
             </Button>
           </div>
@@ -266,7 +275,7 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
           </IconButton>
         </div>
       </div>
-      <p className="md:hidden text-[11px] text-[var(--muted-foreground)] text-center py-2">
+      <p className="md:hidden text-[11px] text-[var(--muted-foreground)] text-center py-2 px-3">
         {ws.pinRequest ? "Tap the photo to choose where it goes"
           : viewingOriginal ? "Tap an item to swap it, or add something new"
           : previewUrl ? "Viewing an earlier version — tap an item to keep editing"

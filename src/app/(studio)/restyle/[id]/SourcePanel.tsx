@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Check, Eraser } from "lucide-react";
+import { Check, Eraser, Search } from "lucide-react";
 import type { RestyleWorkspace } from "./useRestyleWorkspace";
 import type { ShoppingResult } from "@/lib/shopping-search";
 import { downscaleImage } from "@/lib/image-client";
@@ -18,6 +18,7 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
   const [descText, setDescText] = useState("");
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [pendingPreview, setPendingPreview] = useState<string | null>(null);
+  const [itemDraft, setItemDraft] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
   // Reset local sourcing UI whenever the target item changes.
@@ -25,7 +26,7 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
     let active = true;
     Promise.resolve().then(() => {
       if (!active) return;
-      setSrcMode("link"); setProductUrl(""); setDescText("");
+      setSrcMode("link"); setProductUrl(""); setDescText(""); setItemDraft("");
       setPendingFile(null);
       setPendingPreview((prev) => { if (prev) URL.revokeObjectURL(prev); return null; });
     });
@@ -34,6 +35,27 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
 
   if (!sourcing) return null;
   const label = sourcing.label;
+
+  // "+ Add" flow order: location (already chosen on the canvas before this panel ever opens —
+  // see startAddFlow/placeAddLocation) → what is it → how to source it. This is that middle
+  // step: a fresh add always arrives here with an empty label, so gate the usual tabs behind a
+  // one-line "what is it" prompt instead of jumping straight to sourcing.
+  if (sourcing.mode === "add" && !label) {
+    return (
+      <div className="space-y-3">
+        <p className="text-sm font-medium">What are you adding?</p>
+        <div className="rounded-2xl border border-[var(--border)] bg-white p-4 space-y-2.5">
+          <Input type="text" value={itemDraft} onChange={(e) => setItemDraft(e.target.value)} autoFocus
+            onKeyDown={(e) => { if (e.key === "Enter" && itemDraft.trim()) ws.setSourcingLabel(itemDraft.trim()); }}
+            placeholder="e.g. floor lamp, side table, area rug" />
+          <Button variant="primary" className="w-full" disabled={!itemDraft.trim()}
+            onClick={() => ws.setSourcingLabel(itemDraft.trim())}>
+            Continue
+          </Button>
+        </div>
+      </div>
+    );
+  }
   const search = ws.searches[label.toLowerCase()] ?? { status: "idle" as const, scored: false, results: [] };
   // The actual item being replaced, cropped from the original photo — so "Replacing the
   // ceiling fan" isn't just a label, you can see exactly which fixture it means.
@@ -58,9 +80,11 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
   };
 
   const staged = !!sourcing.lastStaged;
-  const tabs = sourcing.mode === "add"
-    ? [{ value: "link" as const, label: "Paste a link" }, { value: "photo" as const, label: "Upload a photo" }]
-    : [{ value: "link" as const, label: "Paste a link" }, { value: "photo" as const, label: "Upload a photo" }, { value: "describe" as const, label: "Describe it" }];
+  const tabs = [
+    { value: "link" as const, label: "Paste a link" },
+    { value: "photo" as const, label: "Upload a photo" },
+    { value: "describe" as const, label: "Describe it" },
+  ];
 
   return (
     <div className="space-y-3">
@@ -73,6 +97,16 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
           {sourcing.mode === "swap" ? `Replacing the ${label}` : label ? `Adding ${label}` : "Adding a new piece"}
         </p>
       </div>
+
+      {sourcing.mode === "swap" && matchedObject && (
+        // "Find similar" for the item AS IT IS — no need to swap it for something else first
+        // just to see what's out there. Searches off the original photo cropped to this
+        // detected object (see SimilarItemsPanel + runVisualSearchByUrl's box2d support).
+        <button type="button" onClick={() => ws.openSimilar(label, "swap", sourcing.stagedEditId)}
+          className="w-full flex items-center justify-center gap-1.5 rounded-full border border-[var(--border)] bg-white py-2 text-xs font-medium hover:border-[var(--foreground)] transition-colors">
+          <Search className="h-3.5 w-3.5" /> Find similar items
+        </button>
+      )}
 
       {staged && (
         <StatusBanner variant="success" icon={<Check className="h-3.5 w-3.5" />}>
@@ -140,6 +174,9 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
               {ws.stagingLink ? <Spinner size="sm" className="text-current" /> : "Fetch"}
             </Button>
           </div>
+          {ws.stagingLink && (
+            <p className="text-[11px] text-[var(--muted-foreground)]">Fetching product details — this can take up to a minute.</p>
+          )}
           <button type="button" onClick={() => setSrcMode("photo")}
             className="text-[11px] text-[var(--muted-foreground)] underline hover:text-[var(--foreground)] transition-colors">
             Can&apos;t find a link? Upload a photo instead →
@@ -183,6 +220,9 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
               {search.status === "loading" ? <Spinner size="sm" className="text-current" /> : "Find"}
             </Button>
           </div>
+          {search.status === "loading" && (
+            <p className="text-[11px] text-[var(--muted-foreground)]">Searching retailers — this can take a few seconds.</p>
+          )}
           <Button variant="outline" className="w-full" disabled={ws.busy || !descText.trim()}
             onClick={() => ws.addEdit({ kind: sourcing.mode === "swap" ? "item" : "add", targetLabel: label, instruction: descText.trim() })}>
             Just go with my description

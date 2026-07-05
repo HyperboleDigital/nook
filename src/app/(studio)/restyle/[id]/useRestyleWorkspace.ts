@@ -27,9 +27,16 @@ export type Sourcing = {
 export type CanvasHotspot = {
   label: string;
   box_2d: DetectedObject["box_2d"];
-  state: "idle" | "queued" | "placed";
+  state: "idle" | "confirming" | "queued" | "placed";
   edit: RestyleEdit | null;
 };
+
+// A fetch used to hang for the full length of a slow/failing Unwrangle or SerpApi call (up to
+// the route's own maxDuration) with the optimistic edit sitting there the whole time and NO
+// visible feedback once the sourcing panel had already closed — from the user's seat, Generate
+// just looked permanently disabled. Every optimistic-staging fetch is now capped client-side so
+// a stuck request fails fast (and rolls back) instead of blocking indefinitely.
+const STAGE_TIMEOUT_MS = 45_000;
 
 const EMPTY_SEARCH: SearchState = { status: "idle", scored: false, results: [] };
 const OPTIMISTIC_PREFIX = "optimistic-";
@@ -75,9 +82,17 @@ export function useRestyleWorkspace(id: string) {
   // History preview
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
-  // Tap-to-place pin for an "add" edit — offered right after it stages successfully.
-  // Optional: Skip/cancel leaves placement null and generate is never blocked on it.
-  const [pinRequest, setPinRequest] = useState<{ editId: string; label: string } | null>(null);
+  // Tap-to-place pin. `editId: string` = the classic post-hoc offer, shown right after an "add"
+  // edit stages successfully (used when the user skipped the upfront location step below).
+  // `editId: null` = the NEW upfront flow: capturing a location for an add that doesn't exist
+  // yet (see startAddFlow) — captured into `pendingAddPlacement` and attached to the edit the
+  // moment it's created, instead of prompting again after the fact. Either way, it's optional:
+  // Skip/cancel leaves placement null and generate is never blocked on it.
+  const [pinRequest, setPinRequest] = useState<{ editId: string | null; label: string } | null>(null);
+  // A location captured BEFORE the item has been sourced (see startAddFlow/placeAddLocation) —
+  // attached to the edit at staging time in stagePhoto/stageProductLink/pickCandidate below,
+  // then cleared. Null if the user skipped the location step or hasn't reached it yet.
+  const [pendingAddPlacement, setPendingAddPlacement] = useState<{ x: number; y: number; note?: string | null } | null>(null);
 
   // Poll an in-flight generate (just kicked off, or resumed from a reload) until the server
   // clears generating_started_at. The render AND the deferred inspo product search both run
@@ -207,11 +222,40 @@ export function useRestyleWorkspace(id: string) {
   // matches the "Show similar" flow from a hotspot/chip/shop-list item, not a blank compose.
   const openSimilar = (label: string, mode: "swap" | "add", stagedEditId: string | null) =>
     setSourcing({ label, mode, view: "similar", stagedEditId });
-  const closeSourcing = () => setSourcing(null);
+  const closeSourcing = () => { setSourcing(null); setPendingAddPlacement(null); };
+
+  // Start the "+ Add" flow: location FIRST (a pin on the original photo), then what it is, then
+  // how to source it — rather than sourcing first and only being asked where it goes afterward.
+  // `pinRequest.editId: null` signals "no edit exists yet" to RestyleCanvas/PinPlacementLayer.
+  const startAddFlow = () => {
+    setSourcing(null);
+    setPendingAddPlacement(null);
+    if (restyle) setPreviewUrl(restyle.original_url);
+    setPinRequest({ editId: null, label: "" });
+  };
+  // Location chosen — remember it locally (nothing to attach it TO yet) and move on to "what is
+  // it" (SourcePanel shows that step first whenever mode is "add" and the label is still empty).
+  const placeAddLocation = (x: number, y: number, note?: string | null) => {
+    setPendingAddPlacement({ x, y, note: note ?? null });
+    setPinRequest(null);
+    setSourcing({ label: "", mode: "add", view: "compose", stagedEditId: null });
+  };
+  // Location skipped — proceed anyway; the classic post-hoc pin offer (requestPin) still fires
+  // after staging in case they change their mind.
+  const skipAddLocation = () => {
+    setPendingAddPlacement(null);
+    setPinRequest(null);
+    setSourcing({ label: "", mode: "add", view: "compose", stagedEditId: null });
+  };
+  // The "what is it" step confirms into sourcing.label so the existing staging calls (which all
+  // read the label from here) pick it up automatically.
+  const setSourcingLabel = (label: string) => setSourcing((s) => (s ? { ...s, label } : s));
 
   // Offer to pin an add edit's location — forces the original photo into view (pins are
   // captured in the same 0–1000 coordinate space as detected_objects) and closes any open
-  // sourcing panel so the pin layer has the canvas to itself.
+  // sourcing panel so the pin layer has the canvas to itself. This is the FALLBACK path now —
+  // used only when the upfront location step (above) was skipped, so the user still gets one
+  // more chance right after the item actually stages.
   const requestPin = (editId: string, label: string) => {
     setSourcing(null);
     if (restyle) setPreviewUrl(restyle.original_url);
@@ -234,6 +278,19 @@ export function useRestyleWorkspace(id: string) {
     } catch { /* best effort — optimistic is already set */ }
   };
 
+  // Called once a fresh "add" edit exists on the server: if the user chose a location UP FRONT
+  // (startAddFlow/placeAddLocation), attach it now and skip the old post-hoc prompt entirely;
+  // otherwise fall back to offering the pin after the fact, same as before that flow existed.
+  const finalizeAddPlacement = (editId: string, targetLabel: string) => {
+    if (pendingAddPlacement) {
+      const placement = pendingAddPlacement;
+      setPendingAddPlacement(null);
+      setPlacement(editId, placement);
+    } else {
+      requestPin(editId, targetLabel);
+    }
+  };
+
   // Text-only edit with no product — "just go with my description".
   const addEdit = async (fields: Record<string, string>) => {
     setBusy(true); setError(null);
@@ -244,6 +301,10 @@ export function useRestyleWorkspace(id: string) {
       const data = await r.json();
       if (!r.ok) throw new Error(data.error ?? "Failed");
       updateEdits(data.edits);
+      // The route always appends the new row last (position = the old edit count) — the newly
+      // inserted edit is reliably the final element of the ordered list it returns.
+      const created = (data.edits as RestyleEdit[]).at(-1);
+      if (created?.kind === "add") finalizeAddPlacement(created.id, created.target_label ?? fields.targetLabel ?? "");
     } catch (err) { setError(err instanceof Error ? err.message : "Something went wrong"); }
     finally { setBusy(false); }
   };
@@ -271,11 +332,15 @@ export function useRestyleWorkspace(id: string) {
 
   // Search using a photo that's ALREADY staged (its reference_url) rather than a fresh
   // upload — used after generate to look up buyable options for inspo-only items that made
-  // it into the render, without re-cropping/re-hosting an image we already have.
-  const runVisualSearchByUrl = async (imageUrl: string, label: string) => {
+  // it into the render, without re-cropping/re-hosting an image we already have. `box2d`
+  // additionally lets this search directly off the ORIGINAL room photo cropped to a detected
+  // object's own box — used for "find similar" on an item that's never been touched at all
+  // (see SimilarItemsPanel), so "similar items" isn't gated behind swapping something first.
+  const runVisualSearchByUrl = async (imageUrl: string, label: string, box2d?: DetectedObject["box_2d"]) => {
     setSearchState(label, { status: "loading", scored: false });
     const fd = new FormData();
     fd.append("imageUrl", imageUrl); fd.append("label", label);
+    if (box2d) fd.append("box2d", JSON.stringify(box2d));
     try {
       const r = await fetch(`/api/restyle/${id}/visual-search`, { method: "POST", body: fd });
       const data = await r.json();
@@ -314,6 +379,7 @@ export function useRestyleWorkspace(id: string) {
       if (replaceEditId) body.replaceEditId = replaceEditId;
       const r = await fetch(`/api/restyle/${id}/product`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+        signal: AbortSignal.timeout(STAGE_TIMEOUT_MS),
       });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error ?? "Couldn't fetch that product");
@@ -323,9 +389,9 @@ export function useRestyleWorkspace(id: string) {
         : s);
       // stageEdit may reclassify a would-be add into a swap when the label matches a
       // detected object — only offer a pin for a genuine, still-unplaced add.
-      if (data.added.kind === "add") requestPin(data.added.id, data.added.target_label ?? label);
+      if (data.added.kind === "add") finalizeAddPlacement(data.added.id, data.added.target_label ?? label);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't fetch that product");
+      setError(err instanceof DOMException && err.name === "TimeoutError" ? "That took too long — the product service may be unavailable. Try again." : err instanceof Error ? err.message : "Couldn't fetch that product");
     } finally {
       setStagingLink(false);
     }
@@ -371,14 +437,15 @@ export function useRestyleWorkspace(id: string) {
       const r = await fetch(`/api/restyle/${id}/product`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ imageUrl: blob.url, targetLabel: label, replaceEditId }),
+        signal: AbortSignal.timeout(STAGE_TIMEOUT_MS),
       });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error ?? "Couldn't add that photo");
       updateEdits(data.edits);
-      if (data.added.kind === "add") requestPin(data.added.id, data.added.target_label ?? label);
+      if (data.added.kind === "add") finalizeAddPlacement(data.added.id, data.added.target_label ?? label);
     } catch (err) {
       updateEdits(prevEdits); // roll back the optimistic edit
-      setError(err instanceof Error ? err.message : "Couldn't add that photo");
+      setError(err instanceof DOMException && err.name === "TimeoutError" ? "That took too long — the product service may be unavailable. Try again." : err instanceof Error ? err.message : "Couldn't add that photo");
     } finally {
       URL.revokeObjectURL(localUrl);
     }
@@ -408,6 +475,7 @@ export function useRestyleWorkspace(id: string) {
       if (replaceEditId) body.replaceEditId = replaceEditId;
       const r = await fetch(`/api/restyle/${id}/product`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+        signal: AbortSignal.timeout(STAGE_TIMEOUT_MS),
       });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error ?? "Couldn't fetch that product");
@@ -415,10 +483,10 @@ export function useRestyleWorkspace(id: string) {
       setSourcing((s) => s && s.label === label
         ? { ...s, stagedEditId: data.added.id, lastStaged: { title: data.added.target_label, retailer: data.added.retailer } }
         : s);
-      if (data.added.kind === "add") requestPin(data.added.id, data.added.target_label ?? label);
+      if (data.added.kind === "add") finalizeAddPlacement(data.added.id, data.added.target_label ?? label);
     } catch (err) {
       updateEdits(prevEdits); // roll back the optimistic edit
-      setError(err instanceof Error ? err.message : "Couldn't fetch that product");
+      setError(err instanceof DOMException && err.name === "TimeoutError" ? "That took too long — the product service may be unavailable. Try again." : err instanceof Error ? err.message : "Couldn't fetch that product");
     } finally {
       setPickingKey(null);
     }
@@ -561,7 +629,8 @@ export function useRestyleWorkspace(id: string) {
   const displayUrl = previewUrl ?? restyle?.current_url ?? "";
   const viewingOriginal = !!restyle && displayUrl === restyle.original_url;
   const showSlider = !previewUrl && !!restyle && !viewingOriginal;
-  const hasOptimistic = activeEdits.some((e) => e.id.startsWith(OPTIMISTIC_PREFIX));
+  const confirmingCount = activeEdits.filter((e) => e.id.startsWith(OPTIMISTIC_PREFIX)).length;
+  const hasOptimistic = confirmingCount > 0;
   const canGenerate = activeEdits.length > 0 && !hasOptimistic;
   const atMaxCustom = (restyle?.custom_items?.length ?? 0) >= 5;
 
@@ -596,7 +665,13 @@ export function useRestyleWorkspace(id: string) {
   // Swaps use the detected object's own box_2d (real position). Pinned adds use a small box
   // synthesized around the tap-to-place pin — an add with no pin gets no hotspot at all and
   // shows only in "Shop this look".
-  const stateFor = (e: RestyleEdit): "placed" | "queued" | null => {
+  // "confirming" is a distinct, prior state to "queued": the edit is only a client-side
+  // optimistic placeholder still round-tripping to the server (a slow/degraded Unwrangle or
+  // SerpApi lookup can take a while — see STAGE_TIMEOUT_MS) — it can never be "placed" (no
+  // render can reference an id the server hasn't issued yet), and showing it as a plain
+  // confirmed "queued" checkmark used to make Generate's disabled state look like a bug.
+  const stateFor = (e: RestyleEdit): "confirming" | "placed" | "queued" | null => {
+    if (e.id.startsWith(OPTIMISTIC_PREFIX) && e.active) return "confirming";
     if (shownProductIds ? shownProductIds.has(e.id) : e.active) return "placed";
     if (e.active) return "queued";
     return null;
@@ -608,11 +683,11 @@ export function useRestyleWorkspace(id: string) {
       (e.kind === "item" || e.kind === "remove") && e.target_label?.toLowerCase() === labelKey,
     );
     let chosen: RestyleEdit | null = null;
-    let state: "idle" | "queued" | "placed" = "idle";
+    let state: "idle" | "confirming" | "queued" | "placed" = "idle";
     for (const c of candidates) {
       const s = stateFor(c);
       if (s === "placed") { chosen = c; state = "placed"; break; }
-      if (s === "queued" && !chosen) { chosen = c; state = "queued"; }
+      if ((s === "queued" || s === "confirming") && !chosen) { chosen = c; state = s; }
     }
     // A placed remove means the item is actually gone from the pictured room — a hotspot on
     // empty floor is confusing, so it surfaces only in the "Removed" section (removedEdits).
@@ -640,8 +715,8 @@ export function useRestyleWorkspace(id: string) {
     id, restyle, renders, objects: objects ?? [], customItems: restyle?.custom_items ?? [], detecting, loading,
     busy, generating, generatingStartedAt, expectedSeconds, error, setError,
     titleDraft, setTitleDraft, saveTitle,
-    sourcing, openSourcing, openSimilar, closeSourcing,
-    pinRequest, requestPin, cancelPin, setPlacement,
+    sourcing, openSourcing, openSimilar, closeSourcing, setSourcingLabel,
+    pinRequest, requestPin, cancelPin, setPlacement, startAddFlow, placeAddLocation, skipAddLocation,
     searches, runVisualSearchByUrl, runTextSearch, pickCandidate, pickingKey,
     stagePhoto, stageProductLink, stagingLink, stageRemove,
     // preview
@@ -649,7 +724,7 @@ export function useRestyleWorkspace(id: string) {
     // handlers
     addEdit, toggle, toggleAndRegenerate, deactivateAll, remove, addCustomItem, removeCustomItem, generate, emptyRoom, downloadImage,
     // derived
-    edits, activeEdits, stagedItems, displayUrl, viewingOriginal, showSlider, canGenerate, atMaxCustom, productEdits, inspoEdits, removedEdits,
+    edits, activeEdits, stagedItems, displayUrl, viewingOriginal, showSlider, canGenerate, confirmingCount, atMaxCustom, productEdits, inspoEdits, removedEdits,
     canvasHotspots,
   };
 }

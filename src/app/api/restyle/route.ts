@@ -4,7 +4,7 @@ import { del } from "@vercel/blob";
 import sharp from "sharp";
 import { supabaseAdmin } from "@/lib/supabase";
 import { uploadImage, urlToBuf } from "@/lib/restyle-render";
-import { detectObjects } from "@/lib/gemini";
+import { detectObjects } from "@/lib/detect";
 
 // Cap the working resolution; every render is normalized to the canonical dims.
 const MAX_DIM = 1536;

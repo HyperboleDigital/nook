@@ -5,11 +5,15 @@ import { Sparkles, ShoppingCart } from "lucide-react";
 import type { RestyleWorkspace } from "./useRestyleWorkspace";
 import type { ShoppingResult } from "@/lib/shopping-search";
 import { Button, SkeletonProductCard, Spinner, StatusBanner } from "./ui";
+import CroppedThumb from "./CroppedThumb";
 
 /**
- * Clean list of alternative products for a slot that already has something placed — the
- * "Show similar" destination. Deliberately just the results, no link/photo/describe tabs:
- * that composing form is for sourcing an EMPTY slot from scratch, a different job.
+ * Clean list of alternative products for ANY detected item — whether it already has something
+ * staged/placed (searches off that reference photo) or has never been touched at all (searches
+ * off the ORIGINAL photo cropped to the item's own detected box, via `box2d` — see
+ * useRestyleWorkspace's `runVisualSearchByUrl` and the visual-search route). "Find similar"
+ * shouldn't require swapping something first. Deliberately just the results, no link/photo/
+ * describe tabs: that composing form is for sourcing an EMPTY slot from scratch, a different job.
  */
 export default function SimilarItemsPanel({ ws }: { ws: RestyleWorkspace }) {
   const sourcing = ws.sourcing;
@@ -17,33 +21,49 @@ export default function SimilarItemsPanel({ ws }: { ws: RestyleWorkspace }) {
   const key = label.toLowerCase();
   const search = ws.searches[key] ?? { status: "idle" as const, scored: false, results: [] };
   const stagedEdit = ws.stagedItems.find((e) => e.target_label?.toLowerCase() === key) ?? null;
+  const detected = ws.objects.find((o) => o.label.toLowerCase() === key) ?? null;
 
-  // Kick off a search if this slot hasn't been searched yet — reuses the already-staged
-  // photo/product's own image rather than asking the user to upload anything again.
+  // Kick off a search if this slot hasn't been searched yet. Prefers an already-staged
+  // photo/product's own image (no re-upload needed); otherwise falls back to the ORIGINAL
+  // photo cropped to the detected item's box, so a never-touched item can still be searched.
   useEffect(() => {
     if (!sourcing || sourcing.view !== "similar") return;
     if (search.status !== "idle") return;
-    const url = stagedEdit?.reference_url;
-    if (url) ws.runVisualSearchByUrl(url, key);
+    if (stagedEdit?.reference_url) { ws.runVisualSearchByUrl(stagedEdit.reference_url, key); return; }
+    if (detected && ws.restyle) ws.runVisualSearchByUrl(ws.restyle.original_url, key, detected.box_2d);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sourcing?.label, sourcing?.view]);
 
   if (!sourcing) return null;
 
+  // `idle` here means "the search is about to fire" (the effect above runs right after mount) —
+  // treat it as loading so the panel never shows a blank flash before the skeletons appear, but
+  // only when there's actually something to search from (otherwise idle would spin forever).
+  const willSearch = !!(stagedEdit?.reference_url || detected);
+  const loading = search.status === "loading" || (search.status === "idle" && willSearch);
+
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-3">
-        {stagedEdit?.reference_url && (
+        {stagedEdit?.reference_url ? (
           /* eslint-disable-next-line @next/next/no-img-element */
           <img src={stagedEdit.reference_url} alt="" className="h-14 w-14 object-cover rounded-xl border border-[var(--border)] bg-[var(--muted)] shrink-0" />
-        )}
+        ) : detected && ws.restyle ? (
+          <CroppedThumb imageUrl={ws.restyle.original_url} box_2d={detected.box_2d}
+            className="h-14 w-14 rounded-xl overflow-hidden border border-[var(--border)] bg-[var(--muted)] shrink-0" />
+        ) : null}
         <p className="text-xs text-[var(--muted-foreground)]">
           Recommended based on <span className="font-medium text-[var(--foreground)] capitalize">{stagedEdit?.product_title ?? label}</span>
         </p>
       </div>
 
-      {search.status === "loading" && (
-        <div className="space-y-2"><SkeletonProductCard /><SkeletonProductCard /><SkeletonProductCard /></div>
+      {loading && (
+        <div className="space-y-2">
+          <p className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
+            <Spinner size="xs" className="text-[var(--accent)]" /> Finding similar items — this can take a few seconds…
+          </p>
+          <SkeletonProductCard /><SkeletonProductCard /><SkeletonProductCard />
+        </div>
       )}
       {search.status === "error" && <StatusBanner variant="error">{search.error}</StatusBanner>}
       {search.status === "ready" && search.results.length === 0 && (

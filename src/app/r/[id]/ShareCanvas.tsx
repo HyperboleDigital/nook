@@ -33,6 +33,13 @@ export default function ShareCanvas({
   const frameRef = useRef<HTMLDivElement>(null);
   const [isDesktop, setIsDesktop] = useState(false);
   const [frameSize, setFrameSize] = useState({ w: 0, h: 0 });
+  // Measured directly off the rendered <img> — more robust than trusting the `width`/`height`
+  // props alone (see RestyleCanvas.tsx's identical comment for why).
+  const [naturalSize, setNaturalSize] = useState<{ w: number; h: number } | null>(null);
+  const onImgLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
+    const t = e.currentTarget;
+    if (t.naturalWidth && t.naturalHeight) setNaturalSize({ w: t.naturalWidth, h: t.naturalHeight });
+  };
 
   useEffect(() => {
     const mq = window.matchMedia("(min-width: 768px)");
@@ -52,13 +59,17 @@ export default function ShareCanvas({
     return () => ro.disconnect();
   }, []);
 
+  const natW = naturalSize?.w || width || 0;
+  const natH = naturalSize?.h || height || 0;
   let imgBoxStyle: CSSProperties | undefined;
-  if (isDesktop && width && height && frameSize.w && frameSize.h) {
-    const scale = Math.min(frameSize.w / width, frameSize.h / height);
-    const w = width * scale, h = height * scale;
+  if (isDesktop && natW && natH && frameSize.w && frameSize.h) {
+    const scale = Math.min(frameSize.w / natW, frameSize.h / natH);
+    const w = natW * scale, h = natH * scale;
     imgBoxStyle = { position: "absolute", left: (frameSize.w - w) / 2, top: (frameSize.h - h) / 2, width: w, height: h };
   }
-  const imgWrapClass = imgBoxStyle ? "relative" : "relative block w-full";
+  const imgWrapClass = imgBoxStyle
+    ? "relative rounded-3xl overflow-hidden shadow-[var(--shadow-pop)]"
+    : "relative block w-full rounded-3xl overflow-hidden shadow-[var(--shadow-pop)]";
   const imgClass = imgBoxStyle ? "block w-full h-full object-cover" : "block w-full h-auto max-h-[85dvh] object-contain";
 
   const total = products.reduce((s, e) => s + parsePrice(e.product_price), 0);
@@ -110,7 +121,7 @@ export default function ShareCanvas({
           <img src={imageUrl} alt="" aria-hidden className="absolute inset-0 h-full w-full object-cover blur-2xl brightness-50 scale-110" />
           <div className={imgWrapClass} style={imgBoxStyle}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={imageUrl} alt={title ?? "Room design"} className={imgClass} />
+            <img src={imageUrl} alt={title ?? "Room design"} className={imgClass} onLoad={onImgLoad} />
             {hotspots.map((h, i) => {
               const [ymin, xmin, ymax, xmax] = h.box_2d;
               const cx = (xmin + xmax) / 2 / 10, cy = (ymin + ymax) / 2 / 10;
