@@ -289,6 +289,7 @@ export async function composeEdits(params: {
       case "style":
         return `${n}. Restyle the whole room in this style: ${e.instruction ?? ""}.`;
       case "remove":
+        if (e.targetLabel) return `${n}. Remove the ${label} from the room entirely. Realistically fill in the floor, wall, or surface it used to cover — match the surrounding material, lighting, and shadows. Do not add anything in its place and do not change any other furniture or decor.`;
         return `${n}. Remove all furniture, decor, rugs, and clutter — leave a clean empty room with bare floor and walls.`;
       default:
         return `${n}. ${e.instruction ?? ""}.`;

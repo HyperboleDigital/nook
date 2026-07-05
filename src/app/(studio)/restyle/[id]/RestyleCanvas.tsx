@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Columns2, Download, Plus, Share2, Check, ArrowLeftRight } from "lucide-react";
+import type { CSSProperties } from "react";
 import type { CanvasHotspot, RestyleWorkspace } from "./useRestyleWorkspace";
 import { Button, IconButton, ProgressOverlay, ShopSummaryPill } from "./ui";
 import ObjectHotspots from "./ObjectHotspots";
@@ -9,11 +10,17 @@ import HotspotPopover from "./HotspotPopover";
 import QueuedHotspotPopover from "./QueuedHotspotPopover";
 import PinPlacementLayer from "./PinPlacementLayer";
 
+// Mobile fallback (and the brief window before the desktop box below is measured): the image
+// lays out at its natural aspect (block, full width, height follows) since the page just
+// scrolls there — no gutters are possible or needed.
+const FALLBACK_WRAP = "relative block w-full";
+const FALLBACK_IMG = "block w-full h-auto max-h-[85dvh] object-contain";
+
 /**
  * The room photo — centerpiece of the editor. Whichever image is on screen (original or a
- * render) is a live canvas: every detected item stays tappable via `ws.canvasHotspots`, so
- * the user can keep swapping/adding/removing and regenerating from a render, not just the
- * original. A hotspot's state (idle/queued/placed) decides what tapping it does:
+ * render) is a live canvas: every detected item stays tappable via `ws.canvasHotspots`, so the
+ * user can keep swapping/adding/removing and regenerating from a render, not just the original.
+ * A hotspot's state (idle/queued/placed) decides what tapping it does:
  *   idle    → open sourcing (nothing staged for it)
  *   queued  → a light "here's what's queued" teaser (Change/Remove) — NOT the placed/priced
  *             popover, since this change isn't actually in the pictured image yet
@@ -22,7 +29,21 @@ import PinPlacementLayer from "./PinPlacementLayer";
  *             actually in the displayed image's signature, which is empty on the original)
  * Generate progress overlays right here instead of a separate result screen. `ws.pinRequest`
  * overlays a tap-to-place layer on the original photo right after a new "add" item stages,
- * ahead of everything else.
+ * ahead of everything else. The raw original photo is intentionally NOT offered as a
+ * navigable "version" (see VersionsStrip) — it's a silent backend reference recompose always
+ * composites from, not a state a user picks; download/share always reflect whatever's
+ * currently displayed (the live render with its current on/off toggle state).
+ *
+ * Desktop (md+) sits inside RestyleStudio's fixed-height immersive stage, so a portrait photo
+ * can't fill both axes the way a simple `w-full h-auto` can on mobile's scrolling column. CSS
+ * percentage-height shrink-wrapping (`max-h-full` on an auto-sized wrapper) is genuinely
+ * ambiguous per spec when the wrapper's own height comes from its content — so instead this
+ * measures the stage (ResizeObserver) and computes the contained image's exact pixel box from
+ * `restyle.width`/`height` (the canonical dimensions every displayed image already shares,
+ * guaranteed by upload-time canonicalization + recompose's fixed-size output). The wrapper is
+ * then pinned to that exact pixel box, so object-cover fills it perfectly with no letterboxing
+ * math needed, and every %-positioned hotspot/popover still lands correctly since the wrapper
+ * IS the image's true rendered box, in pixels, not a CSS approximation.
  */
 export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
   const { restyle, generating, displayUrl, previewUrl } = ws;
@@ -30,6 +51,28 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
   const [copied, setCopied] = useState(false);
   const [openHotspot, setOpenHotspot] = useState<{ label: string; cx: number; cy: number; edit: NonNullable<CanvasHotspot["edit"]> } | null>(null);
   const [queuedPreview, setQueuedPreview] = useState<{ label: string; cx: number; cy: number; edit: NonNullable<CanvasHotspot["edit"]> } | null>(null);
+
+  // Desktop image-box measurement (see doc comment above).
+  const frameRef = useRef<HTMLDivElement>(null);
+  const [isDesktop, setIsDesktop] = useState(false);
+  const [frameSize, setFrameSize] = useState({ w: 0, h: 0 });
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 768px)");
+    const update = () => setIsDesktop(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
+  useEffect(() => {
+    const el = frameRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const { width, height } = entries[0].contentRect;
+      setFrameSize({ w: width, h: height });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   // Before/after slider. Local to this component (nothing else reads it) and throttled to at
   // most one state update per animation frame — calling setCompare on every raw pointermove
@@ -70,6 +113,18 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
 
   if (!restyle) return null;
   const { viewingOriginal } = ws;
+  const backdropSrc = viewingOriginal ? restyle.original_url : displayUrl;
+
+  const natW = restyle.width ?? 0;
+  const natH = restyle.height ?? 0;
+  let imgBoxStyle: CSSProperties | undefined;
+  if (isDesktop && natW && natH && frameSize.w && frameSize.h) {
+    const scale = Math.min(frameSize.w / natW, frameSize.h / natH);
+    const w = natW * scale, h = natH * scale;
+    imgBoxStyle = { position: "absolute", left: (frameSize.w - w) / 2, top: (frameSize.h - h) / 2, width: w, height: h };
+  }
+  const imgWrapClass = imgBoxStyle ? "relative" : FALLBACK_WRAP;
+  const imgClass = imgBoxStyle ? "block w-full h-full object-cover" : FALLBACK_IMG;
 
   const handleTap = (h: CanvasHotspot, cx: number, cy: number) => {
     if (h.state === "idle") { ws.openSourcing(h.label, "swap"); return; }
@@ -108,12 +163,18 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
   };
 
   return (
-    <div className="space-y-2">
-      <div className="relative bg-[var(--muted)] border border-[var(--border)] rounded-3xl overflow-hidden flex items-center justify-center p-2 min-h-[40vh]">
+    <div className="h-full w-full md:flex md:flex-col">
+      <div ref={frameRef} className="relative bg-[var(--muted)] border border-[var(--border)] rounded-3xl min-h-[40vh] overflow-hidden md:border-0 md:rounded-none md:min-h-0 md:flex-1 md:flex md:items-center md:justify-center">
+        {/* Desktop-only: a blurred, darkened cover fill behind a portrait photo so the gutters
+            either side of the shrink-wrapped sharp image read as an intentional frame, not a
+            broken letterbox (a portrait room can't fill a landscape stage on both axes). */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={backdropSrc} alt="" aria-hidden className="hidden md:block absolute inset-0 h-full w-full object-cover blur-2xl brightness-50 scale-110" />
+
         {viewingOriginal ? (
-          <div className="relative inline-block max-h-[65dvh] md:max-h-[70vh]">
+          <div className={imgWrapClass} style={imgBoxStyle}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={restyle.original_url} alt="Your room" className="block max-w-full max-h-[65dvh] md:max-h-[70vh] object-contain" />
+            <img src={restyle.original_url} alt="Your room" className={imgClass} />
             {ws.canvasHotspots.length > 0 && (
               <ObjectHotspots hotspots={ws.canvasHotspots} activeLabel={ws.sourcing?.label} onSelect={handleTap} />
             )}
@@ -132,9 +193,9 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
             )}
           </div>
         ) : !showCompare ? (
-          <div className="relative inline-block max-h-[65dvh] md:max-h-[70vh]">
+          <div className={imgWrapClass} style={imgBoxStyle}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={displayUrl} alt="Restyled room" className="block max-w-full max-h-[65dvh] md:max-h-[70vh] object-contain" />
+            <img src={displayUrl} alt="Restyled room" className={imgClass} />
             {ws.canvasHotspots.length > 0 && (
               <ObjectHotspots hotspots={ws.canvasHotspots} activeLabel={ws.sourcing?.label} onSelect={handleTap} />
             )}
@@ -153,12 +214,12 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
             )}
           </div>
         ) : (
-          <div ref={imgWrapRef} className="relative select-none max-h-[65dvh] md:max-h-[70vh] inline-block touch-none" {...sliderHandlers}>
+          <div ref={imgWrapRef} className={`${imgWrapClass} select-none touch-none`} style={imgBoxStyle} {...sliderHandlers}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={displayUrl} alt="After" className="block max-h-[65dvh] md:max-h-[70vh] w-auto max-w-full object-contain" draggable={false} />
+            <img src={displayUrl} alt="After" className={imgClass} draggable={false} />
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={restyle.original_url} alt="Before" draggable={false}
-              className="absolute inset-0 h-full w-full object-contain"
+              className="absolute inset-0 h-full w-full object-cover"
               style={{ clipPath: `inset(0 ${100 - compare}% 0 0)` }} />
             <div className="absolute top-0 bottom-0 w-0.5 bg-white pointer-events-none" style={{ left: `${compare}%` }}>
               <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-8 w-8 rounded-full bg-white border border-[var(--border)] shadow-[var(--shadow-soft)] flex items-center justify-center text-[var(--foreground)]">
@@ -170,7 +231,9 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
           </div>
         )}
 
-        {generating && <ProgressOverlay status="Generating your room…" subtext="Usually 20–60 seconds" />}
+        {generating && ws.generatingStartedAt != null && (
+          <ProgressOverlay startedAt={ws.generatingStartedAt} expectedSeconds={ws.expectedSeconds} />
+        )}
 
         {!viewingOriginal && !generating && !showCompare && ws.productEdits.length > 0 && (
           <div className="absolute bottom-3 left-3 hidden md:block">
@@ -203,7 +266,7 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
           </IconButton>
         </div>
       </div>
-      <p className="text-[11px] text-[var(--muted-foreground)] text-center">
+      <p className="md:hidden text-[11px] text-[var(--muted-foreground)] text-center py-2">
         {ws.pinRequest ? "Tap the photo to choose where it goes"
           : viewingOriginal ? "Tap an item to swap it, or add something new"
           : previewUrl ? "Viewing an earlier version — tap an item to keep editing"

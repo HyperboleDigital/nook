@@ -9,7 +9,7 @@ import {
   Lightbulb, Footprints, Maximize, Sofa, Bed, UtensilsCrossed, Laptop, LayoutGrid, MoreHorizontal,
 } from "lucide-react";
 import { downscaleImage } from "@/lib/image-client";
-import { Button, Input, Spinner, StatusBanner } from "../[id]/ui";
+import { Button, Input, Spinner, StatusBanner } from "@/app/(studio)/restyle/[id]/ui";
 import { cn } from "@/lib/utils";
 
 type Step = "ready" | "photo" | "roomType" | "confirm";
@@ -36,6 +36,7 @@ export default function NewRestylePage() {
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState(false); // only phones can actually take a photo
+  const [portraitFile, setPortraitFile] = useState<File | null>(null); // camera shot taken upright — offer a retake before committing
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null); // capture="environment" → opens the camera on mobile
 
@@ -60,6 +61,25 @@ export default function NewRestylePage() {
     setFile(f);
     setStep("roomType");
   }, []);
+
+  // A web file-input camera capture can't force landscape orientation or pick a wider lens —
+  // the only thing we CAN do reliably is check the result afterward and offer a retake before
+  // committing to it, rather than silently generating from a photo that won't fit the room in.
+  // Library uploads (existing photos) skip this — no nag for a photo someone already has.
+  const selectFromCamera = useCallback(async (f: File | undefined) => {
+    if (!f || !f.type.startsWith("image/")) return;
+    try {
+      const { width, height } = await new Promise<{ width: number; height: number }>((resolve, reject) => {
+        const img = new Image();
+        const url = URL.createObjectURL(f);
+        img.onload = () => { resolve({ width: img.naturalWidth, height: img.naturalHeight }); URL.revokeObjectURL(url); };
+        img.onerror = () => { reject(new Error("decode failed")); URL.revokeObjectURL(url); };
+        img.src = url;
+      });
+      if (height > width) { setPortraitFile(f); return; }
+    } catch { /* couldn't check dimensions — proceed rather than block on it */ }
+    select(f);
+  }, [select]);
 
   // Paste from clipboard (Cmd+V / Ctrl+V)
   useEffect(() => {
@@ -146,7 +166,7 @@ export default function NewRestylePage() {
       </div>
 
       <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => select(e.target.files?.[0])} />
-      <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => select(e.target.files?.[0])} />
+      <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { selectFromCamera(e.target.files?.[0]); e.target.value = ""; }} />
 
       {step === "ready" && (
         <div className="rounded-3xl bg-[var(--card)] shadow-[var(--shadow-soft)] p-6 space-y-5">
@@ -159,7 +179,7 @@ export default function NewRestylePage() {
               { icon: Lightbulb, text: "Good, even lighting" },
               { icon: Footprints, text: "Keep the floor visible" },
               { icon: Maximize, text: "Step back to fit the whole room" },
-              { icon: Camera, text: "Landscape works best" },
+              { icon: Camera, text: "Hold your phone sideways — use 0.5x zoom to fit the whole room" },
             ].map(({ icon: Icon, text }) => (
               <li key={text} className="flex items-center gap-3">
                 <span className="h-9 w-9 rounded-full bg-[var(--accent-soft)] text-[var(--accent-soft-foreground)] flex items-center justify-center shrink-0">
@@ -297,6 +317,29 @@ export default function NewRestylePage() {
       )}
 
       {error && <StatusBanner variant="error" className="mt-4">{error}</StatusBanner>}
+
+      {portraitFile && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+          onClick={() => setPortraitFile(null)}>
+          <div className="bg-[var(--card)] rounded-3xl p-5 max-w-sm w-full space-y-3 shadow-[var(--shadow-pop)]"
+            onClick={(e) => e.stopPropagation()}>
+            <div>
+              <h2 className="text-base font-bold tracking-tight">Landscape works best</h2>
+              <p className="text-sm text-[var(--muted-foreground)] mt-1">
+                That photo is upright — turning your phone sideways fits more of the room in frame. You can retake it, or use this one as-is.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="primary" className="flex-1" onClick={() => { setPortraitFile(null); cameraInputRef.current?.click(); }}>
+                Retake
+              </Button>
+              <Button variant="outline" onClick={() => { const f = portraitFile; setPortraitFile(null); select(f); }}>
+                Use it anyway
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

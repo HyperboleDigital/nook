@@ -79,6 +79,11 @@ export interface Restyle {
   custom_items: string[] | null;
   /** Room type chosen at capture time (see /restyle/new) — nullable, set via migration 014. */
   room_type: string | null;
+  /** Set when a generate is in-flight, cleared (null) when it finishes or fails — lets a
+   *  fresh page load detect and resume showing progress. See migration 016. */
+  generating_started_at: string | null;
+  /** Error from the most recent generate attempt, if it failed while the user was away. */
+  generate_error: string | null;
   created_at: string;
   updated_at: string;
   edits?: RestyleEdit[];

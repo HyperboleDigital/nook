@@ -54,9 +54,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   }).select().single();
   if (error || !inserted) return NextResponse.json({ error: error?.message ?? "DB error" }, { status: 500 });
 
-  if (kind === "item" && targetLabel) {
+  // A slot can only hold one active outcome at a time — swapping, adding, or removing the
+  // same target_label are mutually exclusive, so staging any one deactivates the others.
+  if ((kind === "item" || kind === "add" || kind === "remove") && targetLabel) {
     await supabaseAdmin.from("restyle_edits").update({ active: false })
-      .eq("restyle_id", id).eq("kind", "item").eq("target_label", targetLabel).neq("id", inserted.id);
+      .eq("restyle_id", id).eq("target_label", targetLabel).in("kind", ["item", "add", "remove"]).neq("id", inserted.id);
   }
 
   return NextResponse.json({ edits: await editsFor(id) });

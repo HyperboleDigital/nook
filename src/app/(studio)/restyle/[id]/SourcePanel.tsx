@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Check } from "lucide-react";
+import { Check, Eraser } from "lucide-react";
 import type { RestyleWorkspace } from "./useRestyleWorkspace";
 import type { ShoppingResult } from "@/lib/shopping-search";
 import { downscaleImage } from "@/lib/image-client";
@@ -188,6 +188,13 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
             Just go with my description
           </Button>
         </div>
+      )}
+
+      {sourcing.mode === "swap" && matchedObject && (
+        <button type="button" onClick={() => ws.stageRemove(label)}
+          className="w-full flex items-center justify-center gap-1.5 text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] py-2 transition-colors">
+          <Eraser className="h-3.5 w-3.5" /> Remove this {label} from the room
+        </button>
       )}
     </div>
   );

@@ -1,26 +1,19 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse, after } from "next/server";
 import { del } from "@vercel/blob";
-import { supabaseAdmin } from "@/lib/supabase";
 import { uploadImage } from "@/lib/restyle-render";
 import { describeScreenshotForSearch, locateProductPhoto, scoreImageMatches } from "@/lib/gemini";
 import { resolveTokenUrls, searchByImage, searchShopping, ShoppingSearchError, type ShoppingResult } from "@/lib/shopping-search";
 import { fileToBuffer } from "@/lib/file-buf";
 import { cropToBox } from "@/lib/image-crop";
 import { loadOwnedRestyle } from "@/lib/restyle-edits";
+import { searchProductByImageUrl, upsertSearch } from "@/lib/restyle-search";
 
 // Google Lens visual match + Gemini identify (parallel) + four parallel SerpApi searches.
 // Scoring + Wayfair token resolution happen in after() once the response is already sent.
 export const maxDuration = 90;
 
 const titleKey = (t: string) => t.toLowerCase().replace(/\s+/g, " ").slice(0, 40);
-
-async function upsertSearch(restyleId: string, label: string, fields: { query?: string | null; results: ShoppingResult[]; scored: boolean }) {
-  await supabaseAdmin.from("restyle_searches").upsert(
-    { restyle_id: restyleId, label, query: fields.query ?? null, results: fields.results, scored: fields.scored, updated_at: new Date().toISOString() },
-    { onConflict: "restyle_id,label" },
-  );
-}
 
 // POST — screenshot, an already-hosted image, or a text query → find the actual product
 // (Google Lens + keyword search) across supported retailers. Responds fast with unscored
@@ -68,24 +61,21 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     }
   }
 
-  if (!file && !imageUrl) return NextResponse.json({ error: "An image is required." }, { status: 400 });
-  if (file && !file.type.startsWith("image/")) return NextResponse.json({ error: "That file isn't an image." }, { status: 400 });
-
-  let rawBuf: Buffer;
-  let mimeType: string;
-  // An imageUrl is an already-staged edit's reference photo — already cropped to just the
-  // product, already hosted — so skip the crop step and reuse it as the Lens/scoring image
-  // directly instead of re-uploading a copy.
-  const alreadyCropped = !!imageUrl;
-  if (file) {
-    rawBuf = await fileToBuffer(file);
-    mimeType = file.type || "image/jpeg";
-  } else {
-    const res = await fetch(imageUrl!);
-    if (!res.ok) return NextResponse.json({ error: "Couldn't load that image." }, { status: 502 });
-    rawBuf = Buffer.from(await res.arrayBuffer());
-    mimeType = res.headers.get("content-type") || "image/jpeg";
+  // An imageUrl (no fresh file) is an already-staged edit's reference photo — already cropped
+  // to just the product, already hosted — delegate entirely to the shared pipeline (also used
+  // server-side by generate's deferred inspo search) instead of duplicating the logic here.
+  if (!file && imageUrl) {
+    const search = await searchProductByImageUrl({ restyleId: id, imageUrl, label });
+    if (!search.ok) return NextResponse.json({ error: search.error }, { status: search.status });
+    after(search.finish);
+    return NextResponse.json({ results: search.results, scored: false });
   }
+
+  if (!file) return NextResponse.json({ error: "An image is required." }, { status: 400 });
+  if (!file.type.startsWith("image/")) return NextResponse.json({ error: "That file isn't an image." }, { status: 400 });
+
+  const rawBuf = await fileToBuffer(file);
+  const mimeType = file.type || "image/jpeg";
   const rawBase64 = rawBuf.toString("base64");
 
   // Full-page/app screenshots carry UI chrome (nav bars, price, buttons) that pollutes both
@@ -93,7 +83,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   // in parallel (independent Gemini calls over the same bytes; used to run serially, and
   // separately duplicated again in the product route for the same screenshot).
   const [box, identified] = await Promise.all([
-    alreadyCropped ? Promise.resolve(null) : locateProductPhoto({ imageBase64: rawBase64, mimeType }).catch(() => null),
+    locateProductPhoto({ imageBase64: rawBase64, mimeType }).catch(() => null),
     describeScreenshotForSearch({ imageBase64: rawBase64, mimeType }).catch(() => null),
   ]);
   if (!identified && !box) {
@@ -105,13 +95,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const lensBase64 = lensBuf.toString("base64");
 
   // Upload once — reused for the Lens search and (if staging) the edit's reference photo.
-  // Skipped when we already have a hosted URL (the imageUrl path).
-  let shotUrl: string | null = imageUrl ?? null;
-  if (!shotUrl) {
-    try {
-      shotUrl = await uploadImage(userId, lensBuf, mimeType);
-    } catch { /* Lens + staging both degrade gracefully without a hosted copy */ }
-  }
+  let shotUrl: string | null = null;
+  try {
+    shotUrl = await uploadImage(userId, lensBuf, mimeType);
+  } catch { /* Lens + staging both degrade gracefully without a hosted copy */ }
 
   const searchQuery = identified
     ? [identified.productTitle, identified.description, identified.itemType].filter(Boolean).join(" ").trim()
@@ -124,9 +111,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     searchQuery ? searchShopping(searchQuery).catch((err) => { console.error("[visual-search] keyword search failed:", err); return []; }) : Promise.resolve([] as ShoppingResult[]),
   ]);
 
-  // Only delete a blob we uploaded ourselves in this request — an imageUrl is someone else's
-  // permanent asset (the staged edit's own reference photo), never ours to clean up.
-  if (!imageUrl && shotUrl) { try { await del(shotUrl); } catch { /* leave it; non-fatal */ } }
+  if (shotUrl) { try { await del(shotUrl); } catch { /* leave it; non-fatal */ } }
 
   const seen = new Set(exact.map((r) => titleKey(r.title)));
   let results = [...exact, ...keyword.filter((r) => !seen.has(titleKey(r.title)))];

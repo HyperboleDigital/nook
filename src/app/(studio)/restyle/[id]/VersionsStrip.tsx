@@ -6,6 +6,11 @@ import { SectionLabel } from "./ui";
 // The server caps restyle_renders at 8 rows per project (recompose prunes the oldest on
 // insert, never the one backing current_url) — `renders` is already this short, so no
 // client-side limiting is needed here.
+//
+// Deliberately does NOT offer the original photo as a selectable thumbnail — the original is
+// a silent backend reference (recompose always composites from it) and its own visual "state"
+// isn't something a user should navigate back into; there's one editable image (the current
+// render), plus this short history of past renders to preview and restore.
 export default function VersionsStrip({ ws }: { ws: RestyleWorkspace }) {
   const { restyle, renders, previewUrl, setPreviewUrl } = ws;
   if (!restyle || renders.length === 0) return null;
@@ -22,14 +27,6 @@ export default function VersionsStrip({ ws }: { ws: RestyleWorkspace }) {
         )}
       </div>
       <div className="flex gap-2 overflow-x-auto pb-1">
-        <button type="button" onClick={() => setPreviewUrl(restyle.original_url)} title="Original"
-          className={`relative shrink-0 h-16 w-16 rounded-xl overflow-hidden border-2 transition-colors ${
-            previewUrl === restyle.original_url ? "border-[var(--primary)]" : "border-[var(--border)] hover:border-[var(--foreground)]"
-          }`}>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={restyle.original_url} alt="Original" className="h-full w-full object-cover" />
-          <span className="absolute bottom-0 inset-x-0 text-[9px] text-center bg-black/60 text-white py-0.5">Original</span>
-        </button>
         {renders.map((r, i) => {
           const isViewed = previewUrl ? previewUrl === r.image_url : r.image_url === restyle.current_url;
           return (

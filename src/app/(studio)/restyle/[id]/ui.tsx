@@ -2,7 +2,7 @@
 
 import { cva, type VariantProps } from "class-variance-authority";
 import { ExternalLink, ShoppingBag, X } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import type { RestyleEdit } from "@/types";
@@ -66,26 +66,40 @@ export function IconButton({ className, ...props }: ButtonHTMLAttributes<HTMLBut
 // A real on/off switch (not an icon button) — used for the per-item "turn this off, revert
 // to original" control on a placed hotspot/product card. `checked` is presentational only;
 // callers regenerate immediately on toggle rather than tracking a persistent off state.
+//
+// `disabled` does NOT use the native HTML disabled attribute — that blocks the click event
+// entirely, so there'd be no way to tell the user WHY nothing happened when they tap a locked
+// switch. Instead the switch stays clickable but visibly muted (grey track, not accent green,
+// regardless of `checked`) and routes taps to `onDisabledClick` instead of `onChange`, so the
+// caller can surface a "here's why" message rather than the switch just silently doing nothing.
 export function Switch({
-  checked, onChange, disabled, "aria-label": ariaLabel,
-}: { checked: boolean; onChange: () => void; disabled?: boolean; "aria-label": string }) {
+  checked, onChange, disabled, onDisabledClick, "aria-label": ariaLabel,
+}: {
+  checked: boolean;
+  onChange: () => void;
+  disabled?: boolean;
+  onDisabledClick?: () => void;
+  "aria-label": string;
+}) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
+      aria-disabled={disabled}
       aria-label={ariaLabel}
-      disabled={disabled}
-      onClick={onChange}
+      onClick={() => (disabled ? onDisabledClick?.() : onChange())}
       className={cn(
-        "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors cursor-pointer",
-        "disabled:opacity-40 disabled:cursor-not-allowed",
-        checked ? "bg-[var(--accent)]" : "bg-[var(--border)]",
+        "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors",
+        disabled
+          ? "bg-[var(--muted)] cursor-not-allowed"
+          : cn("cursor-pointer", checked ? "bg-[var(--accent)]" : "bg-[var(--border)]"),
       )}
     >
       <span
         className={cn(
-          "inline-block h-4 w-4 rounded-full bg-white shadow-[var(--shadow-soft)] transition-transform",
+          "inline-block h-4 w-4 rounded-full shadow-[var(--shadow-soft)] transition-transform",
+          disabled ? "bg-white/60" : "bg-white",
           checked ? "translate-x-6" : "translate-x-1",
         )}
       />
@@ -270,13 +284,65 @@ export function SkeletonProductCard() {
 }
 
 // ── ProgressOverlay ───────────────────────────────────────────────────────────
-// Full-bleed overlay for the canvas during generate — status + optional context line.
-export function ProgressOverlay({ status, subtext }: { status: string; subtext?: string }) {
+// Warm, playful lines rotated under the progress bar while a room generates. Kept here (not a
+// prop) so every caller gets the same personality for free — pass `messages` only to override.
+export const GENERATE_MESSAGES = [
+  "Fluffing the pillows…",
+  "Hanging the art straight…",
+  "Rolling out the rug…",
+  "Nudging the sofa two inches to the left…",
+  "Letting in the afternoon light…",
+  "Checking the feng shui…",
+  "Warming up the color palette…",
+  "Dusting the shelves before the big reveal…",
+  "Matching the shadows to the sunlight…",
+  "Stepping back to admire the room…",
+  "Adding the finishing touches…",
+];
+
+// Full-bleed overlay for the canvas during generate. Self-ticking: given `startedAt` (epoch ms)
+// and `expectedSeconds`, it computes its own % / seconds-left / rotating message on a 300ms
+// interval — nothing above it re-renders on every tick (that used to live in the shared
+// workspace hook and re-rendered the whole editor tree once per interval). The percentage and
+// "time left" are a time-based ESTIMATE, not a real signal — Gemini's image-generation call has
+// no streaming/progress API — so this is honest-but-fake, tuned to feel right, not to be exact.
+export function ProgressOverlay({
+  status = "Generating your room…", startedAt, expectedSeconds = 45, messages = GENERATE_MESSAGES,
+}: {
+  status?: string; startedAt: number; expectedSeconds?: number; messages?: string[];
+}) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 300);
+    return () => clearInterval(interval);
+  }, []);
+
+  const elapsedSeconds = Math.max(0, (now - startedAt) / 1000);
+  // Asymptotic curve scaled to expectedSeconds: ~63% at 1x, ~86% at 2x, caps at 95% until the
+  // real image lands (the caller stops rendering this overlay the moment it does).
+  const progress = Math.min(95, 100 * (1 - Math.exp(-elapsedSeconds / (expectedSeconds / 1.5))));
+  const secondsLeft = Math.round(expectedSeconds - elapsedSeconds);
+  const messageIndex = Math.floor(elapsedSeconds / 3.5) % messages.length;
+
   return (
     <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[var(--background)]/85 text-center px-4">
       <Spinner size="lg" className="text-[var(--primary)]" />
       <p className="text-sm font-medium text-[var(--foreground)]">{status}</p>
-      {subtext && <p className="text-xs text-[var(--muted-foreground)]">{subtext}</p>}
+      <div className="w-48 space-y-1">
+        <div className="h-1.5 w-full rounded-full bg-[var(--muted)] overflow-hidden">
+          <div
+            className="h-full rounded-full bg-[var(--primary)] transition-[width] duration-300 ease-out"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+        <div className="flex items-center justify-between text-[11px] text-[var(--muted-foreground)] tabular-nums">
+          <span>{Math.round(progress)}%</span>
+          <span>{secondsLeft > 0 ? `~${secondsLeft}s left` : "Almost there…"}</span>
+        </div>
+      </div>
+      <p key={messageIndex} className="text-xs text-[var(--muted-foreground)] animate-[fade-in_0.3s_ease-out]">
+        {messages[messageIndex]}
+      </p>
     </div>
   );
 }

@@ -56,7 +56,12 @@ export function useRestyleWorkspace(id: string) {
   const [objects, setObjects] = useState<DetectedObject[] | null>(null);
   const [detecting, setDetecting] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [generating, setGenerating] = useState(false);
+  // Epoch ms a generate started at — set directly by generate() or adopted from the server's
+  // restyles.generating_started_at on load, so a fresh reload can resume showing progress
+  // instead of the render finishing invisibly while the user was away. `generating` (below)
+  // is derived from this so a resumed in-flight generate reads the same as one just clicked.
+  const [generatingStartedAt, setGeneratingStartedAt] = useState<number | null>(null);
+  const generating = generatingStartedAt !== null;
   const [error, setError] = useState<string | null>(null);
 
   const [titleDraft, setTitleDraft] = useState("");
@@ -73,6 +78,46 @@ export function useRestyleWorkspace(id: string) {
   // Tap-to-place pin for an "add" edit — offered right after it stages successfully.
   // Optional: Skip/cancel leaves placement null and generate is never blocked on it.
   const [pinRequest, setPinRequest] = useState<{ editId: string; label: string } | null>(null);
+
+  // Poll an in-flight generate (just kicked off, or resumed from a reload) until the server
+  // clears generating_started_at. The render AND the deferred inspo product search both run
+  // fully server-side (see the generate route's after()), so this loop is read-only — it just
+  // waits and then hydrates whatever the server already finished, including search results
+  // that ran while the client may have been disconnected entirely.
+  const pollGenerating = useCallback(async (startedAt: number) => {
+    const STALE_MS = 6.5 * 60 * 1000; // past maxDuration=300 + buffer
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 4000));
+      if (Date.now() - startedAt > STALE_MS) {
+        setGeneratingStartedAt(null);
+        setError("This render seems to have stalled. Try generating again.");
+        return;
+      }
+      try {
+        const r = await fetch(`/api/restyles/${id}`);
+        if (!r.ok) continue;
+        const d: Restyle = await r.json();
+        if (!d.generating_started_at) {
+          setRestyle((prev) => prev ? { ...prev, current_url: d.current_url, edits: d.edits } : d);
+          if (d.renders) setRenders(d.renders);
+          if (d.generate_error) setError(d.generate_error);
+          setGeneratingStartedAt(null);
+          try {
+            const sr = await fetch(`/api/restyle/${id}/searches`);
+            if (sr.ok) {
+              const sj = await sr.json();
+              const hydrated: Record<string, SearchState> = {};
+              for (const row of sj.searches ?? []) {
+                hydrated[row.label] = { status: "ready", scored: row.scored, results: row.results ?? [] };
+              }
+              setSearches((prev) => ({ ...prev, ...hydrated }));
+            }
+          } catch { /* best effort */ }
+          return;
+        }
+      } catch { /* keep polling */ }
+    }
+  }, [id]);
 
   // ── Load: project + persisted searches in parallel, then poll detection if pending ──
   useEffect(() => {
@@ -95,6 +140,15 @@ export function useRestyleWorkspace(id: string) {
           hydrated[row.label] = { status: "ready", scored: row.scored, results: row.results ?? [] };
         }
         if (active) setSearches(hydrated);
+      }
+
+      // A generate was in flight when this project was last touched — the underlying render
+      // survives a closed tab (it's a normal serverless invocation that runs to completion),
+      // but nothing told the UI until now. Resume showing progress and poll until it clears.
+      if (d.generating_started_at) {
+        const startedAt = new Date(d.generating_started_at).getTime();
+        setGeneratingStartedAt(startedAt);
+        pollGenerating(startedAt);
       }
 
       if (d.detected_objects && d.detected_objects.length > 0) {
@@ -130,7 +184,7 @@ export function useRestyleWorkspace(id: string) {
       }
     })();
     return () => { active = false; };
-  }, [id]);
+  }, [id, pollGenerating]);
 
   const saveTitle = async (t: string) => {
     const trimmed = t.trim();
@@ -370,37 +424,34 @@ export function useRestyleWorkspace(id: string) {
     }
   };
 
-  const generate = async () => {
-    setGenerating(true); setError(null); setPreviewUrl(null); setPinRequest(null);
+  // Fire-and-forget: POST returns 202 immediately (the render + deferred inspo search run
+  // fully server-side in the route's after()), then this hands off to pollGenerating, which
+  // is the single place that adopts the finished result — whether generate() called it just
+  // now or a page reload resumed an already-in-flight one. An optional body can apply a
+  // server-side edit-state change (toggle one edit, or empty the room) atomically before
+  // rendering, so those flows never depend on a client-side loop surviving to the end.
+  const generate = async (body?: { toggle?: { editId: string; active: boolean }; emptyRoom?: boolean }) => {
+    setError(null); setPreviewUrl(null); setPinRequest(null);
     try {
-      const r = await fetch(`/api/restyle/${id}/generate`, { method: "POST" });
+      const r = await fetch(`/api/restyle/${id}/generate`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body ?? {}),
+      });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error ?? "Generate failed");
-      setRestyle((prev) => prev ? { ...prev, current_url: data.url, edits: data.edits } : prev);
-      if (data.renders) setRenders(data.renders);
-
-      // Now that the room is actually generated, look up buyable options for any inspo-only
-      // items (uploaded photos with no product link yet) that ended up in this render — this
-      // is the deferred half of "upload a photo": staging it earlier didn't search, so search
-      // happens now against whatever actually made it into the picture.
-      const inspo = (data.edits as RestyleEdit[]).filter(
-        (e) => e.active && e.reference_url && !e.buy_url && e.target_label,
-      );
-      for (const e of inspo) runVisualSearchByUrl(e.reference_url!, e.target_label!.toLowerCase());
-
+      const startedAt = new Date(data.generatingStartedAt).getTime();
+      setGeneratingStartedAt(startedAt);
+      await pollGenerating(startedAt);
       return true;
-    } catch (err) { setError(err instanceof Error ? err.message : "Generate failed"); return false; }
-    finally { setGenerating(false); }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Generate failed");
+      setGeneratingStartedAt(null);
+      return false;
+    }
   };
 
-  // Deactivate everything, ensure a "remove" edit, generate — a bare room.
-  const emptyRoom = async () => {
-    const active = restyle?.edits?.filter((e) => e.active) ?? [];
-    for (const e of active) if (e.kind !== "remove") await toggle(e.id, false);
-    const hasRemoveAll = restyle?.edits?.some((e) => e.kind === "remove" && e.active);
-    if (!hasRemoveAll) await addEdit({ kind: "remove" });
-    return generate();
-  };
+  // Whole-room reset — server applies "deactivate everything, ensure a whole-room remove
+  // edit" atomically before rendering (see the generate route's `emptyRoom` handling).
+  const emptyRoom = () => generate({ emptyRoom: true });
 
   const toggle = async (editId: string, active: boolean) => {
     updateEdits((restyle?.edits ?? []).map((e) => (e.id === editId ? { ...e, active } : e)));
@@ -412,14 +463,49 @@ export function useRestyleWorkspace(id: string) {
     } catch { /* best effort — optimistic is already set */ }
   };
 
-  // A simple on/off switch for a single item already in the picture: flip it, then regenerate
-  // right away — a combination already seen before is an instant cache hit (restyle_renders'
-  // signature cache), a new one pays the real render cost, surfaced via the existing
-  // generating/ProgressOverlay state. toggle() already awaits its PATCH before resolving, so
-  // by the time generate() reads active edits from the DB it reflects the flipped state.
+  // A simple on/off switch for a single item already in the picture: flip it (optimistically,
+  // for instant hotspot/list feedback) and regenerate right away, with the toggle itself
+  // applied server-side as part of the same generate call — a combination already seen before
+  // is an instant cache hit (restyle_renders' signature cache), a new one pays the real render
+  // cost, surfaced via the ProgressOverlay.
   const toggleAndRegenerate = async (editId: string, active: boolean) => {
-    await toggle(editId, active);
-    await generate();
+    updateEdits((restyle?.edits ?? []).map((e) => (e.id === editId ? { ...e, active } : e)));
+    await generate({ toggle: { editId, active } });
+  };
+
+  // Batch-deactivate every active edit in one call (used by "Start from original" — GenerateBar
+  // used to do this as a client for-loop of individual toggles, which left a partial state if
+  // the tab closed mid-loop; the edits route's `states` map applies it atomically).
+  const deactivateAll = async () => {
+    const activeIds = (restyle?.edits ?? []).filter((e) => e.active).map((e) => e.id);
+    if (activeIds.length === 0) return;
+    updateEdits((restyle?.edits ?? []).map((e) => (activeIds.includes(e.id) ? { ...e, active: false } : e)));
+    try {
+      const states: Record<string, boolean> = {};
+      for (const eid of activeIds) states[eid] = false;
+      const r = await fetch(`/api/restyle/${id}/edits`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ states }),
+      });
+      const data = await r.json();
+      if (r.ok) updateEdits(data.edits);
+    } catch { /* best effort — optimistic is already set */ }
+  };
+
+  // Remove a detected item from the room entirely (distinct from un-toggling a swap, which
+  // just reverts to the original item) — stages a targeted `remove` edit for this label.
+  const stageRemove = async (label: string) => {
+    setError(null);
+    try {
+      const fd = new FormData();
+      fd.append("kind", "remove"); fd.append("targetLabel", label);
+      const r = await fetch(`/api/restyle/${id}/edits`, { method: "POST", body: fd });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error ?? "Couldn't remove that item");
+      updateEdits(data.edits);
+      setSourcing(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't remove that item");
+    }
   };
 
   const remove = async (editId: string) => {
@@ -471,7 +557,7 @@ export function useRestyleWorkspace(id: string) {
   const loading = !restyle || objects === null;
   const edits = restyle?.edits ?? [];
   const activeEdits = edits.filter((e) => e.active);
-  const stagedItems = activeEdits.filter((e) => e.kind === "item" || e.kind === "add");
+  const stagedItems = activeEdits.filter((e) => e.kind === "item" || e.kind === "add" || (e.kind === "remove" && e.target_label));
   const displayUrl = previewUrl ?? restyle?.current_url ?? "";
   const viewingOriginal = !!restyle && displayUrl === restyle.original_url;
   const showSlider = !previewUrl && !!restyle && !viewingOriginal;
@@ -490,6 +576,11 @@ export function useRestyleWorkspace(id: string) {
   // "Shop this look" looks up buyable options for these once a render exists.
   const inspoEdits = edits.filter((e) =>
     e.reference_url && !e.buy_url && e.target_label && (shownProductIds ? shownProductIds.has(e.id) : e.active),
+  );
+  // Targeted removes actually in the current render — shown as a "Removed" section with a
+  // Restore action rather than a hotspot (an empty floor isn't something to tap).
+  const removedEdits = edits.filter((e) =>
+    e.kind === "remove" && e.target_label && (shownProductIds ? shownProductIds.has(e.id) : e.active),
   );
 
   // Unified hotspots for whichever image is on screen — the render is a canvas too, not a
@@ -513,7 +604,9 @@ export function useRestyleWorkspace(id: string) {
   const canvasHotspots: CanvasHotspot[] = [];
   for (const o of objects ?? []) {
     const labelKey = o.label.toLowerCase();
-    const candidates = edits.filter((e) => e.kind === "item" && e.target_label?.toLowerCase() === labelKey);
+    const candidates = edits.filter((e) =>
+      (e.kind === "item" || e.kind === "remove") && e.target_label?.toLowerCase() === labelKey,
+    );
     let chosen: RestyleEdit | null = null;
     let state: "idle" | "queued" | "placed" = "idle";
     for (const c of candidates) {
@@ -521,6 +614,9 @@ export function useRestyleWorkspace(id: string) {
       if (s === "placed") { chosen = c; state = "placed"; break; }
       if (s === "queued" && !chosen) { chosen = c; state = "queued"; }
     }
+    // A placed remove means the item is actually gone from the pictured room — a hotspot on
+    // empty floor is confusing, so it surfaces only in the "Removed" section (removedEdits).
+    if (chosen?.kind === "remove" && state === "placed") continue;
     canvasHotspots.push({ label: o.label, box_2d: o.box_2d, state, edit: chosen });
   }
   for (const e of edits) {
@@ -534,20 +630,26 @@ export function useRestyleWorkspace(id: string) {
     canvasHotspots.push({ label: e.target_label, box_2d: box, state: s, edit: e });
   }
 
+  // Estimated seconds for a generate — used by the self-ticking ProgressOverlay (it derives %
+  // and "~Xs left" from generatingStartedAt + this value; it is a time-based ESTIMATE, since
+  // Gemini's generateContent call has no streaming/progress signal). Scales gently with how
+  // much work this render is doing.
+  const expectedSeconds = Math.min(90, Math.max(30, 30 + 8 * activeEdits.length));
+
   return {
     id, restyle, renders, objects: objects ?? [], customItems: restyle?.custom_items ?? [], detecting, loading,
-    busy, generating, error, setError,
+    busy, generating, generatingStartedAt, expectedSeconds, error, setError,
     titleDraft, setTitleDraft, saveTitle,
     sourcing, openSourcing, openSimilar, closeSourcing,
     pinRequest, requestPin, cancelPin, setPlacement,
     searches, runVisualSearchByUrl, runTextSearch, pickCandidate, pickingKey,
-    stagePhoto, stageProductLink, stagingLink,
+    stagePhoto, stageProductLink, stagingLink, stageRemove,
     // preview
     previewUrl, setPreviewUrl,
     // handlers
-    addEdit, toggle, toggleAndRegenerate, remove, addCustomItem, removeCustomItem, generate, emptyRoom, downloadImage,
+    addEdit, toggle, toggleAndRegenerate, deactivateAll, remove, addCustomItem, removeCustomItem, generate, emptyRoom, downloadImage,
     // derived
-    edits, activeEdits, stagedItems, displayUrl, viewingOriginal, showSlider, canGenerate, atMaxCustom, productEdits, inspoEdits,
+    edits, activeEdits, stagedItems, displayUrl, viewingOriginal, showSlider, canGenerate, atMaxCustom, productEdits, inspoEdits, removedEdits,
     canvasHotspots,
   };
 }

@@ -1,8 +1,10 @@
 "use client";
 
+import { useRef, useState } from "react";
 import { X, Search, ShoppingCart } from "lucide-react";
 import type { RestyleEdit } from "@/types";
 import { Button, IconButton, Switch, storeName } from "./ui";
+import { cn } from "@/lib/utils";
 
 /**
  * Floating product card anchored near a tapped "placed" hotspot: thumb, title, retailer +
@@ -30,6 +32,13 @@ export default function HotspotPopover({
   onClose: () => void;
 }) {
   const hasProduct = !!edit.buy_url;
+  const [lockedHint, setLockedHint] = useState(false);
+  const hintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flashLockedHint = () => {
+    setLockedHint(true);
+    if (hintTimer.current) clearTimeout(hintTimer.current);
+    hintTimer.current = setTimeout(() => setLockedHint(false), 2500);
+  };
   // Flip the card above the dot when it's in the lower half of the frame — otherwise it
   // clips off the bottom edge of the (overflow-hidden) canvas.
   const below = cy <= 50;
@@ -71,10 +80,11 @@ export default function HotspotPopover({
       </div>
 
       <div className="flex items-center justify-between px-3 pb-2">
-        <span className="text-xs text-[var(--muted-foreground)]">
-          {canToggleOff ? "In your room" : "Only change — can't turn off"}
+        <span className={cn("text-xs", lockedHint ? "font-medium text-[var(--foreground)]" : "text-[var(--muted-foreground)]")}>
+          {!canToggleOff && lockedHint ? "Add another item first" : canToggleOff ? "In your room" : "Only change — can't turn off"}
         </span>
         <Switch checked={true} disabled={!canToggleOff} onChange={onToggleOff}
+          onDisabledClick={flashLockedHint}
           aria-label={canToggleOff ? "Turn off — revert to original" : "Can't turn off the only active change"} />
       </div>
 

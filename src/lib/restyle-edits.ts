@@ -74,8 +74,10 @@ export async function stageEdit(
   if (error || !inserted) throw new Error(error?.message ?? "DB error staging edit");
 
   if (targetLabel) {
+    // A slot holds one active outcome — swap, add, or remove of the same target_label are
+    // mutually exclusive, so staging any one deactivates the others (see edits/route.ts POST).
     await supabaseAdmin.from("restyle_edits").update({ active: false })
-      .eq("restyle_id", restyleId).eq("target_label", targetLabel).in("kind", ["item", "add"]).neq("id", inserted.id);
+      .eq("restyle_id", restyleId).eq("target_label", targetLabel).in("kind", ["item", "add", "remove"]).neq("id", inserted.id);
   }
 
   return {

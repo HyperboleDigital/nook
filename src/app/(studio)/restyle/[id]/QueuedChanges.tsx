@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, ChevronUp, MapPin, Plus, Replace, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Eraser, MapPin, Plus, Replace, X } from "lucide-react";
 import type { RestyleWorkspace } from "./useRestyleWorkspace";
 import { IconButton } from "./ui";
 
@@ -44,22 +44,23 @@ export default function QueuedChanges({ ws }: { ws: RestyleWorkspace }) {
         {ws.stagedItems.map((e) => {
           const label = e.target_label ?? "item";
           const isOptimistic = e.id.startsWith("optimistic-");
+          const isRemove = e.kind === "remove";
           return (
             <div key={e.id}
-              className="flex items-center gap-3 p-2.5 rounded-2xl border border-[var(--border)] bg-white cursor-pointer hover:border-[var(--foreground)] transition-colors"
-              onClick={() => ws.openSimilar(label, e.kind === "add" ? "add" : "swap", e.id)}>
-              {e.reference_url ? (
+              className={`flex items-center gap-3 p-2.5 rounded-2xl border border-[var(--border)] bg-white transition-colors ${isRemove ? "" : "cursor-pointer hover:border-[var(--foreground)]"}`}
+              onClick={isRemove ? undefined : () => ws.openSimilar(label, e.kind === "add" ? "add" : "swap", e.id)}>
+              {!isRemove && e.reference_url ? (
                 /* eslint-disable-next-line @next/next/no-img-element */
                 <img src={e.reference_url} alt="" className="h-12 w-12 object-cover rounded-xl border border-[var(--border)] shrink-0" />
               ) : (
                 <span className="h-12 w-12 rounded-xl bg-[var(--muted)] border border-[var(--border)] shrink-0 flex items-center justify-center text-[var(--muted-foreground)]">
-                  {e.kind === "add" ? <Plus className="h-4 w-4" /> : <Replace className="h-4 w-4" />}
+                  {isRemove ? <Eraser className="h-4 w-4" /> : e.kind === "add" ? <Plus className="h-4 w-4" /> : <Replace className="h-4 w-4" />}
                 </span>
               )}
               <div className="min-w-0 flex-1">
-                <p className="text-xs font-medium capitalize truncate">{e.product_title ?? label}</p>
+                <p className="text-xs font-medium capitalize truncate">{isRemove ? label : e.product_title ?? label}</p>
                 <p className="text-[11px] text-[var(--muted-foreground)] capitalize">
-                  {e.kind === "add" ? "Adding" : "Swapping"}{label ? ` · ${label}` : ""}
+                  {isRemove ? "Removing" : e.kind === "add" ? "Adding" : "Swapping"}{!isRemove && label ? ` · ${label}` : ""}
                   {e.product_price ? ` · ${e.product_price}` : ""}
                 </p>
                 {e.kind === "add" && (
@@ -74,7 +75,7 @@ export default function QueuedChanges({ ws }: { ws: RestyleWorkspace }) {
                 )}
               </div>
               {!isOptimistic && (
-                <IconButton aria-label="Remove" className="h-7 w-7 shrink-0"
+                <IconButton aria-label={isRemove ? "Keep it — don't remove" : "Remove"} className="h-7 w-7 shrink-0"
                   onClick={(ev) => { ev.stopPropagation(); ws.remove(e.id); }}>
                   <X className="h-3.5 w-3.5" />
                 </IconButton>

@@ -4,9 +4,14 @@ import { useState, useRef, useEffect } from "react";
 import { MoreHorizontal, Eraser, RotateCcw } from "lucide-react";
 import type { RestyleWorkspace } from "./useRestyleWorkspace";
 import { Button, IconButton } from "./ui";
+import { cn } from "@/lib/utils";
 
-/** Sticky bottom action bar — primary Generate + an overflow menu for secondary actions. */
-export default function GenerateBar({ ws }: { ws: RestyleWorkspace }) {
+/**
+ * Primary Generate action + an overflow menu for secondary actions. `variant="floating"`
+ * (desktop, immersive layout) renders as a self-contained rounded pill; `"sticky"` (mobile)
+ * spans the bottom of the stacked column as before.
+ */
+export default function GenerateBar({ ws, variant = "sticky" }: { ws: RestyleWorkspace; variant?: "sticky" | "floating" }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -27,12 +32,17 @@ export default function GenerateBar({ ws }: { ws: RestyleWorkspace }) {
   const startFromOriginal = async () => {
     setMenuOpen(false);
     if (!ws.restyle) return;
-    for (const e of ws.activeEdits) await ws.toggle(e.id, false);
+    await ws.deactivateAll();
     ws.setPreviewUrl(ws.restyle.original_url);
   };
 
   return (
-    <div className="sticky bottom-0 bg-white border-t border-[var(--border)] px-4 py-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] flex items-center gap-2">
+    <div className={cn(
+      "flex items-center gap-2",
+      variant === "floating"
+        ? "rounded-full bg-white shadow-[var(--shadow-pop)] border border-[var(--border)] px-2 py-2"
+        : "sticky bottom-0 bg-white border-t border-[var(--border)] px-4 py-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)]",
+    )}>
       <div className="relative" ref={menuRef}>
         <IconButton onClick={() => setMenuOpen((v) => !v)} aria-label="More actions">
           <MoreHorizontal className="h-4 w-4" />

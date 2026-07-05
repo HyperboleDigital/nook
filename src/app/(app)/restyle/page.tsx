@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowUpRight, Plus, Trash2, UploadCloud } from "lucide-react";
-import { Button, IconButton, Skeleton, Spinner } from "./[id]/ui";
+import { Button, IconButton, Skeleton, Spinner } from "@/app/(studio)/restyle/[id]/ui";
 
 interface RestyleCard {
   id: string;
@@ -41,14 +41,14 @@ export default function RestyleHistoryPage() {
 
   return (
     <div className="max-w-4xl">
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
         <div>
           <h1 className="text-2xl font-bold tracking-tight -tracking-[0.02em] mb-1">Room Restyle</h1>
           <p className="text-[var(--muted-foreground)] text-sm">
             Reimagine any room, then fine-tune it piece by piece.
           </p>
         </div>
-        <Link href="/restyle/new">
+        <Link href="/restyle/new" className="self-start">
           <Button variant="primary" className="whitespace-nowrap">
             <Plus className="h-4 w-4" /> New restyle
           </Button>

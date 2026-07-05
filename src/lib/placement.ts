@@ -25,10 +25,19 @@ export function describePlacement(pin: PinPlacement, detected: DetectedObject[] 
     : pin.x < 667 ? "in the middle of the room"
     : "in the right part of the room";
 
-  const vertical =
-    pin.y > 650 ? "on or near the floor"
-    : pin.y < 350 ? "high up (wall or upper area)"
-    : "at mid height";
+  // A floor-level tap needs an unambiguous, physically explicit instruction — "on or near the
+  // floor" was too soft and a model would sometimes place the item at a neighboring object's
+  // height instead of the ground (e.g. a basket pinned beside a TV stand rendered floating at
+  // shelf height). The floor band is also intentionally generous (anything in the lower half
+  // of the photo): most floor taps land well above the very bottom edge once camera angle and
+  // the object's own height are accounted for.
+  const isFloor = pin.y > 500;
+  const isHigh = pin.y < 350;
+  const vertical = isFloor
+    ? "resting directly on the floor, in full contact with the ground — it must NOT float, hover, or appear mounted/elevated"
+    : isHigh
+      ? "mounted or placed high up, at wall/upper-shelf height"
+      : "at mid height (e.g. on a table or counter surface, not on the floor and not high on the wall)";
 
   // Nearest detected objects: distance from the pin to the clamped nearest point of each
   // box ([ymin, xmin, ymax, xmax], 0–1000). Zero inside the box.
@@ -44,9 +53,13 @@ export function describePlacement(pin: PinPlacement, detected: DetectedObject[] 
     .sort((a, b) => a.dist - b.dist)
     .slice(0, 2);
 
+  // "near the TV stand" alone is ambiguous about height — for a floor placement, spell out
+  // that proximity means alongside it ON THE GROUND, not at the neighbor's own height (this is
+  // what caused a floor-pinned item to render floating near an elevated neighbor).
+  const neighborNames = neighbors.map((n) => n.label);
   const near =
-    neighbors.length === 2 ? `near the ${neighbors[0].label} and the ${neighbors[1].label}`
-    : neighbors.length === 1 ? `near the ${neighbors[0].label}`
+    neighborNames.length === 2 ? `${isFloor ? "on the floor beside" : "near"} the ${neighborNames[0]} and the ${neighborNames[1]}${isFloor ? " (at ground level, not on top of or elevated near them)" : ""}`
+    : neighborNames.length === 1 ? `${isFloor ? "on the floor beside" : "near"} the ${neighborNames[0]}${isFloor ? " (at ground level, not on top of or elevated near it)" : ""}`
     : "";
 
   const note = pin.note?.trim();
