@@ -1,12 +1,12 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
+import { del } from "@vercel/blob";
 import { uploadImage } from "@/lib/restyle-render";
 import { fetchProduct, ProductFetchError, type ProductInfo } from "@/lib/product";
 import { describeProductImages, describeScreenshotForSearch, locateProductPhoto } from "@/lib/gemini";
 import { resolveImmersiveToken } from "@/lib/shopping-search";
 import { editsFor, loadOwnedRestyle, stageEdit, type StagedProduct } from "@/lib/restyle-edits";
 import { supabaseAdmin } from "@/lib/supabase";
-import { fileToBuffer } from "@/lib/file-buf";
 import { cropToBox } from "@/lib/image-crop";
 
 // Amazon scrapes via Unwrangle can take 60–90s, plus Gemini gallery sizing afterward.
@@ -74,10 +74,17 @@ async function fromListing(userId: string, info: ProductInfo): Promise<StagedPro
  * looks up buyable options for whatever inspo photos made it into the render, surfaced in
  * "Shop this look" instead of mid-composition. Pasting a product link is unaffected — that's
  * already a confirmed real product, nothing to search for.
+ *
+ * The client uploads the raw photo straight to Vercel Blob first (see /api/restyle/upload-url)
+ * and only sends the resulting URL here — `rawBuf` is fetched from that URL, not read from a
+ * multipart body, so a closed tab can only interrupt the (separate, resumable) Blob transfer,
+ * never strand a half-staged edit.
  */
-async function fromUpload(userId: string, file: File): Promise<StagedProduct> {
-  const rawBuf = await fileToBuffer(file);
-  const mimeType = file.type || "image/jpeg";
+async function fromUpload(userId: string, rawUrl: string): Promise<StagedProduct> {
+  const res = await fetch(rawUrl);
+  if (!res.ok) throw new ProductFetchError("Couldn't load that photo.", 502);
+  const rawBuf: Buffer = Buffer.from(await res.arrayBuffer());
+  const mimeType = res.headers.get("content-type") || "image/jpeg";
 
   let identified: { itemType: string; description: string };
   try {
@@ -99,6 +106,9 @@ async function fromUpload(userId: string, file: File): Promise<StagedProduct> {
   } catch {
     throw new ProductFetchError("Couldn't save that photo. Try again.", 502);
   }
+  // The client's raw upload is now redundant — referenceUrl above (possibly cropped) is
+  // what actually gets used. Best-effort cleanup; never let it fail staging.
+  try { await del(rawUrl); } catch { /* orphaned blob, harmless */ }
 
   let visionDesc = "";
   try {
@@ -114,11 +124,14 @@ async function fromUpload(userId: string, file: File): Promise<StagedProduct> {
 }
 
 // POST — stage a product/photo as a reference edit, then auto-decide replace-vs-add.
-// Input shapes (Does NOT render — the client calls POST /generate when ready):
-//   - JSON { url }         : a pasted retailer product link — a confirmed real product
-//   - JSON { token }       : a visual-search candidate (Google Shopping immersive token → URL)
-//   - multipart image      : an inspo photo — staged as a reference with no buy link;
-//                            shopping options are looked up later, after generate.
+// Input shapes, all JSON (Does NOT render — the client calls POST /generate when ready):
+//   - { url }      : a pasted retailer product link — a confirmed real product
+//   - { token }    : a visual-search candidate (Google Shopping immersive token → URL)
+//   - { imageUrl } : an inspo photo, already uploaded by the client to Vercel Blob (see
+//                    /api/restyle/upload-url) — staged as a reference with no buy link;
+//                    shopping options are looked up later, after generate. Sending only the
+//                    URL (not the bytes) means a closed tab can only interrupt that separate,
+//                    resumable Blob transfer, never strand a half-staged edit here.
 // `targetLabel` force-targets a specific slot (the chip/hotspot the user tapped) instead of
 // relying on auto-detection. `replaceEditId` — when this staging supersedes an already-staged
 // edit for the same slot, deletes that edit in the same request instead of a separate round-trip.
@@ -133,22 +146,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   let forcedTarget: string | undefined;
   let replaceEditId: string | undefined;
   try {
-    if (req.headers.get("content-type")?.includes("multipart/form-data")) {
-      const form = await req.formData();
-      const file = form.get("image") as File | null;
-      if (!file) return NextResponse.json({ error: "An image is required." }, { status: 400 });
-      if (!file.type.startsWith("image/")) return NextResponse.json({ error: "That file isn't an image." }, { status: 400 });
-      forcedTarget = (form.get("targetLabel") as string | null) || undefined;
-      replaceEditId = (form.get("replaceEditId") as string | null) || undefined;
-      staged = await fromUpload(userId, file);
-    } else {
-      const body = await req.json().catch(() => ({}));
-      const { url: rawUrl, token, targetLabel: ft, replaceEditId: re } = body as {
-        url?: string; token?: string; targetLabel?: string; replaceEditId?: string;
-      };
-      forcedTarget = ft;
-      replaceEditId = re;
+    const body = await req.json().catch(() => ({}));
+    const { url: rawUrl, token, imageUrl, targetLabel: ft, replaceEditId: re } = body as {
+      url?: string; token?: string; imageUrl?: string; targetLabel?: string; replaceEditId?: string;
+    };
+    forcedTarget = ft;
+    replaceEditId = re;
 
+    if (imageUrl && typeof imageUrl === "string") {
+      staged = await fromUpload(userId, imageUrl);
+    } else {
       // A visual-search candidate gives us a SerpApi immersive token, not a URL — resolve it.
       // Most candidates arrive with a real productUrl already (visual-search resolves Wayfair
       // tokens eagerly in the background), so this is only a fallback for picks made before

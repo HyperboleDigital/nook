@@ -26,7 +26,8 @@ export async function uploadImage(userId: string, buf: Buffer, contentType: stri
   return blob.url;
 }
 
-async function urlToBuf(url: string) {
+/** Fetch a URL (e.g. a client-uploaded Blob) into a plain Buffer. */
+export async function urlToBuf(url: string) {
   const res = await fetch(url);
   return Buffer.from(await res.arrayBuffer());
 }

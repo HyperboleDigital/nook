@@ -1,9 +1,9 @@
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { NextResponse, after } from "next/server";
+import { del } from "@vercel/blob";
 import sharp from "sharp";
 import { supabaseAdmin } from "@/lib/supabase";
-import { uploadImage } from "@/lib/restyle-render";
-import { fileToBuffer } from "@/lib/file-buf";
+import { uploadImage, urlToBuf } from "@/lib/restyle-render";
 import { detectObjects } from "@/lib/gemini";
 
 // Cap the working resolution; every render is normalized to the canonical dims.
@@ -15,25 +15,28 @@ const ROOM_TYPES = ["living_room", "bedroom", "dining", "home_office", "multi_us
 // under the route's own maxDuration (Vercel bounds after() work to it).
 export const maxDuration = 60;
 
-// POST /api/restyle — create a restyle project from a room photo. Detection runs
-// in the background via after() using the canonical buffer already in memory, so
-// chips are typically ready by the time the editor mounts instead of the client
-// having to trigger + wait for a separate detect call after the page loads.
+// POST /api/restyle — create a restyle project from a room photo already uploaded to Vercel
+// Blob by the client (see /api/restyle/upload-url). The client only sends the resulting blob
+// URL here, not the photo bytes — a closed tab can only interrupt the (separate, resumable)
+// direct-to-Blob transfer, never this small JSON call, so a project either gets created
+// cleanly or not at all; there's no half-created state to strand.
+// Detection runs in the background via after() using the canonical buffer already in memory,
+// so chips are typically ready by the time the editor mounts instead of the client having to
+// trigger + wait for a separate detect call after the page loads.
 export async function POST(req: Request) {
   const { userId } = await auth();
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   try {
-    const form = await req.formData();
-    const photo = form.get("photo") as File | null;
-    if (!photo) return NextResponse.json({ error: "A room photo is required" }, { status: 400 });
-    const title = (form.get("title") as string | null)?.trim() || "Untitled room";
-    const roomTypeRaw = (form.get("room_type") as string | null)?.trim();
+    const body = await req.json();
+    const photoUrl = typeof body.photoUrl === "string" ? body.photoUrl : null;
+    if (!photoUrl) return NextResponse.json({ error: "A room photo is required" }, { status: 400 });
+    const title = typeof body.title === "string" && body.title.trim() ? body.title.trim() : "Untitled room";
+    const roomTypeRaw = typeof body.room_type === "string" ? body.room_type.trim() : "";
     const roomType = ROOM_TYPES.includes(roomTypeRaw as (typeof ROOM_TYPES)[number]) ? roomTypeRaw : null;
 
     // Canonicalize the original: EXIF-rotate + downscale to MAX_DIM (keeps aspect).
-    // Copy into a fresh (non-shared) buffer — a view over a SharedArrayBuffer is rejected downstream.
-    const photoBuf = await fileToBuffer(photo);
+    const photoBuf = await urlToBuf(photoUrl);
     const canonical = await sharp(photoBuf)
       .rotate()
       .resize({ width: MAX_DIM, height: MAX_DIM, fit: "inside", withoutEnlargement: true })
@@ -41,6 +44,10 @@ export async function POST(req: Request) {
       .toBuffer();
     const meta = await sharp(canonical).metadata();
     const originalUrl = await uploadImage(userId, canonical, "image/jpeg");
+
+    // The client's raw upload is now redundant — the canonical copy above is what the app
+    // actually uses. Best-effort cleanup; never let it fail project creation.
+    try { await del(photoUrl); } catch { /* orphaned blob, harmless */ }
 
     // Ensure the user row exists (FK), mirroring the tours route.
     const user = await currentUser();

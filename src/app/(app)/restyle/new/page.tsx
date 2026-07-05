@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { upload } from "@vercel/blob/client";
 import {
   Camera, ImagePlus, UploadCloud, Check, ChevronLeft,
   Lightbulb, Footprints, Maximize, Sofa, Bed, UtensilsCrossed, Laptop, LayoutGrid, MoreHorizontal,
@@ -32,6 +33,7 @@ export default function NewRestylePage() {
   const [preview, setPreview] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState(false); // only phones can actually take a photo
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -83,22 +85,45 @@ export default function NewRestylePage() {
   const confirm = async () => {
     if (!file) return;
     setLoading(true);
+    setUploadProgress(0);
     setError(null);
     try {
       // Phone camera photos routinely exceed Vercel's 4.5 MB request-body limit — downscale
-      // client-side first so the upload doesn't die with a bare "load failed".
+      // client-side first so the direct-to-Blob transfer is smaller and faster.
       const small = await downscaleImage(file);
-      const fd = new FormData();
-      fd.append("photo", small);
-      if (name.trim()) fd.append("title", name.trim());
-      if (roomType) fd.append("room_type", roomType);
-      const res = await fetch("/api/restyle", { method: "POST", body: fd });
+
+      // Upload straight to Vercel Blob — decoupled from our own API route, so closing the
+      // tab mid-transfer just loses an unfinished Blob upload, not a half-created project
+      // (the POST below, which actually creates the restyle row, only fires once this
+      // resolves — see the reported bug this fixed).
+      const blob = await upload(
+        `restyle-uploads/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`,
+        small,
+        {
+          access: "public",
+          handleUploadUrl: "/api/restyle/upload-url",
+          multipart: true,
+          onUploadProgress: ({ percentage }) => setUploadProgress(Math.round(percentage)),
+        }
+      );
+      setUploadProgress(null);
+
+      const res = await fetch("/api/restyle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          photoUrl: blob.url,
+          ...(name.trim() ? { title: name.trim() } : {}),
+          ...(roomType ? { room_type: roomType } : {}),
+        }),
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Upload failed");
       router.push(`/restyle/${data.restyleId}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
       setLoading(false);
+      setUploadProgress(null);
     }
   };
 
@@ -241,7 +266,8 @@ export default function NewRestylePage() {
 
           {loading ? (
             <div className="text-sm text-[var(--muted-foreground)] flex items-center gap-2">
-              <Spinner /> Setting up your room…
+              <Spinner />
+              {uploadProgress != null ? `Uploading… ${uploadProgress}%` : "Setting up your room…"}
             </div>
           ) : (
             <>
