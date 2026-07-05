@@ -9,8 +9,15 @@ export const GEMINI_IMAGE_MODEL = "gemini-2.5-flash-image";
 // "Nano Banana Pro" — much stronger at reference-guided multi-image edits
 // (swapping an item to match an uploaded reference photo).
 export const GEMINI_IMAGE_PRO_MODEL = "gemini-3-pro-image-preview";
-// Vision model for object detection/segmentation (returns JSON, ~0.1c/call).
+// Vision model for the many small vision calls (scoring, product/screenshot description).
 export const GEMINI_VISION_MODEL = "gemini-2.5-flash";
+// Detection model — deliberately a STRONGER tier than GEMINI_VISION_MODEL. `2.5-flash` is
+// among the weakest frontier models at bounding-box localization (it mislabels/mis-boxes items,
+// e.g. a "console" box landing on the TV), whereas the Pro tier is dramatically better at
+// grounding. Detection is one call per room, so the Pro cost/latency is fine here even though
+// the high-frequency vision calls above stay on flash. Env-overridable (e.g. to a gemini-3-pro
+// vision id) without a code change.
+export const GEMINI_DETECT_MODEL = process.env.GEMINI_DETECT_MODEL || "gemini-2.5-pro";
 
 export type RestyleTheme =
   | "modern"
@@ -333,8 +340,13 @@ export const DETECT_PROMPT =
   "Do NOT detect architecture or the room shell: no walls, floor, ceiling, windows, doors, " +
   "doorways, baseboards, or built-in trim. Also skip tiny utility fixtures (air vents, " +
   "outlets, switches, handles, thermostats, smoke detectors). " +
-  "Box each item TIGHTLY around the item itself, not the surrounding area, and make sure each " +
-  "box actually surrounds the item its label names. " +
+  "Box each item TIGHTLY around the item itself, not the surrounding area. " +
+  "CRITICAL — every box MUST tightly enclose the exact item its label names; verify each one " +
+  "before returning: a 'tv' box surrounds the screen only; a 'console'/'media cabinet'/'sideboard' " +
+  "box surrounds the cabinet BELOW or beside the tv, NOT the tv; a 'rug' box covers the floor " +
+  "covering, NOT the furniture sitting on it; a 'coffee table' box is the table, not the items on " +
+  "top of it. When two items overlap, box each separately around its own visible extent. If you " +
+  "are unsure what an item is, omit it rather than guess a wrong label. " +
   'Each item has "label" (a short human name, e.g. "sofa", "floor lamp") and "box_2d" ' +
   "([ymin, xmin, ymax, xmax] as integers 0–1000, where 0,0 is the top-left of the image and " +
   "1000,1000 is the bottom-right). No duplicates, at most 14 items.";
@@ -348,7 +360,7 @@ export async function detectObjectsGemini(params: {
 }): Promise<DetectedObject[]> {
   const prompt = DETECT_PROMPT + ' Return a JSON array of {"label","box_2d"}.';
 
-  const data = await geminiPost(GEMINI_VISION_MODEL, {
+  const data = await geminiPost(GEMINI_DETECT_MODEL, {
     contents: [
       { parts: [{ text: prompt }, { inline_data: { mime_type: params.mimeType, data: params.imageBase64 } }] },
     ],

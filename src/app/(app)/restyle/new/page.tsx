@@ -326,7 +326,11 @@ export default function NewRestylePage() {
               </div>
               <div className="space-y-1">
                 <label className="text-xs font-medium">Name this room</label>
-                <Input type="text" value={name} autoFocus
+                {/* No autoFocus — it popped the mobile keyboard the instant this screen loaded,
+                    burying the room preview and the "Start designing" button. The name is
+                    optional, so let the user see the screen first and tap the field only if they
+                    want to type. */}
+                <Input type="text" value={name}
                   onChange={(e) => setName(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") confirm(); }}
                   placeholder="e.g. Maple St living room" />

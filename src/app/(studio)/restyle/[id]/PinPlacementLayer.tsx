@@ -19,6 +19,9 @@ export default function PinPlacementLayer({
 }) {
   const [pin, setPin] = useState<{ x: number; y: number } | null>(null);
   const [note, setNote] = useState("");
+  // "the sofa" vs "it" — `label` is empty in the upfront add flow (location is chosen before the
+  // item is named), so never emit "the this item"/"the it".
+  const what = label.trim() && label.trim() !== "this item" ? `the ${label.trim()}` : "it";
 
   const aim = (clientX: number, clientY: number, rect: DOMRect) => {
     const x = Math.round(Math.min(1000, Math.max(0, ((clientX - rect.left) / rect.width) * 1000)));
@@ -26,21 +29,15 @@ export default function PinPlacementLayer({
     setPin({ x, y });
   };
 
+  // NOTE: the "tap where it should go" instruction + Skip deliberately live OUTSIDE the image
+  // now (in RestyleCanvas, in a bar above the photo) — a pill floating over the image covered
+  // the very spot a user might want to place the item. This layer is now just the invisible
+  // tap-catcher plus the confirm popover that appears AT the chosen point after a tap.
   return (
     <div
       className="absolute inset-0 z-20 cursor-crosshair"
       onClick={(e) => aim(e.clientX, e.clientY, e.currentTarget.getBoundingClientRect())}
     >
-      {!pin && (
-        <div className="absolute top-3 left-1/2 -translate-x-1/2 flex items-center gap-2 rounded-full bg-[var(--foreground)] text-white pl-4 pr-2 py-1.5 text-xs shadow-[var(--shadow-pop)] whitespace-nowrap">
-          <span>Tap where the {label} should go</span>
-          <button type="button" onClick={(e) => { e.stopPropagation(); onCancel(); }}
-            className="rounded-full px-2 py-0.5 text-white/80 hover:text-white hover:bg-white/10 transition-colors">
-            Skip
-          </button>
-        </div>
-      )}
-
       {pin && (
         <>
           <span
@@ -64,7 +61,7 @@ export default function PinPlacementLayer({
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between p-3 pb-2">
-              <p className="text-sm font-semibold">Place the {label} here?</p>
+              <p className="text-sm font-semibold">Place {what} here?</p>
               <IconButton onClick={onCancel} aria-label="Cancel" className="h-6 w-6 shrink-0 -mt-1 -mr-1">
                 <X className="h-3.5 w-3.5" />
               </IconButton>

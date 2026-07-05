@@ -169,8 +169,25 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
     } catch { /* user cancelled share sheet */ }
   };
 
+  // Skip the pin step: for the upfront add flow (no edit yet) proceed to sourcing without a
+  // location; for the post-hoc offer (edit exists) just close the pin layer.
+  const skipPin = () => (ws.pinRequest?.editId ? ws.cancelPin() : ws.skipAddLocation());
+  const pinLabel = ws.pinRequest?.label?.trim() ? `your ${ws.pinRequest.label.trim()}` : "your new item";
+
   return (
     <div className="h-full w-full md:flex md:flex-col">
+      {/* Pin-placement instruction lives HERE, above the photo — never over it — so it can't
+          cover the very spot the user wants to tap. The layer itself (PinPlacementLayer) is now
+          just the invisible tap-catcher + the confirm popover at the chosen point. */}
+      {ws.pinRequest && (
+        <div className="flex items-center justify-between gap-2 px-4 py-2.5 bg-[var(--foreground)] text-[var(--background)] text-xs">
+          <span className="font-medium">Tap the photo to place {pinLabel}</span>
+          <button type="button" onClick={skipPin}
+            className="rounded-full px-3 py-1 bg-white/15 hover:bg-white/25 transition-colors shrink-0">
+            Skip
+          </button>
+        </div>
+      )}
       <div ref={frameRef} className="relative bg-[var(--muted)] overflow-hidden flex items-center justify-center h-[65dvh] md:h-auto md:flex-1">
         {/* A blurred, darkened cover fill behind a portrait (or otherwise mismatched-aspect)
             photo so the gutters beside the shrink-wrapped sharp image read as an intentional
@@ -194,11 +211,11 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
                 onClose={() => setQueuedPreview(null)} />
             )}
             {ws.pinRequest && (
-              <PinPlacementLayer label={ws.pinRequest.label || "this item"}
+              <PinPlacementLayer label={ws.pinRequest.label}
                 onPlace={(x, y, note) => ws.pinRequest!.editId
                   ? ws.setPlacement(ws.pinRequest!.editId, { x, y, note })
                   : ws.placeAddLocation(x, y, note)}
-                onCancel={() => (ws.pinRequest!.editId ? ws.cancelPin() : ws.skipAddLocation())} />
+                onCancel={skipPin} />
             )}
           </div>
         ) : !showCompare ? (
@@ -275,12 +292,14 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
           </IconButton>
         </div>
       </div>
-      <p className="md:hidden text-[11px] text-[var(--muted-foreground)] text-center py-2 px-3">
-        {ws.pinRequest ? "Tap the photo to choose where it goes"
-          : viewingOriginal ? "Tap an item to swap it, or add something new"
-          : previewUrl ? "Viewing an earlier version — tap an item to keep editing"
-          : "Tap an item to swap it, shop it, or add something new"}
-      </p>
+      {/* pinRequest is handled by the instruction bar above the photo, so it's omitted here. */}
+      {!ws.pinRequest && (
+        <p className="md:hidden text-[11px] text-[var(--muted-foreground)] text-center py-2 px-3">
+          {viewingOriginal ? "Tap an item to swap it, or add something new"
+            : previewUrl ? "Viewing an earlier version — tap an item to keep editing"
+            : "Tap an item to swap it, shop it, or add something new"}
+        </p>
+      )}
     </div>
   );
 }
