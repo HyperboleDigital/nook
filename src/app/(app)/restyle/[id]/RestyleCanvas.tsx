@@ -2,58 +2,62 @@
 
 import { useEffect, useState } from "react";
 import { Columns2, Download, Share2, Check, ArrowLeftRight } from "lucide-react";
-import type { RestyleWorkspace } from "./useRestyleWorkspace";
-import type { RestyleEdit } from "@/types";
+import type { CanvasHotspot, RestyleWorkspace } from "./useRestyleWorkspace";
 import { IconButton, ProgressOverlay, ShopSummaryPill } from "./ui";
 import ObjectHotspots from "./ObjectHotspots";
 import HotspotPopover from "./HotspotPopover";
+import QueuedHotspotPopover from "./QueuedHotspotPopover";
 import PinPlacementLayer from "./PinPlacementLayer";
 
 /**
- * The room photo — centerpiece of the editor. Shows hotspots over the original photo (real
- * detected positions), or over a render (approximated from each swapped item's original
- * position; "added" items use their placed pin instead — see renderHotspots). The floating
- * "here's what's placed" popover only ever shows on the RENDER — the original photo hasn't
- * actually changed yet, so a staged item there routes straight to Similar Items instead of a
- * popup implying it's already visible in the photo. Generate progress overlays right here
- * instead of a separate result screen. `ws.pinRequest` overlays a tap-to-place layer on the
- * original photo right after a new "add" item stages, ahead of everything else.
+ * The room photo — centerpiece of the editor. Whichever image is on screen (original or a
+ * render) is a live canvas: every detected item stays tappable via `ws.canvasHotspots`, so
+ * the user can keep swapping/adding/removing and regenerating from a render, not just the
+ * original. A hotspot's state (idle/queued/placed) decides what tapping it does:
+ *   idle    → open sourcing (nothing staged for it)
+ *   queued  → a light "here's what's queued" teaser (Change/Remove) — NOT the placed/priced
+ *             popover, since this change isn't actually in the pictured image yet
+ *   placed  → the placed/priced popover (thumbnail, price, Show similar / Buy) — this can
+ *             only occur on a render (see canvasHotspots — "placed" is derived from what's
+ *             actually in the displayed image's signature, which is empty on the original)
+ * Generate progress overlays right here instead of a separate result screen. `ws.pinRequest`
+ * overlays a tap-to-place layer on the original photo right after a new "add" item stages,
+ * ahead of everything else.
  */
 export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
   const { restyle, generating, compare, imgWrapRef, sliderHandlers, displayUrl, previewUrl } = ws;
   const [showCompare, setShowCompare] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [openHotspot, setOpenHotspot] = useState<{ label: string; cx: number; cy: number; edit: RestyleEdit } | null>(null);
+  const [openHotspot, setOpenHotspot] = useState<{ label: string; cx: number; cy: number; edit: NonNullable<CanvasHotspot["edit"]> } | null>(null);
+  const [queuedPreview, setQueuedPreview] = useState<{ label: string; cx: number; cy: number; edit: NonNullable<CanvasHotspot["edit"]> } | null>(null);
 
-  // The popover's coordinates are meaningless once the displayed image changes (switching
-  // between original/render/an earlier version) — close it rather than leave it floating
+  // A popover's coordinates are meaningless once the displayed image changes (switching
+  // between original/render/an earlier version) — close them rather than leave one floating
   // over the wrong photo.
   useEffect(() => {
     let active = true;
-    Promise.resolve().then(() => { if (active) setOpenHotspot(null); });
+    Promise.resolve().then(() => { if (active) { setOpenHotspot(null); setQueuedPreview(null); } });
     return () => { active = false; };
   }, [displayUrl]);
 
   if (!restyle) return null;
   const { viewingOriginal } = ws;
-  const stagedLabels = new Set(ws.stagedItems.map((e) => e.target_label?.toLowerCase()).filter(Boolean) as string[]);
 
-  const findStagedEdit = (label: string) =>
-    ws.stagedItems.find((e) => e.target_label?.toLowerCase() === label.toLowerCase()) ?? null;
-
-  // Original photo: nothing is actually visually placed there yet (it's still the untouched
-  // photo), so a tap never shows the "here's what's placed" popover — an already-staged item
-  // goes straight to Similar items, an empty slot goes straight to sourcing.
-  const handleOriginalTap = (label: string) => {
-    const edit = findStagedEdit(label);
-    if (edit) ws.openSimilar(label, "swap", edit.id);
-    else ws.openSourcing(label, "swap");
+  const handleTap = (h: CanvasHotspot, cx: number, cy: number) => {
+    if (h.state === "idle") { ws.openSourcing(h.label, "swap"); return; }
+    if (h.state === "queued") { setQueuedPreview({ label: h.label, cx, cy, edit: h.edit! }); setOpenHotspot(null); return; }
+    setOpenHotspot({ label: h.label, cx, cy, edit: h.edit! }); setQueuedPreview(null);
   };
-  // Render: the item genuinely IS in the photo at this position, so the quick preview popover
-  // (thumbnail, price, Show similar / Buy) makes sense here.
-  const handleRenderTap = (label: string, cx: number, cy: number) => {
-    const edit = findStagedEdit(label);
-    if (edit) setOpenHotspot({ label, cx, cy, edit });
+  const changeFromQueued = () => {
+    if (!queuedPreview) return;
+    const { label, edit } = queuedPreview;
+    ws.openSimilar(label, edit.kind === "add" ? "add" : "swap", edit.id);
+    setQueuedPreview(null);
+  };
+  const removeFromQueued = () => {
+    if (!queuedPreview) return;
+    ws.remove(queuedPreview.edit.id);
+    setQueuedPreview(null);
   };
   const showSimilarFromPopover = () => {
     if (!openHotspot) return;
@@ -77,9 +81,16 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
           <div className="relative inline-block max-h-[65dvh] md:max-h-[70vh]">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={restyle.original_url} alt="Your room" className="block max-w-full max-h-[65dvh] md:max-h-[70vh] object-contain" />
-            {ws.objects.length > 0 && (
-              <ObjectHotspots objects={ws.objects} activeLabel={ws.sourcing?.label} stagedLabels={stagedLabels}
-                onSelect={handleOriginalTap} />
+            {ws.canvasHotspots.length > 0 && (
+              <ObjectHotspots hotspots={ws.canvasHotspots} activeLabel={ws.sourcing?.label} onSelect={handleTap} />
+            )}
+            {queuedPreview && !ws.pinRequest && (
+              <QueuedHotspotPopover
+                edit={queuedPreview.edit} label={queuedPreview.label}
+                cx={queuedPreview.cx} cy={queuedPreview.cy}
+                onChange={changeFromQueued}
+                onRemove={queuedPreview.edit.id.startsWith("optimistic-") ? undefined : removeFromQueued}
+                onClose={() => setQueuedPreview(null)} />
             )}
             {ws.pinRequest && (
               <PinPlacementLayer label={ws.pinRequest.label}
@@ -91,11 +102,16 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
           <div className="relative inline-block max-h-[65dvh] md:max-h-[70vh]">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={displayUrl} alt="Restyled room" className="block max-w-full max-h-[65dvh] md:max-h-[70vh] object-contain" />
-            {ws.renderHotspots.length > 0 && (
-              <ObjectHotspots
-                objects={ws.renderHotspots.map((h) => ({ label: h.label, box_2d: h.box_2d }))}
-                activeLabel={ws.sourcing?.label} stagedLabels={stagedLabels}
-                onSelect={handleRenderTap} />
+            {ws.canvasHotspots.length > 0 && (
+              <ObjectHotspots hotspots={ws.canvasHotspots} activeLabel={ws.sourcing?.label} onSelect={handleTap} />
+            )}
+            {queuedPreview && (
+              <QueuedHotspotPopover
+                edit={queuedPreview.edit} label={queuedPreview.label}
+                cx={queuedPreview.cx} cy={queuedPreview.cy}
+                onChange={changeFromQueued}
+                onRemove={queuedPreview.edit.id.startsWith("optimistic-") ? undefined : removeFromQueued}
+                onClose={() => setQueuedPreview(null)} />
             )}
             {openHotspot && (
               <HotspotPopover edit={openHotspot.edit} label={openHotspot.label} cx={openHotspot.cx} cy={openHotspot.cy}
@@ -147,7 +163,8 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
       <p className="text-[11px] text-[var(--muted-foreground)] text-center">
         {ws.pinRequest ? "Tap the photo to choose where it goes"
           : viewingOriginal ? "Tap an item to swap it, or add something new"
-          : previewUrl ? "Viewing an earlier version" : "Your restyled room"}
+          : previewUrl ? "Viewing an earlier version — tap an item to keep editing"
+          : "Tap an item to swap it, shop it, or add something new"}
       </p>
     </div>
   );

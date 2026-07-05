@@ -5,10 +5,13 @@ import type { RestyleEdit } from "@/types";
 import { Button, IconButton, storeName } from "./ui";
 
 /**
- * Floating product card anchored near a tapped hotspot — mirrors the reference design: thumb,
- * title, retailer + "Link to product", price, a short description, then a "Show similar" /
- * buy action pair. Shown for whatever's already placed at that slot; tapping an empty slot on
- * the original photo skips this and opens the sourcing form directly (nothing to preview yet).
+ * Floating product card anchored near a tapped "placed" hotspot: thumb, title, retailer +
+ * "Link to product", price, then a "Show similar" / buy action pair. The caller (RestyleCanvas)
+ * only ever shows this for a `placed` canvasHotspot, which by construction can't occur on the
+ * original photo (see useRestyleWorkspace's `canvasHotspots`) — so this component never needs
+ * to worry about running on an unrendered image. Flips above/below the dot depending on which
+ * half of the frame it's in, since the canvas is `overflow-hidden` and a card anchored below a
+ * low dot would otherwise clip off the bottom edge.
  */
 export default function HotspotPopover({
   edit, label, cx, cy, onShowSimilar, onClose,
@@ -21,13 +24,17 @@ export default function HotspotPopover({
   onClose: () => void;
 }) {
   const hasProduct = !!edit.buy_url;
+  // Flip the card above the dot when it's in the lower half of the frame — otherwise it
+  // clips off the bottom edge of the (overflow-hidden) canvas.
+  const below = cy <= 50;
 
   return (
     <div
       className="absolute z-10 w-72 max-w-[85vw] rounded-2xl border border-[var(--border)] bg-white shadow-[var(--shadow-pop)]"
       style={{
         left: `${Math.min(Math.max(cx, 18), 82)}%`,
-        top: `${Math.min(cy + 6, 88)}%`,
+        top: below ? `${Math.min(cy + 5, 88)}%` : undefined,
+        bottom: below ? undefined : `${Math.min(100 - cy + 5, 88)}%`,
         transform: "translateX(-50%)",
       }}
     >
@@ -51,10 +58,6 @@ export default function HotspotPopover({
           <X className="h-3.5 w-3.5" />
         </IconButton>
       </div>
-
-      {edit.reference_desc && (
-        <p className="px-3 pb-3 text-xs text-[var(--muted-foreground)] leading-relaxed line-clamp-2">{edit.reference_desc}</p>
-      )}
 
       <div className="flex gap-2 p-3 pt-0">
         <Button size="sm" variant="accentSoft" className="flex-1" onClick={onShowSimilar}>

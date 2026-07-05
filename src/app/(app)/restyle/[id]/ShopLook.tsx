@@ -1,14 +1,16 @@
 "use client";
 
-import { ShoppingBag, Replace } from "lucide-react";
+import { Search, ShoppingBag, Replace } from "lucide-react";
 import type { RestyleWorkspace } from "./useRestyleWorkspace";
-import type { ShoppingResult } from "@/lib/shopping-search";
-import { Button, ProductCard, SkeletonProductCard, Spinner, StatusBanner, matchWord, shopSummary, storeName } from "./ui";
+import { Button, ProductCard, shopSummary, storeName } from "./ui";
 
 /**
- * Shoppable items in the current render, plus buyable options for any inspo-only items
- * (photos with no product link) — that search is deferred until here (right after generate)
- * instead of running the moment a photo was uploaded, when the user might still be deciding.
+ * Exactly what's actually IN the currently displayed image — real products with a buy link,
+ * plus a compact card for any inspo-only item (an uploaded photo, no product link yet). This
+ * is deliberately NOT a search-results list: alternatives for an inspo item live behind its
+ * "Find buyable matches" button (opens SimilarItemsPanel, pre-populated from the deferred
+ * post-generate search — see the search kickoff in generate()) so this panel always reads as
+ * "here's your room," not "here's what we found."
  */
 export default function ShopLook({ ws }: { ws: RestyleWorkspace }) {
   const { productEdits, inspoEdits } = ws;
@@ -57,38 +59,21 @@ export default function ShopLook({ ws }: { ws: RestyleWorkspace }) {
         </div>
       )}
 
-      {inspoEdits.map((e) => {
-        const label = (e.target_label ?? "").toLowerCase();
-        const search = ws.searches[label] ?? { status: "idle" as const, scored: false, results: [] };
-        return (
-          <div key={e.id} className="space-y-2 pt-2 border-t border-[var(--border)] first:border-t-0 first:pt-0">
-            <p className="text-[11px] font-medium capitalize">{e.target_label} <span className="text-[var(--muted-foreground)] font-normal">— from your photo</span></p>
-            {search.status === "loading" && <SkeletonProductCard />}
-            {search.status === "error" && <StatusBanner variant="error">{search.error}</StatusBanner>}
-            {search.status === "idle" && (
-              <p className="text-xs text-[var(--muted-foreground)]">Looking for buyable matches…</p>
-            )}
-            {search.status === "ready" && search.results.length === 0 && (
-              <p className="text-xs text-[var(--muted-foreground)]">No buyable matches found for this one.</p>
-            )}
-            {search.status === "ready" && search.results.slice(0, 3).map((c, i) => {
-              const key = `shop:${label}:${i}`;
-              const picking = ws.pickingKey === key;
-              return (
-                <ProductCard key={i}
-                  image={c.thumbnail} title={c.title} retailer={c.retailer} price={c.price}
-                  viewUrl={c.productUrl ?? c.alternates?.[0]?.url ?? null}
-                  badge={matchWord(c.score, c.exact)}>
-                  <Button size="sm" variant="accent" disabled={ws.pickingKey != null}
-                    onClick={() => ws.pickCandidate(c as ShoppingResult, e.target_label ?? "", key, e.id)} className="mt-1">
-                    {picking ? <><Spinner size="xs" className="text-current" /> Using…</> : "Use this instead"}
-                  </Button>
-                </ProductCard>
-              );
-            })}
-          </div>
-        );
-      })}
+      {inspoEdits.length > 0 && (
+        <div className="space-y-2 pt-2 border-t border-[var(--border)] first:border-t-0 first:pt-0">
+          {inspoEdits.map((e) => (
+            <ProductCard key={e.id}
+              image={e.reference_url}
+              title={e.target_label ?? "Item"}
+              retailer="From your photo">
+              <Button size="sm" variant="accentSoft" className="mt-1"
+                onClick={() => ws.openSimilar(e.target_label ?? "item", e.kind === "add" ? "add" : "swap", e.id)}>
+                <Search className="h-3.5 w-3.5" /> Find buyable matches
+              </Button>
+            </ProductCard>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

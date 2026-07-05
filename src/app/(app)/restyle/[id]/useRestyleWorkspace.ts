@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { upload } from "@vercel/blob/client";
 import type { DetectedObject, Restyle, RestyleEdit, RestyleRender } from "@/types";
 import type { ShoppingResult } from "@/lib/shopping-search";
 
@@ -21,15 +22,25 @@ export type Sourcing = {
   lastStaged?: { title: string; retailer: string };
 } | null;
 
+// A tappable position on whichever image is currently displayed (original or a render) — see
+// the canvasHotspots derivation below for what each state means and how it's computed.
+export type CanvasHotspot = {
+  label: string;
+  box_2d: DetectedObject["box_2d"];
+  state: "idle" | "queued" | "placed";
+  edit: RestyleEdit | null;
+};
+
 const EMPTY_SEARCH: SearchState = { status: "idle", scored: false, results: [] };
 const OPTIMISTIC_PREFIX = "optimistic-";
 
-// Walls, a bare ceiling, and a bare floor aren't furniture/decor items there's a product to
-// swap them for — filter them out of hotspots and the chip row entirely. Careful not to drop
-// legitimate swappable items that share the word, like "wall art"/"wall mirror", "ceiling fan"/
-// "ceiling light", or "floor lamp" (the trailing word after floor/wall/ceiling means it won't
-// match this anchored pattern).
-const NOT_SWAPPABLE = /^(the\s+)?(left|right|back|front|far)?\s*(walls?|ceiling|floors?)$/i;
+// Walls, windows, a bare ceiling, and a bare floor are architecture, not furniture/decor
+// there's a product to swap them for — filter them out of hotspots and the chip row entirely.
+// Matched by TRAILING word, so multi-word surfaces like "dark tiled wall" or "back windows"
+// are caught too, while genuinely swappable items that merely start with the word survive
+// ("wall art"/"wall mirror", "window curtains"/"window treatment", "ceiling fan"/"ceiling
+// light", "floor lamp" — their real noun is the last word, so they don't match).
+const NOT_SWAPPABLE = /(^|\s)(walls?|windows?|ceilings?|floors?)$/i;
 const swappableObjects = (objs: DetectedObject[]) => objs.filter((o) => !NOT_SWAPPABLE.test(o.label.trim()));
 
 /**
@@ -288,25 +299,51 @@ export function useRestyleWorkspace(id: string) {
   // and a token cost — the user might not even want yet, since they could still be deciding).
   // It's deferred to after generate(), which looks up options for whatever inspo photos
   // actually made it into the render (see the search kickoff there).
+  //
+  // Optimistic, same pattern as pickCandidate below: the sourcing panel closes immediately
+  // and the photo appears queued right away (using a local object URL as its thumbnail) —
+  // identifying the item and cropping it (server-side Gemini calls) happens in the background
+  // and reconciles once done, rather than making the user watch a multi-second spinner before
+  // they can even tell it worked. Uploads the raw photo straight to Vercel Blob first (same
+  // signed-token route the initial room-photo upload uses), then sends only the resulting URL
+  // as JSON — closing the tab mid-upload just loses that unfinished transfer, not a staged edit.
   const stagePhoto = async (file: File, label: string) => {
     const replaceEditId = sourcing?.label === label ? sourcing.stagedEditId ?? undefined : undefined;
-    setStagingLink(true); setError(null);
-    const fd = new FormData();
-    fd.append("image", file); fd.append("targetLabel", label);
-    if (replaceEditId) fd.append("replaceEditId", replaceEditId);
+    const guessedKind = sourcing?.mode === "add" ? "add" : "item";
+    setError(null);
+
+    const optimisticId = `${OPTIMISTIC_PREFIX}${Date.now()}`;
+    const localUrl = URL.createObjectURL(file);
+    const prevEdits = restyle?.edits ?? [];
+    const optimisticEdit: RestyleEdit = {
+      id: optimisticId, restyle_id: id, kind: guessedKind, target_label: label,
+      instruction: null, reference_url: localUrl, reference_desc: null,
+      active: true, position: prevEdits.length, created_at: new Date().toISOString(),
+      buy_url: null, product_title: null, product_price: null, placement: null,
+    };
+    updateEdits([...prevEdits.filter((e) => e.id !== replaceEditId), optimisticEdit]);
+    setSourcing(null); // the item already shows as queued — no need to keep the panel open
+
     try {
-      const r = await fetch(`/api/restyle/${id}/product`, { method: "POST", body: fd });
+      const ext = file.type.split("/")[1] || "jpg";
+      const blob = await upload(
+        `restyle-uploads/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`,
+        file,
+        { access: "public", handleUploadUrl: "/api/restyle/upload-url", multipart: true },
+      );
+      const r = await fetch(`/api/restyle/${id}/product`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageUrl: blob.url, targetLabel: label, replaceEditId }),
+      });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error ?? "Couldn't add that photo");
       updateEdits(data.edits);
-      setSourcing((s) => s && s.label === label
-        ? { ...s, stagedEditId: data.added.id, lastStaged: { title: data.added.target_label ?? label, retailer: "" } }
-        : s);
       if (data.added.kind === "add") requestPin(data.added.id, data.added.target_label ?? label);
     } catch (err) {
+      updateEdits(prevEdits); // roll back the optimistic edit
       setError(err instanceof Error ? err.message : "Couldn't add that photo");
     } finally {
-      setStagingLink(false);
+      URL.revokeObjectURL(localUrl);
     }
   };
 
@@ -462,27 +499,47 @@ export function useRestyleWorkspace(id: string) {
     e.reference_url && !e.buy_url && e.target_label && (shownProductIds ? shownProductIds.has(e.id) : e.active),
   );
 
-  // Hotspot positions for shoppable items on a RENDER. Swaps: we only ever detected positions
-  // on the original photo, so approximate by reusing the swapped-out object's original box_2d
-  // (a swap usually stays roughly where the original piece was). Adds: use the tap-to-place
-  // pin as a small synthesized box around it — an add with no pin still has no render hotspot
-  // and shows only in the shop list below.
-  const detectedByLabel = new Map((restyle?.detected_objects ?? []).map((o) => [o.label.toLowerCase(), o.box_2d]));
-  const shownForHotspot = (e: RestyleEdit) => shownProductIds ? shownProductIds.has(e.id) : e.active;
-  const renderHotspots = edits
-    .filter((e) => e.target_label && shownForHotspot(e) && (e.kind === "item" || (e.kind === "add" && e.placement)))
-    .map((e) => {
-      const box: DetectedObject["box_2d"] | undefined = e.kind === "item"
-        ? detectedByLabel.get((e.target_label as string).toLowerCase())
-        : e.placement
-          ? [
-              Math.max(0, e.placement.y - 40), Math.max(0, e.placement.x - 40),
-              Math.min(1000, e.placement.y + 40), Math.min(1000, e.placement.x + 40),
-            ]
-          : undefined;
-      return box ? { label: e.target_label as string, box_2d: box, edit: e } : null;
-    })
-    .filter((h): h is { label: string; box_2d: DetectedObject["box_2d"]; edit: RestyleEdit } => h !== null);
+  // Unified hotspots for whichever image is on screen — the render is a canvas too, not a
+  // dead end: every detected item stays tappable so the user can keep swapping/adding and
+  // regenerating from it. A hotspot's state is derived from the same shownProductIds used
+  // above, so "placed" (this change IS in the pictured image) can only ever occur on a
+  // render — on the original, shownProductIds is always empty, so every match falls through
+  // to "queued" or "idle". This makes the "never show placed UI on the original" rule hold
+  // by construction instead of needing a separate original/render code path.
+  //   idle    — unchanged item, nothing staged for it
+  //   queued  — a change IS staged for it, but not in the currently displayed image
+  //   placed  — the change IS in the currently displayed image (render only)
+  // Swaps use the detected object's own box_2d (real position). Pinned adds use a small box
+  // synthesized around the tap-to-place pin — an add with no pin gets no hotspot at all and
+  // shows only in "Shop this look".
+  const stateFor = (e: RestyleEdit): "placed" | "queued" | null => {
+    if (shownProductIds ? shownProductIds.has(e.id) : e.active) return "placed";
+    if (e.active) return "queued";
+    return null;
+  };
+  const canvasHotspots: CanvasHotspot[] = [];
+  for (const o of objects ?? []) {
+    const labelKey = o.label.toLowerCase();
+    const candidates = edits.filter((e) => e.kind === "item" && e.target_label?.toLowerCase() === labelKey);
+    let chosen: RestyleEdit | null = null;
+    let state: "idle" | "queued" | "placed" = "idle";
+    for (const c of candidates) {
+      const s = stateFor(c);
+      if (s === "placed") { chosen = c; state = "placed"; break; }
+      if (s === "queued" && !chosen) { chosen = c; state = "queued"; }
+    }
+    canvasHotspots.push({ label: o.label, box_2d: o.box_2d, state, edit: chosen });
+  }
+  for (const e of edits) {
+    if (e.kind !== "add" || !e.placement || !e.target_label) continue;
+    const s = stateFor(e);
+    if (!s) continue; // inactive and never rendered — nothing to show
+    const box: DetectedObject["box_2d"] = [
+      Math.max(0, e.placement.y - 40), Math.max(0, e.placement.x - 40),
+      Math.min(1000, e.placement.y + 40), Math.min(1000, e.placement.x + 40),
+    ];
+    canvasHotspots.push({ label: e.target_label, box_2d: box, state: s, edit: e });
+  }
 
   return {
     id, restyle, renders, objects: objects ?? [], customItems: restyle?.custom_items ?? [], detecting, loading,
@@ -500,7 +557,7 @@ export function useRestyleWorkspace(id: string) {
     addEdit, toggle, remove, addCustomItem, removeCustomItem, generate, emptyRoom, downloadImage,
     // derived
     edits, activeEdits, stagedItems, displayUrl, viewingOriginal, showSlider, canGenerate, atMaxCustom, productEdits, inspoEdits,
-    renderHotspots,
+    canvasHotspots,
   };
 }
 
