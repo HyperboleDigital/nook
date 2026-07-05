@@ -1,6 +1,7 @@
 "use client";
 
-import { MapPin, Plus, Replace, X } from "lucide-react";
+import { useState } from "react";
+import { ChevronDown, ChevronUp, MapPin, Plus, Replace, X } from "lucide-react";
 import type { RestyleWorkspace } from "./useRestyleWorkspace";
 import { IconButton } from "./ui";
 
@@ -9,8 +10,15 @@ import { IconButton } from "./ui";
  * rail while viewing the original (nothing's been generated to show them in yet). Deliberately
  * framed as "queued", not "placed": ShopLook is the source of truth for what's actually IN the
  * current image once a render exists; this is what WILL be in it after the next generate.
+ *
+ * Collapsed by default: each queued item already has a green-checkmark hotspot directly on the
+ * canvas (tapping it opens the same Change/Remove teaser), so this list is a secondary "review
+ * everything at once" view, not the primary way to see what's queued — expand it only when
+ * wanted, via the "n queued" toggle.
  */
 export default function QueuedChanges({ ws }: { ws: RestyleWorkspace }) {
+  const [expanded, setExpanded] = useState(false);
+
   if (ws.stagedItems.length === 0) {
     return (
       <p className="text-xs text-[var(--muted-foreground)]">
@@ -21,10 +29,17 @@ export default function QueuedChanges({ ws }: { ws: RestyleWorkspace }) {
 
   return (
     <div className="space-y-3">
-      <div>
-        <p className="text-sm font-semibold">Queued changes</p>
-        <p className="text-[11px] text-[var(--muted-foreground)]">Not in the photo yet — generate to see these in your room.</p>
-      </div>
+      <button type="button" onClick={() => setExpanded((v) => !v)}
+        className="flex items-center justify-between w-full text-left">
+        <div>
+          <p className="text-sm font-semibold">
+            {ws.stagedItems.length} change{ws.stagedItems.length === 1 ? "" : "s"} queued
+          </p>
+          <p className="text-[11px] text-[var(--muted-foreground)]">Not in the photo yet — generate to see these in your room.</p>
+        </div>
+        {expanded ? <ChevronUp className="h-4 w-4 text-[var(--muted-foreground)] shrink-0" /> : <ChevronDown className="h-4 w-4 text-[var(--muted-foreground)] shrink-0" />}
+      </button>
+      {expanded && (
       <div className="space-y-2">
         {ws.stagedItems.map((e) => {
           const label = e.target_label ?? "item";
@@ -68,6 +83,7 @@ export default function QueuedChanges({ ws }: { ws: RestyleWorkspace }) {
           );
         })}
       </div>
+      )}
     </div>
   );
 }

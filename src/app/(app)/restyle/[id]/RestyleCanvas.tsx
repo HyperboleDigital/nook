@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Columns2, Download, Share2, Check, ArrowLeftRight } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Columns2, Download, Plus, Share2, Check, ArrowLeftRight } from "lucide-react";
 import type { CanvasHotspot, RestyleWorkspace } from "./useRestyleWorkspace";
-import { IconButton, ProgressOverlay, ShopSummaryPill } from "./ui";
+import { Button, IconButton, ProgressOverlay, ShopSummaryPill } from "./ui";
 import ObjectHotspots from "./ObjectHotspots";
 import HotspotPopover from "./HotspotPopover";
 import QueuedHotspotPopover from "./QueuedHotspotPopover";
@@ -25,11 +25,39 @@ import PinPlacementLayer from "./PinPlacementLayer";
  * ahead of everything else.
  */
 export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
-  const { restyle, generating, compare, imgWrapRef, sliderHandlers, displayUrl, previewUrl } = ws;
+  const { restyle, generating, displayUrl, previewUrl } = ws;
   const [showCompare, setShowCompare] = useState(false);
   const [copied, setCopied] = useState(false);
   const [openHotspot, setOpenHotspot] = useState<{ label: string; cx: number; cy: number; edit: NonNullable<CanvasHotspot["edit"]> } | null>(null);
   const [queuedPreview, setQueuedPreview] = useState<{ label: string; cx: number; cy: number; edit: NonNullable<CanvasHotspot["edit"]> } | null>(null);
+
+  // Before/after slider. Local to this component (nothing else reads it) and throttled to at
+  // most one state update per animation frame — calling setCompare on every raw pointermove
+  // re-renders on every pixel of movement, which is what made dragging feel laggy.
+  const [compare, setCompare] = useState(50);
+  const dragging = useRef(false);
+  const imgWrapRef = useRef<HTMLDivElement>(null);
+  const rafId = useRef<number | null>(null);
+  const pendingClientX = useRef<number | null>(null);
+  const moveCompare = (clientX: number) => {
+    pendingClientX.current = clientX;
+    if (rafId.current != null) return; // a frame is already scheduled — coalesce
+    rafId.current = requestAnimationFrame(() => {
+      rafId.current = null;
+      const el = imgWrapRef.current;
+      const cx = pendingClientX.current;
+      if (!el || cx == null) return;
+      const rect = el.getBoundingClientRect();
+      setCompare(Math.max(0, Math.min(100, ((cx - rect.left) / rect.width) * 100)));
+    });
+  };
+  const sliderHandlers = {
+    onPointerDown: (e: React.PointerEvent) => { e.currentTarget.setPointerCapture(e.pointerId); dragging.current = true; moveCompare(e.clientX); },
+    onPointerMove: (e: React.PointerEvent) => { if (dragging.current) moveCompare(e.clientX); },
+    onPointerUp: (e: React.PointerEvent) => { dragging.current = false; e.currentTarget.releasePointerCapture(e.pointerId); },
+    onPointerCancel: () => { dragging.current = false; },
+  };
+  useEffect(() => () => { if (rafId.current != null) cancelAnimationFrame(rafId.current); }, []);
 
   // A popover's coordinates are meaningless once the displayed image changes (switching
   // between original/render/an earlier version) — close them rather than leave one floating
@@ -62,6 +90,11 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
   const showSimilarFromPopover = () => {
     if (!openHotspot) return;
     ws.openSimilar(openHotspot.label, "swap", openHotspot.edit.id);
+    setOpenHotspot(null);
+  };
+  const toggleOffFromPopover = () => {
+    if (!openHotspot) return;
+    ws.toggleAndRegenerate(openHotspot.edit.id, false);
     setOpenHotspot(null);
   };
 
@@ -115,7 +148,7 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
             )}
             {openHotspot && (
               <HotspotPopover edit={openHotspot.edit} label={openHotspot.label} cx={openHotspot.cx} cy={openHotspot.cy}
-                onShowSimilar={showSimilarFromPopover} onClose={() => setOpenHotspot(null)} />
+                onShowSimilar={showSimilarFromPopover} onToggleOff={toggleOffFromPopover} onClose={() => setOpenHotspot(null)} />
             )}
           </div>
         ) : (
@@ -141,6 +174,15 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
         {!viewingOriginal && !generating && !showCompare && ws.productEdits.length > 0 && (
           <div className="absolute bottom-3 left-3 hidden md:block">
             <ShopSummaryPill edits={ws.productEdits} />
+          </div>
+        )}
+
+        {!generating && !showCompare && !ws.pinRequest && (
+          <div className="absolute bottom-3 right-3">
+            <Button variant="primary" size="sm" className="shadow-[var(--shadow-pop)]"
+              onClick={() => ws.openSourcing("", "add")}>
+              <Plus className="h-3.5 w-3.5" /> Add
+            </Button>
           </div>
         )}
 

@@ -25,11 +25,14 @@ export default function QueuedHotspotPopover({
 }) {
   const isAdd = edit.kind === "add";
   const below = cy <= 50;
+  // Clamp horizontal position in PIXELS (see HotspotPopover for why percent-only breaks on a
+  // narrower rendered image).
+  const HALF_WIDTH_PX = 128; // half of w-64 (256px)
   return (
     <div
       className="absolute z-10 w-64 max-w-[80vw] rounded-2xl border border-[var(--border)] bg-white shadow-[var(--shadow-pop)]"
       style={{
-        left: `${Math.min(Math.max(cx, 18), 82)}%`,
+        left: `clamp(${HALF_WIDTH_PX}px, ${cx}%, calc(100% - ${HALF_WIDTH_PX}px))`,
         top: below ? `${Math.min(cy + 5, 90)}%` : undefined,
         bottom: below ? undefined : `${Math.min(100 - cy + 5, 90)}%`,
         transform: "translateX(-50%)",

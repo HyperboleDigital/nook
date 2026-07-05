@@ -3,7 +3,6 @@
 import type { RestyleWorkspace } from "./useRestyleWorkspace";
 import { Sheet, SheetChrome } from "./ui";
 import RestyleCanvas from "./RestyleCanvas";
-import ChipRow from "./ChipRow";
 import SourcePanel from "./SourcePanel";
 import SimilarItemsPanel from "./SimilarItemsPanel";
 import GenerateBar from "./GenerateBar";
@@ -12,12 +11,14 @@ import QueuedChanges from "./QueuedChanges";
 import VersionsStrip from "./VersionsStrip";
 
 /**
- * The canvas-first editor. Room photo + chips/hotspots on the left; a right-hand rail that
- * defaults to either "Queued changes" (viewing the original — nothing's been generated into
- * the photo yet, so this is what WILL be there) or "Shop this look" (viewing a render — what's
- * actually IN it), and swaps to the sourcing/similar-items panel while one is open. On mobile
- * there's no room for a persistent rail, so the same queued/shop content stays inline below
- * the canvas and sourcing uses the bottom sheet overlay instead.
+ * The canvas-first editor. Room photo + hotspots on the left (tapping the photo directly is
+ * the only way to source an item now — see canvasHotspots/RestyleCanvas; the old chip row was
+ * removed as redundant once hotspots worked on renders too); a right-hand rail that defaults
+ * to either "Queued changes" (viewing the original — nothing's been generated into the photo
+ * yet, so this is what WILL be there) or "Shop this look" (viewing a render — what's actually
+ * IN it), and swaps to the sourcing/similar-items panel while one is open. On mobile there's no
+ * room for a persistent rail, so the same queued/shop content stays inline below the canvas and
+ * sourcing uses the bottom sheet overlay instead.
  */
 export default function RestyleStudio({ ws }: { ws: RestyleWorkspace }) {
   const hasRender = ws.renders.length > 0;
@@ -28,7 +29,6 @@ export default function RestyleStudio({ ws }: { ws: RestyleWorkspace }) {
       <div className="flex-1 min-w-0 flex flex-col md:h-full md:overflow-y-auto">
         <div className="p-3 md:p-4 space-y-3 flex-1">
           <RestyleCanvas ws={ws} />
-          <ChipRow ws={ws} />
           {/* Mobile only — desktop shows these in the persistent right rail instead */}
           <div className="md:hidden">
             {ws.viewingOriginal ? <QueuedChanges ws={ws} /> : hasRender ? <ShopLook ws={ws} /> : null}

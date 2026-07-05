@@ -53,7 +53,10 @@ export default function PinPlacementLayer({
           <div
             className="absolute z-10 w-64 max-w-[80vw] rounded-2xl border border-[var(--border)] bg-white shadow-[var(--shadow-pop)]"
             style={{
-              left: `${Math.min(Math.max(pin.x / 10, 18), 82)}%`,
+              // Clamp in PIXELS, not just percent — a percent-only clamp assumes the image is
+              // wide enough that half the card's fixed width is a small percentage of it,
+              // which breaks (clips the card off the edge) on a narrower rendered image.
+              left: `clamp(128px, ${pin.x / 10}%, calc(100% - 128px))`,
               top: pin.y > 500 ? undefined : `${Math.min(pin.y / 10 + 6, 88)}%`,
               bottom: pin.y > 500 ? `${100 - pin.y / 10 + 6}%` : undefined,
               transform: "translateX(-50%)",

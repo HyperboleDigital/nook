@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { upload } from "@vercel/blob/client";
 import type { DetectedObject, Restyle, RestyleEdit, RestyleRender } from "@/types";
 import type { ShoppingResult } from "@/lib/shopping-search";
@@ -66,23 +66,6 @@ export function useRestyleWorkspace(id: string) {
   const [searches, setSearches] = useState<Record<string, SearchState>>({});
   const [pickingKey, setPickingKey] = useState<string | null>(null);
   const [stagingLink, setStagingLink] = useState(false);
-
-  // Before/after slider
-  const [compare, setCompare] = useState(50);
-  const dragging = useRef(false);
-  const imgWrapRef = useRef<HTMLDivElement>(null);
-  const moveCompare = (clientX: number) => {
-    const el = imgWrapRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    setCompare(Math.max(0, Math.min(100, ((clientX - rect.left) / rect.width) * 100)));
-  };
-  const sliderHandlers = {
-    onPointerDown: (e: React.PointerEvent) => { e.currentTarget.setPointerCapture(e.pointerId); dragging.current = true; moveCompare(e.clientX); },
-    onPointerMove: (e: React.PointerEvent) => { if (dragging.current) moveCompare(e.clientX); },
-    onPointerUp: (e: React.PointerEvent) => { dragging.current = false; e.currentTarget.releasePointerCapture(e.pointerId); },
-    onPointerCancel: () => { dragging.current = false; },
-  };
 
   // History preview
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -429,6 +412,16 @@ export function useRestyleWorkspace(id: string) {
     } catch { /* best effort — optimistic is already set */ }
   };
 
+  // A simple on/off switch for a single item already in the picture: flip it, then regenerate
+  // right away — a combination already seen before is an instant cache hit (restyle_renders'
+  // signature cache), a new one pays the real render cost, surfaced via the existing
+  // generating/ProgressOverlay state. toggle() already awaits its PATCH before resolving, so
+  // by the time generate() reads active edits from the DB it reflects the flipped state.
+  const toggleAndRegenerate = async (editId: string, active: boolean) => {
+    await toggle(editId, active);
+    await generate();
+  };
+
   const remove = async (editId: string) => {
     setBusy(true);
     setPinRequest((p) => (p?.editId === editId ? null : p));
@@ -549,12 +542,10 @@ export function useRestyleWorkspace(id: string) {
     pinRequest, requestPin, cancelPin, setPlacement,
     searches, runVisualSearchByUrl, runTextSearch, pickCandidate, pickingKey,
     stagePhoto, stageProductLink, stagingLink,
-    // slider
-    compare, imgWrapRef, sliderHandlers,
     // preview
     previewUrl, setPreviewUrl,
     // handlers
-    addEdit, toggle, remove, addCustomItem, removeCustomItem, generate, emptyRoom, downloadImage,
+    addEdit, toggle, toggleAndRegenerate, remove, addCustomItem, removeCustomItem, generate, emptyRoom, downloadImage,
     // derived
     edits, activeEdits, stagedItems, displayUrl, viewingOriginal, showSlider, canGenerate, atMaxCustom, productEdits, inspoEdits,
     canvasHotspots,
