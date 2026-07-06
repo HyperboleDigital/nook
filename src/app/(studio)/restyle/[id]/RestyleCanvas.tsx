@@ -4,10 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { Columns2, Download, Plus, Share2, Check, ArrowLeftRight } from "lucide-react";
 import type { CSSProperties } from "react";
 import type { CanvasHotspot, RestyleWorkspace } from "./useRestyleWorkspace";
-import { Button, IconButton, ProgressOverlay, ShopSummaryPill } from "./ui";
+import { Button, IconButton, ProgressOverlay, ShopSummaryPill, Spinner } from "./ui";
 import ObjectHotspots from "./ObjectHotspots";
-import HotspotPopover from "./HotspotPopover";
-import QueuedHotspotPopover from "./QueuedHotspotPopover";
 import PinPlacementLayer from "./PinPlacementLayer";
 
 // Fallback for the brief window before the frame/image have been measured (or if width/height
@@ -17,58 +15,73 @@ const FALLBACK_WRAP = "relative block w-full rounded-3xl overflow-hidden shadow-
 const FALLBACK_IMG = "block w-full h-auto max-h-[85dvh] object-contain";
 
 /**
- * The room photo — centerpiece of the editor. Whichever image is on screen (original or a
- * render) is a live canvas: every detected item stays tappable via `ws.canvasHotspots`, so the
- * user can keep swapping/adding/removing and regenerating from a render, not just the original.
- * A hotspot's state (idle/queued/placed) decides what tapping it does:
- *   idle    → open sourcing (nothing staged for it)
- *   queued  → a light "here's what's queued" teaser (Change/Remove) — NOT the placed/priced
- *             popover, since this change isn't actually in the pictured image yet
- *   placed  → the placed/priced popover (thumbnail, price, Show similar / Buy) — this can
- *             only occur on a render (see canvasHotspots — "placed" is derived from what's
- *             actually in the displayed image's signature, which is empty on the original)
- * Generate progress overlays right here instead of a separate result screen. `ws.pinRequest`
- * overlays a tap-to-place layer on the original photo right after a new "add" item stages,
- * ahead of everything else. The raw original photo is intentionally NOT offered as a
- * navigable "version" (see VersionsStrip) — it's a silent backend reference recompose always
- * composites from, not a state a user picks; download/share always reflect whatever's
- * currently displayed (the live render with its current on/off toggle state).
+ * The room photo — the ONE image the user is editing. There is no version navigation and no
+ * "viewing the original": `ws.displayUrl` is always the current generation. The original photo
+ * and past renders exist only as backend machinery (recompose composites from the original;
+ * `restyle_renders` caches per active-edit signature so toggling a change back is instant). So
+ * this is a live canvas: every detected item stays tappable via `ws.canvasHotspots`, and tapping
+ * ANY of them — changed or not — opens the same "Edit item" menu in the rail/sheet (see
+ * `handleTap` → `ws.openSourcing`; there are no on-canvas popovers anymore, everything routes to
+ * the one consistent menu). "+ Add" drops a pin over THIS image (the current render, not the
+ * bare original) via `ws.pinRequest`. Download/share always reflect the current generation.
  *
  * The stage has a FIXED height on every breakpoint (a viewport-relative height on mobile since
  * the page scrolls, `flex-1` filling the immersive column on desktop), so a portrait photo
  * can't fill both axes the way a simple `w-full h-auto` box could. CSS percentage-height
- * shrink-wrapping (`max-h-full` on an auto-sized wrapper) is genuinely ambiguous per spec when
- * the wrapper's own height comes from its content — so instead this measures the stage
- * (ResizeObserver) and computes the contained image's exact pixel box from `restyle.width`/
- * `height` (the canonical dimensions every displayed image already shares, guaranteed by
- * upload-time canonicalization + recompose's fixed-size output). The wrapper is then pinned to
- * that exact pixel box, so object-cover fills it perfectly with no letterboxing math needed, and
- * every %-positioned hotspot/popover still lands correctly since the wrapper IS the image's true
- * rendered box, in pixels, not a CSS approximation. A blurred, darkened copy of the same image
- * fills the stage edge-to-edge behind it (no rounding, no shadow — it's just backdrop) while the
- * sharp photo floats on top as a rounded, shadowed card (`imgWrapClass`) — the stage itself has
- * no rounding/border, only the photo does.
+ * shrink-wrapping is genuinely ambiguous per spec when the wrapper's own height comes from its
+ * content — so instead this measures the stage (ResizeObserver) + the rendered image's natural
+ * size and pins the wrapper to the exact contained pixel box, so object-cover fills it perfectly
+ * and every %-positioned hotspot/pin lands correctly (the wrapper IS the image's true rendered
+ * box, in pixels). A blurred, darkened copy of the same image fills the stage edge-to-edge behind
+ * it (just backdrop) while the sharp photo floats on top as a rounded, shadowed card.
  */
 export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
-  const { restyle, generating, displayUrl, previewUrl } = ws;
+  const { restyle, generating, displayUrl } = ws;
   const [showCompare, setShowCompare] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [openHotspot, setOpenHotspot] = useState<{ label: string; cx: number; cy: number; edit: NonNullable<CanvasHotspot["edit"]> } | null>(null);
-  const [queuedPreview, setQueuedPreview] = useState<{ label: string; cx: number; cy: number; edit: NonNullable<CanvasHotspot["edit"]> } | null>(null);
 
   // Desktop image-box measurement (see doc comment above). `naturalSize` is measured directly
   // off the actual rendered <img> (onLoad) rather than trusted solely from `restyle.width`/
   // `height` — that DB column is normally correct, but hotspot placement is precise enough that
-  // any drift between it and the real bytes on screen (a stale value, a legacy row from before
-  // the column existed) would visibly misalign every pin. The DB value is still used as an
-  // instant first-paint fallback before the image has finished loading.
+  // any drift between it and the real bytes on screen would visibly misalign every pin. The DB
+  // value is still used as an instant first-paint fallback before the image has finished loading.
   const frameRef = useRef<HTMLDivElement>(null);
   const [frameSize, setFrameSize] = useState({ w: 0, h: 0 });
   const [naturalSize, setNaturalSize] = useState<{ w: number; h: number } | null>(null);
+  // The last displayUrl whose <img> actually finished loading — used below to keep the
+  // ProgressOverlay up until the NEW image has visibly painted, instead of it vanishing the
+  // instant `generating` flips false and leaving a stale frame of the old room on screen for a
+  // beat while the new one decodes.
+  const [settledUrl, setSettledUrl] = useState<string | null>(null);
   const onImgLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
     const t = e.currentTarget;
     if (t.naturalWidth && t.naturalHeight) setNaturalSize({ w: t.naturalWidth, h: t.naturalHeight });
+    setSettledUrl(t.src);
   };
+  // Safety valve: if the new image never fires onLoad (broken URL, aggressive cache, etc.) don't
+  // strand the overlay forever — release it a few seconds after generating finishes regardless.
+  const [wasGenerating, setWasGenerating] = useState(false);
+  useEffect(() => {
+    let active = true;
+    if (generating) {
+      Promise.resolve().then(() => { if (active) setWasGenerating(true); });
+      return () => { active = false; };
+    }
+    if (!wasGenerating) return () => { active = false; };
+    const t = setTimeout(() => { if (active) setWasGenerating(false); }, 5000);
+    return () => { active = false; clearTimeout(t); };
+  }, [generating, wasGenerating]);
+  const holdingOverlay = wasGenerating && !generating && displayUrl !== settledUrl;
+  // `ws.generatingStartedAt` gets nulled the moment generating flips false — the same instant
+  // we want the overlay to keep showing (holdingOverlay) — so remember the last real value to
+  // keep feeding ProgressOverlay a valid startedAt through the hold period.
+  const [lastStartedAt, setLastStartedAt] = useState<number | null>(null);
+  useEffect(() => {
+    if (ws.generatingStartedAt == null) return;
+    let active = true;
+    Promise.resolve().then(() => { if (active) setLastStartedAt(ws.generatingStartedAt); });
+    return () => { active = false; };
+  }, [ws.generatingStartedAt]);
   useEffect(() => {
     const el = frameRef.current;
     if (!el) return;
@@ -108,18 +121,8 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
   };
   useEffect(() => () => { if (rafId.current != null) cancelAnimationFrame(rafId.current); }, []);
 
-  // A popover's coordinates are meaningless once the displayed image changes (switching
-  // between original/render/an earlier version) — close them rather than leave one floating
-  // over the wrong photo.
-  useEffect(() => {
-    let active = true;
-    Promise.resolve().then(() => { if (active) { setOpenHotspot(null); setQueuedPreview(null); } });
-    return () => { active = false; };
-  }, [displayUrl]);
-
   if (!restyle) return null;
   const { viewingOriginal } = ws;
-  const backdropSrc = viewingOriginal ? restyle.original_url : displayUrl;
 
   const natW = naturalSize?.w || restyle.width || 0;
   const natH = naturalSize?.h || restyle.height || 0;
@@ -132,32 +135,14 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
   const imgWrapClass = imgBoxStyle ? "relative rounded-3xl overflow-hidden shadow-[var(--shadow-pop)]" : FALLBACK_WRAP;
   const imgClass = imgBoxStyle ? "block w-full h-full object-cover" : FALLBACK_IMG;
 
-  const handleTap = (h: CanvasHotspot, cx: number, cy: number) => {
-    if (h.state === "idle") { ws.openSourcing(h.label, "swap"); return; }
+  // Tapping any actionable item opens the unified edit menu (rail on desktop, sheet on mobile),
+  // passing the item's current staged edit id so Swap/Similar/Adjust supersede it. A detected
+  // item is mode "swap"; a placed "add" (no detected match) is mode "add" so the menu/back logic
+  // treats it correctly.
+  const handleTap = (h: CanvasHotspot) => {
     if (h.state === "confirming") return; // still round-tripping to the server — nothing to act on yet
-    if (h.state === "queued") { setQueuedPreview({ label: h.label, cx, cy, edit: h.edit! }); setOpenHotspot(null); return; }
-    setOpenHotspot({ label: h.label, cx, cy, edit: h.edit! }); setQueuedPreview(null);
-  };
-  const changeFromQueued = () => {
-    if (!queuedPreview) return;
-    const { label, edit } = queuedPreview;
-    ws.openSimilar(label, edit.kind === "add" ? "add" : "swap", edit.id);
-    setQueuedPreview(null);
-  };
-  const removeFromQueued = () => {
-    if (!queuedPreview) return;
-    ws.remove(queuedPreview.edit.id);
-    setQueuedPreview(null);
-  };
-  const showSimilarFromPopover = () => {
-    if (!openHotspot) return;
-    ws.openSimilar(openHotspot.label, "swap", openHotspot.edit.id);
-    setOpenHotspot(null);
-  };
-  const toggleOffFromPopover = () => {
-    if (!openHotspot) return;
-    ws.toggleAndRegenerate(openHotspot.edit.id, false);
-    setOpenHotspot(null);
+    const isDetected = ws.objects.some((o) => o.label.toLowerCase() === h.label.toLowerCase());
+    ws.openSourcing(h.label, isDetected ? "swap" : "add", h.edit?.id ?? null);
   };
 
   const share = async () => {
@@ -193,22 +178,14 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
             photo so the gutters beside the shrink-wrapped sharp image read as an intentional
             frame, not a broken letterbox. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={backdropSrc} alt="" aria-hidden className="absolute inset-0 h-full w-full object-cover blur-2xl brightness-50 scale-110" />
+        <img src={displayUrl} alt="" aria-hidden className="absolute inset-0 h-full w-full object-cover blur-2xl brightness-50 scale-110" />
 
-        {viewingOriginal ? (
+        {!showCompare ? (
           <div className={imgWrapClass} style={imgBoxStyle}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={restyle.original_url} alt="Your room" className={imgClass} onLoad={onImgLoad} />
-            {ws.canvasHotspots.length > 0 && (
+            <img src={displayUrl} alt={restyle.title ?? "Your room"} className={imgClass} onLoad={onImgLoad} />
+            {ws.canvasHotspots.length > 0 && !ws.pinRequest && (
               <ObjectHotspots hotspots={ws.canvasHotspots} activeLabel={ws.sourcing?.label} onSelect={handleTap} />
-            )}
-            {queuedPreview && !ws.pinRequest && (
-              <QueuedHotspotPopover
-                edit={queuedPreview.edit} label={queuedPreview.label}
-                cx={queuedPreview.cx} cy={queuedPreview.cy}
-                onChange={changeFromQueued}
-                onRemove={queuedPreview.edit.id.startsWith("optimistic-") ? undefined : removeFromQueued}
-                onClose={() => setQueuedPreview(null)} />
             )}
             {ws.pinRequest && (
               <PinPlacementLayer label={ws.pinRequest.label}
@@ -216,27 +193,6 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
                   ? ws.setPlacement(ws.pinRequest!.editId, { x, y, note })
                   : ws.placeAddLocation(x, y, note)}
                 onCancel={skipPin} />
-            )}
-          </div>
-        ) : !showCompare ? (
-          <div className={imgWrapClass} style={imgBoxStyle}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={displayUrl} alt="Restyled room" className={imgClass} onLoad={onImgLoad} />
-            {ws.canvasHotspots.length > 0 && (
-              <ObjectHotspots hotspots={ws.canvasHotspots} activeLabel={ws.sourcing?.label} onSelect={handleTap} />
-            )}
-            {queuedPreview && (
-              <QueuedHotspotPopover
-                edit={queuedPreview.edit} label={queuedPreview.label}
-                cx={queuedPreview.cx} cy={queuedPreview.cy}
-                onChange={changeFromQueued}
-                onRemove={queuedPreview.edit.id.startsWith("optimistic-") ? undefined : removeFromQueued}
-                onClose={() => setQueuedPreview(null)} />
-            )}
-            {openHotspot && (
-              <HotspotPopover edit={openHotspot.edit} label={openHotspot.label} cx={openHotspot.cx} cy={openHotspot.cy}
-                canToggleOff={ws.productEdits.length + ws.inspoEdits.length > 1}
-                onShowSimilar={showSimilarFromPopover} onToggleOff={toggleOffFromPopover} onClose={() => setOpenHotspot(null)} />
             )}
           </div>
         ) : (
@@ -257,17 +213,23 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
           </div>
         )}
 
-        {generating && ws.generatingStartedAt != null && (
-          <ProgressOverlay startedAt={ws.generatingStartedAt} expectedSeconds={ws.expectedSeconds} />
+        {ws.detecting && (
+          <div className="absolute top-3 left-3 flex items-center gap-1.5 rounded-full bg-white/95 border border-[var(--border)] text-[var(--muted-foreground)] text-xs px-3 py-1.5 shadow-[var(--shadow-pop)]">
+            <Spinner size="xs" /> Finding your furniture…
+          </div>
         )}
 
-        {!viewingOriginal && !generating && !showCompare && ws.productEdits.length > 0 && (
+        {(generating || holdingOverlay) && lastStartedAt != null && (
+          <ProgressOverlay startedAt={lastStartedAt} expectedSeconds={ws.expectedSeconds} />
+        )}
+
+        {!viewingOriginal && !generating && !holdingOverlay && !showCompare && ws.productEdits.length > 0 && (
           <div className="absolute bottom-3 left-3 hidden md:block">
             <ShopSummaryPill edits={ws.productEdits} />
           </div>
         )}
 
-        {!generating && !showCompare && !ws.pinRequest && (
+        {!generating && !holdingOverlay && !showCompare && !ws.pinRequest && (
           <div className="absolute bottom-3 right-3">
             <Button variant="primary" size="sm" className="shadow-[var(--shadow-pop)]"
               onClick={() => ws.startAddFlow()}>
@@ -295,9 +257,8 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
       {/* pinRequest is handled by the instruction bar above the photo, so it's omitted here. */}
       {!ws.pinRequest && (
         <p className="md:hidden text-[11px] text-[var(--muted-foreground)] text-center py-2 px-3">
-          {viewingOriginal ? "Tap an item to swap it, or add something new"
-            : previewUrl ? "Viewing an earlier version — tap an item to keep editing"
-            : "Tap an item to swap it, shop it, or add something new"}
+          {viewingOriginal ? "Tap an item to edit it, or add something new"
+            : "Tap an item to edit it, shop it, or add something new"}
         </p>
       )}
     </div>

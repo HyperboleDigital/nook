@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Check, Eraser, Search } from "lucide-react";
-import type { RestyleWorkspace } from "./useRestyleWorkspace";
+import { Check, ChevronLeft, ChevronRight, Eraser, Replace, ShoppingBag, Sparkles, Wand2 } from "lucide-react";
+import { boxFromPlacement, type RestyleWorkspace } from "./useRestyleWorkspace";
 import type { ShoppingResult } from "@/lib/shopping-search";
 import { downscaleImage } from "@/lib/image-client";
 import { Button, Input, ProductCard, SegmentedTabs, SkeletonProductCard, Spinner, StatusBanner, matchWord } from "./ui";
@@ -10,7 +10,28 @@ import CroppedThumb from "./CroppedThumb";
 
 type SrcMode = "link" | "photo" | "describe";
 
-/** Sourcing UI shown inside the Sheet for whichever item ws.sourcing points at. */
+// Suggestions for the "what are you adding?" step — mirrors the vocabulary in gemini.ts's
+// DETECT_PROMPT so the guided list and what detection actually recognizes stay in sync. Native
+// <datalist> autocomplete: helps a user land on a clean, common item name (and nudges away from
+// typing something off-topic) without forcing a rigid picker — free text is still accepted and
+// goes through the same normalize-label call either way.
+const COMMON_ITEMS = [
+  "sofa", "sectional", "armchair", "coffee table", "side table", "console table",
+  "dining table", "dining chair", "bed", "nightstand", "dresser", "bookshelf", "desk",
+  "area rug", "floor lamp", "table lamp", "pendant light", "chandelier", "ceiling fan",
+  "mirror", "framed art", "curtains", "plant", "ottoman", "bench",
+];
+
+/**
+ * Sourcing UI shown inside the Sheet/rail for whichever item ws.sourcing points at. For an
+ * EXISTING detected item (mode "swap"), this starts on a category MENU — "Edit the sofa": Swap
+ * it / Find similar items / Adjust it / Remove it — rather than jumping straight into a sourcing
+ * form. That reframe (an item has several things you can DO to it, sourcing a replacement is
+ * just one of them) is why "Adjust it" is its own destination (`view: "adjust"`) instead of a
+ * 4th tab crammed alongside Paste-link/Upload-photo/Describe-it. A fresh "add" (nothing placed
+ * yet) skips the menu entirely — sourcing IS the only action, so it goes straight to `view:
+ * "compose"` (see useRestyleWorkspace's openSourcing/placeAddLocation/skipAddLocation).
+ */
 export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
   const sourcing = ws.sourcing;
   const [srcMode, setSrcMode] = useState<SrcMode>("link");
@@ -19,6 +40,9 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [pendingPreview, setPendingPreview] = useState<string | null>(null);
   const [itemDraft, setItemDraft] = useState("");
+  const [normalizing, setNormalizing] = useState(false);
+  const [normalizeError, setNormalizeError] = useState<string | null>(null);
+  const [refineText, setRefineText] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
   // Reset local sourcing UI whenever the target item changes.
@@ -26,15 +50,57 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
     let active = true;
     Promise.resolve().then(() => {
       if (!active) return;
-      setSrcMode("link"); setProductUrl(""); setDescText(""); setItemDraft("");
+      setSrcMode("link"); setProductUrl(""); setDescText(""); setItemDraft(""); setRefineText("");
+      setNormalizing(false); setNormalizeError(null);
       setPendingFile(null);
       setPendingPreview((prev) => { if (prev) URL.revokeObjectURL(prev); return null; });
     });
     return () => { active = false; };
   }, [sourcing?.label, sourcing?.mode]);
 
+  // Seed the "Adjust it" text box from any already-active instruction for this label, ONCE per
+  // visit to that view (not on every render — see the "adjust" branch below, which reads
+  // `refineText` directly so it stays freely editable/clearable after this). Must live above
+  // the `!sourcing` early return (hooks can't be called conditionally), so it re-derives the
+  // active refine edit itself rather than reusing the `activeRefine` const computed below.
+  useEffect(() => {
+    if (sourcing?.view !== "adjust") return;
+    let active = true;
+    Promise.resolve().then(() => {
+      if (!active) return;
+      const current = ws.edits.find((e) =>
+        e.kind === "refine" && e.active && e.target_label?.toLowerCase() === sourcing.label.toLowerCase());
+      setRefineText((prev) => prev || current?.instruction || "");
+    });
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sourcing?.view, sourcing?.label]);
+
   if (!sourcing) return null;
   const label = sourcing.label;
+
+  // Free text gets turned into a short, clean label ("floor plant next to the tv, kind of tall"
+  // → "Floor Plant") before it's accepted — the raw input used to become the label EVERYWHERE
+  // (menu title, canvas hotspot, changes-rail card) verbatim, which read terribly once it stuck.
+  // This also doubles as a content-moderation gate: normalizeItemLabel refuses non-item/
+  // gibberish/offensive input, surfaced here as an error instead of silently accepting it.
+  const confirmItemDraft = async () => {
+    const text = itemDraft.trim();
+    if (!text) return;
+    setNormalizing(true); setNormalizeError(null);
+    try {
+      const r = await fetch("/api/restyle/normalize-label", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error ?? "Couldn't recognize that item");
+      ws.setSourcingLabel(data.label);
+    } catch (err) {
+      setNormalizeError(err instanceof Error ? err.message : "Couldn't recognize that item");
+    } finally {
+      setNormalizing(false);
+    }
+  };
 
   // "+ Add" flow order: location (already chosen on the canvas before this panel ever opens —
   // see startAddFlow/placeAddLocation) → what is it → how to source it. This is that middle
@@ -46,22 +112,34 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
         <p className="text-sm font-medium">What are you adding?</p>
         <div className="rounded-2xl border border-[var(--border)] bg-white p-4 space-y-2.5">
           <Input type="text" value={itemDraft} onChange={(e) => setItemDraft(e.target.value)} autoFocus
-            onKeyDown={(e) => { if (e.key === "Enter" && itemDraft.trim()) ws.setSourcingLabel(itemDraft.trim()); }}
+            list="restyle-common-items" disabled={normalizing}
+            onKeyDown={(e) => { if (e.key === "Enter" && itemDraft.trim()) confirmItemDraft(); }}
             placeholder="e.g. floor lamp, side table, area rug" />
-          <Button variant="primary" className="w-full" disabled={!itemDraft.trim()}
-            onClick={() => ws.setSourcingLabel(itemDraft.trim())}>
-            Continue
+          <datalist id="restyle-common-items">
+            {COMMON_ITEMS.map((item) => <option key={item} value={item} />)}
+          </datalist>
+          {normalizeError && <StatusBanner variant="error">{normalizeError}</StatusBanner>}
+          <Button variant="primary" className="w-full" disabled={!itemDraft.trim() || normalizing}
+            onClick={confirmItemDraft}>
+            {normalizing ? <><Spinner size="sm" className="text-current" /> Checking…</> : "Continue"}
           </Button>
         </div>
       </div>
     );
   }
   const search = ws.searches[label.toLowerCase()] ?? { status: "idle" as const, scored: false, results: [] };
-  // The actual item being replaced, cropped from the original photo — so "Replacing the
+  // The actual item being replaced, cropped from the original photo — so "Editing the
   // ceiling fan" isn't just a label, you can see exactly which fixture it means.
   const matchedObject = sourcing.mode === "swap"
     ? ws.objects.find((o) => o.label.toLowerCase() === label.toLowerCase())
     : undefined;
+  // If this item has already been swapped, the header should show the NEW staged item, not the
+  // original one it replaced — otherwise "Editing the console" kept showing the old console
+  // forever, since the crop was always taken from the original photo at the detected box.
+  const stagedEdit = sourcing.stagedEditId ? ws.edits.find((e) => e.id === sourcing.stagedEditId) : null;
+  // An already-active custom instruction for this label, if any — reopening "Adjust it" shows
+  // (and lets you replace) what's currently staged rather than starting from a blank box.
+  const activeRefine = ws.edits.find((e) => e.kind === "refine" && e.active && e.target_label?.toLowerCase() === label.toLowerCase());
 
   const pickPending = (f: File | undefined) => {
     if (!f || !f.type.startsWith("image/")) return;
@@ -86,25 +164,106 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
     { value: "describe" as const, label: "Describe it" },
   ];
 
+  // "← Back" returns to the "Edit item" menu — shown whenever this session started there
+  // (`hasMenu`), i.e. an existing item was tapped. A fresh "+ Add" (hasMenu false) has no menu.
+  const canBackToMenu = sourcing.hasMenu;
+  const backToMenu = () => ws.setSourcingView("menu");
+  // "Remove it": for a detected item, stage a targeted remove (take the real object out of the
+  // room). For a pure "add" (no detected object — a piece the user added), removing means
+  // deleting the add edit itself, not staging a remove of something that was never there.
+  const removeIt = () => {
+    if (matchedObject) ws.stageRemove(label);
+    else if (sourcing.stagedEditId) ws.remove(sourcing.stagedEditId);
+    ws.closeSourcing();
+  };
+
+  const header = (
+    <div className="flex items-center gap-3">
+      {stagedEdit?.reference_url ? (
+        /* eslint-disable-next-line @next/next/no-img-element */
+        <img src={stagedEdit.reference_url} alt="" className="h-14 w-14 object-cover rounded-xl border border-[var(--border)] bg-[var(--muted)] shrink-0" />
+      ) : matchedObject && ws.restyle ? (
+        <CroppedThumb imageUrl={ws.restyle.original_url} box_2d={matchedObject.box_2d}
+          className="h-14 w-14 rounded-xl overflow-hidden border border-[var(--border)] bg-[var(--muted)] shrink-0" />
+      ) : stagedEdit?.placement ? (
+        // An "add" sourced by plain description (no reference photo) — once it's actually
+        // pictured, crop the real thing out of the current photo instead of showing nothing.
+        <CroppedThumb imageUrl={ws.displayUrl} box_2d={boxFromPlacement(stagedEdit.placement)}
+          className="h-14 w-14 rounded-xl overflow-hidden border border-[var(--border)] bg-[var(--muted)] shrink-0" />
+      ) : null}
+      <p className="text-sm font-medium capitalize">
+        {sourcing.view === "menu" ? `Editing the ${label}`
+          : sourcing.view === "adjust" ? `Adjusting the ${label}`
+          : sourcing.mode === "swap" ? `Replacing the ${label}`
+          : label ? `Adding ${label}` : "Adding a new piece"}
+      </p>
+    </div>
+  );
+
+  // ── Category menu — the entry point for any existing item (changed or not) ──
+  if (sourcing.view === "menu") {
+    return (
+      <div className="space-y-3">
+        {header}
+        <div className="space-y-2">
+          <MenuRow icon={Sparkles} title="Swap it" subtitle="Replace with a different product" tone="swap"
+            onClick={() => ws.setSourcingView("compose")} />
+          <MenuRow icon={ShoppingBag} title="Shop similar items" subtitle="See buyable alternatives to what's there now" tone="shop"
+            onClick={() => ws.setSourcingView("similar")} />
+          <MenuRow icon={Wand2} title="Adjust it" tone="adjust"
+            subtitle={activeRefine ? `"${activeRefine.instruction}"` : "Keep it, just reposition or reorient it"}
+            onClick={() => ws.setSourcingView("adjust")} />
+          <MenuRow icon={Eraser} title="Remove it" subtitle="Take it out of the room entirely" tone="remove"
+            onClick={removeIt} />
+        </div>
+      </div>
+    );
+  }
+
+  // ── Adjust it — a standalone destination now, not a tab ──
+  if (sourcing.view === "adjust") {
+    return (
+      <div className="space-y-3">
+        {header}
+        {canBackToMenu && (
+          <button type="button" onClick={backToMenu}
+            className="flex items-center gap-1 text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors">
+            <ChevronLeft className="h-3.5 w-3.5" /> Back
+          </button>
+        )}
+        {ws.error && <StatusBanner variant="error">{ws.error}</StatusBanner>}
+        <div className="rounded-2xl border border-[var(--border)] bg-white p-4 space-y-2.5">
+          <p className="text-[11px] text-[var(--muted-foreground)]">
+            Keep the {label} as-is, just change how it&apos;s placed or oriented — e.g. &quot;mount it on the wall&quot;, &quot;move it a bit to the left&quot;, &quot;turn it to face the window&quot;.
+          </p>
+          <Input type="text" value={refineText} onChange={(e) => setRefineText(e.target.value)} autoFocus
+            onKeyDown={(e) => { if (e.key === "Enter" && refineText.trim()) ws.stageRefine(label, refineText); }}
+            placeholder={`e.g. mount the ${label} on the wall`} />
+          <div className="flex gap-2">
+            <Button variant="primary" className="flex-1" disabled={!refineText.trim()}
+              onClick={() => ws.stageRefine(label, refineText)}>
+              {activeRefine ? "Update instruction" : "Apply instruction"}
+            </Button>
+            {activeRefine && (
+              <Button variant="outline" onClick={() => { ws.remove(activeRefine.id); setRefineText(""); }}>
+                Clear
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Compose — the link/photo/describe sourcing form (an empty "add" slot, or "Swap it" from
+  //     the menu above) ──
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-3">
-        {matchedObject && ws.restyle && (
-          <CroppedThumb imageUrl={ws.restyle.original_url} box_2d={matchedObject.box_2d}
-            className="h-14 w-14 rounded-xl overflow-hidden border border-[var(--border)] bg-[var(--muted)] shrink-0" />
-        )}
-        <p className="text-sm font-medium capitalize">
-          {sourcing.mode === "swap" ? `Replacing the ${label}` : label ? `Adding ${label}` : "Adding a new piece"}
-        </p>
-      </div>
-
-      {sourcing.mode === "swap" && matchedObject && (
-        // "Find similar" for the item AS IT IS — no need to swap it for something else first
-        // just to see what's out there. Searches off the original photo cropped to this
-        // detected object (see SimilarItemsPanel + runVisualSearchByUrl's box2d support).
-        <button type="button" onClick={() => ws.openSimilar(label, "swap", sourcing.stagedEditId)}
-          className="w-full flex items-center justify-center gap-1.5 rounded-full border border-[var(--border)] bg-white py-2 text-xs font-medium hover:border-[var(--foreground)] transition-colors">
-          <Search className="h-3.5 w-3.5" /> Find similar items
+      {header}
+      {canBackToMenu && (
+        <button type="button" onClick={backToMenu}
+          className="flex items-center gap-1 text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors">
+          <ChevronLeft className="h-3.5 w-3.5" /> Back
         </button>
       )}
 
@@ -229,13 +388,43 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
           </Button>
         </div>
       )}
-
-      {sourcing.mode === "swap" && matchedObject && (
-        <button type="button" onClick={() => ws.stageRemove(label)}
-          className="w-full flex items-center justify-center gap-1.5 text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] py-2 transition-colors">
-          <Eraser className="h-3.5 w-3.5" /> Remove this {label} from the room
-        </button>
-      )}
     </div>
+  );
+}
+
+// Each row's icon badge gets its own color + a slow-shifting gradient sheen (a "fun and techy"
+// touch) so the four actions read as visually distinct categories at a glance, not just a list
+// of identical gray squares — "Remove it" being red was already the one exception; now all four
+// are color-coded the same way.
+const MENU_ROW_TONES = {
+  swap: "from-violet-500 to-fuchsia-500",
+  shop: "from-emerald-500 to-teal-500",
+  adjust: "from-amber-400 to-orange-500",
+  remove: "from-red-500 to-rose-600",
+} as const;
+
+function MenuRow({
+  icon: Icon, title, subtitle, onClick, tone,
+}: {
+  icon: typeof Replace;
+  title: string;
+  subtitle: string;
+  onClick: () => void;
+  tone: keyof typeof MENU_ROW_TONES;
+}) {
+  return (
+    <button type="button" onClick={onClick}
+      className="w-full flex items-center gap-3 rounded-2xl border border-[var(--border)] bg-white p-3 text-left hover:border-[var(--foreground)] transition-colors">
+      <span
+        className={`h-9 w-9 rounded-xl shrink-0 flex items-center justify-center text-white bg-gradient-to-br ${MENU_ROW_TONES[tone]} bg-[length:200%_200%] animate-[icon-gradient-shift_4s_ease-in-out_infinite]`}
+      >
+        <Icon className="h-4 w-4" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-medium">{title}</span>
+        <span className="block text-[11px] text-[var(--muted-foreground)] truncate capitalize">{subtitle}</span>
+      </span>
+      <ChevronRight className="h-4 w-4 text-[var(--muted-foreground)] shrink-0" />
+    </button>
   );
 }

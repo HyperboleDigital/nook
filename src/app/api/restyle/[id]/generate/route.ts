@@ -3,6 +3,7 @@ import { NextResponse, after } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { recompose } from "@/lib/restyle-render";
 import { searchProductByImageUrl } from "@/lib/restyle-search";
+import { locateItemInRoom } from "@/lib/gemini";
 import type { RestyleEdit } from "@/types";
 
 // Render (Gemini compose) + the deferred inspo product search both run in after() below, so
@@ -56,15 +57,44 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   after(async () => {
     try {
-      await recompose(restyle, userId);
+      const renderedUrl = await recompose(restyle, userId);
+
+      const { data: activeEdits } = await supabaseAdmin
+        .from("restyle_edits").select("*").eq("restyle_id", id).eq("active", true);
+
+      // An "add" edit the user never manually pinned (skipped the location step, or Generate
+      // ran before they got to it) still gets placed SOMEWHERE by Nano Banana — locate it in
+      // the fresh render so it gets a real canvas hotspot too, same as a swap, instead of only
+      // being reachable via "Choose a spot" in the changes rail forever. Best-effort: a miss
+      // just leaves it as it was (still reachable via "Choose a spot"), no error surfaced.
+      const unpinnedAdds = ((activeEdits ?? []) as RestyleEdit[]).filter(
+        (e) => e.kind === "add" && e.target_label && !e.placement,
+      );
+      if (unpinnedAdds.length > 0) {
+        const imgRes = await fetch(renderedUrl);
+        const imageBase64 = Buffer.from(await imgRes.arrayBuffer()).toString("base64");
+        const mimeType = imgRes.headers.get("content-type") || "image/png";
+        for (const e of unpinnedAdds) {
+          const box = await locateItemInRoom({ imageBase64, mimeType, label: e.target_label! });
+          if (!box) continue;
+          const [ymin, xmin, ymax, xmax] = box;
+          // Store the box's actual half-extents (w/h), not just its center — a generic small
+          // fixed-size box around the center point badly undersizes a tall/wide item like a
+          // floor plant or a rug, making the hotspot look like it's floating near the item
+          // rather than around it.
+          const placement = {
+            x: Math.round((xmin + xmax) / 2), y: Math.round((ymin + ymax) / 2), note: null,
+            w: Math.round((xmax - xmin) / 2), h: Math.round((ymax - ymin) / 2),
+          };
+          await supabaseAdmin.from("restyle_edits").update({ placement }).eq("id", e.id);
+        }
+      }
 
       // Deferred product search: now that the room is actually generated, look up buyable
       // options for any inspo-only edit (a reference photo, no buy_url yet) that ended up
       // active in this render — scoped to what actually made it in, not everything ever
       // staged (see the CLAUDE.md "deferred search" product decision). Runs fully server-side
       // (fast + finish both awaited here) so it survives the client disconnecting.
-      const { data: activeEdits } = await supabaseAdmin
-        .from("restyle_edits").select("*").eq("restyle_id", id).eq("active", true);
       const inspo = ((activeEdits ?? []) as RestyleEdit[]).filter(
         (e) => e.reference_url && !e.buy_url && e.target_label,
       );

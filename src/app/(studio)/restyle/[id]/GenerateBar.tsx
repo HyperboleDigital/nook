@@ -29,14 +29,18 @@ export default function GenerateBar({ ws, variant = "sticky" }: { ws: RestyleWor
     }
   };
 
+  // Turn every change off and re-render — with no active edits, recompose returns the original
+  // (a cheap no-Gemini short-circuit), so `current_url` becomes the bare room. There's one
+  // image, so this actually regenerates rather than just previewing the original.
   const startFromOriginal = async () => {
     setMenuOpen(false);
     if (!ws.restyle) return;
     await ws.deactivateAll();
-    ws.setPreviewUrl(ws.restyle.original_url);
+    await ws.generate();
   };
 
   const confirming = ws.confirmingCount > 0;
+  const upToDate = !ws.generating && !confirming && ws.pendingCount === 0 && ws.renders.length > 0;
 
   return (
     <div className={cn(
@@ -71,7 +75,12 @@ export default function GenerateBar({ ws, variant = "sticky" }: { ws: RestyleWor
             // product lookup (Unwrangle/SerpApi) left an item optimistically staged for a while —
             // spell out why Generate is greyed out instead of just greying it out silently.
             ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Confirming {ws.confirmingCount} item{ws.confirmingCount === 1 ? "" : "s"}…</>
-            : <>Generate{ws.activeEdits.length > 0 && <span className="ml-1 rounded-full bg-white/20 text-[10px] font-bold px-1.5 py-0.5">{ws.activeEdits.length}</span>}</>}
+            : upToDate
+            ? <>Looking good as-is!</>
+            // pendingCount (not activeEdits.length) — the diff between what's active and what's
+            // actually in the current render, so this resets to 0 (and hides) after a successful
+            // generate instead of staying at "3" forever just because 3 edits are still active.
+            : <>Generate{ws.pendingCount > 0 && <span className="ml-1 rounded-full bg-white/20 text-[10px] font-bold px-1.5 py-0.5">{ws.pendingCount}</span>}</>}
         </Button>
       </div>
       {confirming && (

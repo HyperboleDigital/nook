@@ -15,6 +15,40 @@ export function closestAspect(w: number, h: number) {
   return SUPPORTED.reduce((best, s) => (Math.abs(s[1] - r) < Math.abs(best[1] - r) ? s : best), SUPPORTED[0])[0];
 }
 
+/**
+ * After an edit-state change (toggle/delete/stage) that does NOT itself trigger a render, check
+ * whether the resulting active-edit combination has already been rendered before — if so, adopt
+ * that image as `current_url` immediately for free, instead of leaving the user to press
+ * Generate for a combination that's already sitting in the `restyle_renders` cache (the exact
+ * scenario a toggle-off-then-back-on hits: same signature as an earlier render). The empty active
+ * set is always "cached" — it's just the original photo, no render row needed. Returns the URL
+ * `current_url` should now be (which may be unchanged, meaning "still pending — nothing to adopt
+ * yet, the combination genuinely hasn't been rendered before").
+ */
+export async function adoptCachedRenderIfKnown(restyleId: string): Promise<string> {
+  const { data: restyle } = await supabaseAdmin
+    .from("restyles").select("original_url, current_url").eq("id", restyleId).single();
+  if (!restyle) throw new Error("Not found");
+
+  const { data: activeEdits } = await supabaseAdmin
+    .from("restyle_edits").select("id").eq("restyle_id", restyleId).eq("active", true).order("position", { ascending: true });
+  const signature = (activeEdits ?? []).map((e) => e.id).join(",");
+
+  let targetUrl = restyle.current_url;
+  if (!signature) {
+    targetUrl = restyle.original_url;
+  } else {
+    const { data: cached } = await supabaseAdmin
+      .from("restyle_renders").select("image_url").eq("restyle_id", restyleId).eq("signature", signature).maybeSingle();
+    if (cached?.image_url) targetUrl = cached.image_url;
+  }
+
+  if (targetUrl !== restyle.current_url) {
+    await supabaseAdmin.from("restyles").update({ current_url: targetUrl, updated_at: new Date().toISOString() }).eq("id", restyleId);
+  }
+  return targetUrl;
+}
+
 export async function uploadImage(userId: string, buf: Buffer, contentType: string) {
   const ext = contentType.includes("jpeg") ? "jpg" : "png";
   // put() sends the body via fetch; sharp's output buffer can be SharedArrayBuffer-
@@ -48,9 +82,14 @@ interface RestyleRow {
   detected_objects: DetectedObject[] | null;
 }
 
-// Keep only the newest MAX_RENDERS cached renders per restyle — the cache exists for
-// instant toggle-back, not as a permanent archive, and each row holds a Blob image.
-const MAX_RENDERS = 8;
+// Keep only the newest MAX_RENDERS cached renders per restyle — the cache exists for instant
+// toggle-back, not as a permanent archive, and each row holds a Blob image. Was 8, which an
+// active editing session (several swaps/removes/adds, each toggled on and off a few times)
+// blows through easily — evicting the exact combination a toggle-back needed, silently forcing
+// a real Gemini regenerate for something that had already been rendered. Blob storage for a
+// handful of extra PNGs is far cheaper than a surprise regenerate, so this is deliberately
+// generous now; still bounded so a single room can't grow the cache unboundedly forever.
+const MAX_RENDERS = 40;
 
 /** Prune renders beyond the cap. Never deletes the row backing current_url; blob deletion
  *  is best-effort and never fails the render that triggered it. */

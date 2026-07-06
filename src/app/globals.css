@@ -92,6 +92,14 @@ h1, h2, h3, h4, h5, h6 {
   to   { opacity: 1; transform: translateY(0); }
 }
 
+/* Slow-shifting gradient sheen on the "Edit item" menu row icon badges (SourcePanel) — a subtle
+   "fun and techy" touch that also reinforces each row's color-coded tone. */
+@keyframes icon-gradient-shift {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     transition: none !important;

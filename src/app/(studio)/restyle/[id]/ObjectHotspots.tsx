@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment } from "react";
-import { Check, Loader2, ShoppingBag } from "lucide-react";
+import { Check, Loader2, ShoppingBag, Sparkles } from "lucide-react";
 import type { CanvasHotspot } from "./useRestyleWorkspace";
 import { cn } from "@/lib/utils";
 
@@ -76,7 +76,9 @@ function declutter(points: { x: number; y: number }[]): { x: number; y: number }
 
 /** The small at-rest marker per state, so the canvas shows WHERE items are without 14 always-on
  *  boxes cluttering it. The full-item highlight (below) is the forgiving tap target + hover cue. */
-function StateMarker({ state, delay, isActive }: { state: CanvasHotspot["state"]; delay: number; isActive: boolean }) {
+function StateMarker({
+  state, delay, isActive, shoppable,
+}: { state: CanvasHotspot["state"]; delay: number; isActive: boolean; shoppable: boolean }) {
   if (state === "confirming") {
     return (
       <span className="relative h-6 w-6 rounded-full bg-[var(--muted-foreground)] border-2 border-white shadow-[var(--shadow-soft)] flex items-center justify-center">
@@ -92,9 +94,15 @@ function StateMarker({ state, delay, isActive }: { state: CanvasHotspot["state"]
     );
   }
   if (state === "placed") {
+    // A shopping bag implies "this is a real, buyable product" — true for a genuine swap/pick
+    // with a buy_url, but NOT for an add/swap sourced from a plain description or inspo photo
+    // with nothing shoppable resolved yet. Those get a "new" sparkle instead, so the marker
+    // never claims something's purchasable when it isn't.
     return (
       <span className="relative h-6 w-6 rounded-full bg-[var(--accent)] border-2 border-white shadow-[var(--shadow-soft)] flex items-center justify-center">
-        <ShoppingBag className="h-3.5 w-3.5 text-white" strokeWidth={2.5} />
+        {shoppable
+          ? <ShoppingBag className="h-3.5 w-3.5 text-white" strokeWidth={2.5} />
+          : <Sparkles className="h-3.5 w-3.5 text-white" strokeWidth={2.5} />}
       </span>
     );
   }
@@ -141,7 +149,7 @@ export default function ObjectHotspots({
         const ariaLabel =
           h.state === "confirming" ? `${h.label} (confirming…)`
           : h.state === "queued" ? `${h.label} (queued for a change)`
-          : h.state === "placed" ? `${h.label} (shop this)`
+          : h.state === "placed" ? `${h.label} (${h.edit?.buy_url ? "shop this" : "added"})`
           : h.label;
         return (
           <Fragment key={`${h.label}-${i}`}>
@@ -173,7 +181,7 @@ export default function ObjectHotspots({
               className="absolute pointer-events-none -translate-x-1/2 -translate-y-1/2 flex items-center justify-center"
               style={{ left: `${m.x}%`, top: `${m.y}%` }}
             >
-              <StateMarker state={h.state} delay={i * 150} isActive={isActive} />
+              <StateMarker state={h.state} delay={i * 150} isActive={isActive} shoppable={!!h.edit?.buy_url} />
             </span>
           </Fragment>
         );

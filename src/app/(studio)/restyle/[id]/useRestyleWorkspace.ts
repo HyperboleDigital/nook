@@ -15,10 +15,19 @@ export type SearchState = {
 export type Sourcing = {
   label: string;           // "" until the AI identifies an unlabeled "add" item
   mode: "swap" | "add";
-  // "similar" = a clean product-card list for an already-placed item (find an alternative);
-  // "compose" = the link/photo/describe sourcing form for an empty slot.
-  view: "similar" | "compose";
+  // "menu" = the category picker for an EXISTING detected item ("Edit the sofa" — Swap it /
+  //   Find similar items / Adjust it / Remove it) — the entry point whenever mode is "swap".
+  // "compose" = the link/photo/describe sourcing form — for an empty "add" slot from scratch
+  //   (no menu, sourcing IS the only action), or reached from the menu's "Swap it".
+  // "adjust" = the free-text "keep it, just reposition/reorient it" form, reached from the menu.
+  // "similar" = a clean product-card list for an already-placed item (find an alternative) —
+  //   reached from the menu OR directly from ShopLook/QueuedChanges cards.
+  view: "menu" | "compose" | "adjust" | "similar";
   stagedEditId: string | null;
+  // Did this session start at the category menu ("Edit the X")? True when an existing item was
+  // tapped (openSourcing); false for a fresh "+ Add" or a direct-from-rail "Find similar", where
+  // there is no menu to go "back" to. Drives the "← Back" affordance in SourcePanel/SimilarItems.
+  hasMenu: boolean;
   lastStaged?: { title: string; retailer: string };
 } | null;
 
@@ -31,6 +40,11 @@ export type CanvasHotspot = {
   edit: RestyleEdit | null;
 };
 
+// One card in the unified changes rail (see `railEdits`). Status is derived from
+// (active, inRender) — see the derivation below for exactly what each means.
+export type RailStatus = "in-room" | "pending" | "turning-off" | "off";
+export type RailItem = { edit: RestyleEdit; status: RailStatus };
+
 // A fetch used to hang for the full length of a slow/failing Unwrangle or SerpApi call (up to
 // the route's own maxDuration) with the optimistic edit sitting there the whole time and NO
 // visible feedback once the sourcing panel had already closed — from the user's seat, Generate
@@ -40,6 +54,20 @@ const STAGE_TIMEOUT_MS = 45_000;
 
 const EMPTY_SEARCH: SearchState = { status: "idle", scored: false, results: [] };
 const OPTIMISTIC_PREFIX = "optimistic-";
+
+// A box_2d around an "add" edit's placement point — `w`/`h` (half-extents) come from an
+// auto-located item's ACTUAL detected size (see the generate route's locateItemInRoom step); a
+// manual tap-to-place pin has neither, so falls back to a generic small box around the point.
+// Exported so ChangesPanel/SourcePanel can crop the same region out of the current photo for a
+// preview thumbnail, matching what the canvas hotspot itself covers.
+export function boxFromPlacement(placement: NonNullable<RestyleEdit["placement"]>): DetectedObject["box_2d"] {
+  const halfW = placement.w ?? 40;
+  const halfH = placement.h ?? 40;
+  return [
+    Math.max(0, placement.y - halfH), Math.max(0, placement.x - halfW),
+    Math.min(1000, placement.y + halfH), Math.min(1000, placement.x + halfW),
+  ];
+}
 
 // Walls, windows, a bare ceiling, and a bare floor are architecture, not furniture/decor
 // there's a product to swap them for — filter them out of hotspots and the chip row entirely.
@@ -78,9 +106,6 @@ export function useRestyleWorkspace(id: string) {
   const [searches, setSearches] = useState<Record<string, SearchState>>({});
   const [pickingKey, setPickingKey] = useState<string | null>(null);
   const [stagingLink, setStagingLink] = useState(false);
-
-  // History preview
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   // Tap-to-place pin. `editId: string` = the classic post-hoc offer, shown right after an "add"
   // edit stages successfully (used when the user skipped the upfront location step below).
@@ -213,24 +238,41 @@ export function useRestyleWorkspace(id: string) {
     } catch { /* best effort */ }
   };
 
-  const updateEdits = (edits: RestyleEdit[]) => setRestyle((prev) => prev ? { ...prev, edits } : prev);
+  // `currentUrl` is set whenever the server found (or the edit-state change resulted in) an
+  // ALREADY-cached render for the exact resulting active-edit combination — see the edits API's
+  // `adoptCachedRenderIfKnown`. Applying it here means a toggle/delete/stage that happens to land
+  // back on a combination we've rendered before updates the photo INSTANTLY, no Generate click
+  // needed; a genuinely new combination just leaves `current_url` untouched (the status chips /
+  // `pendingCount` already tell the user they need to hit Generate for that one).
+  const updateEdits = (edits: RestyleEdit[], currentUrl?: string) =>
+    setRestyle((prev) => prev ? { ...prev, edits, ...(currentUrl ? { current_url: currentUrl } : {}) } : prev);
 
   // ── Sourcing panel open/close ──
-  // Compose: the link/photo/describe form, for sourcing an empty slot from scratch.
-  const openSourcing = (label: string, mode: "swap" | "add") => setSourcing({ label, mode, view: "compose", stagedEditId: null });
-  // Similar: a clean product-card list for a slot that already has something placed —
-  // matches the "Show similar" flow from a hotspot/chip/shop-list item, not a blank compose.
+  // Tapping ANY existing item on the canvas (whether it's been changed yet or not) opens the
+  // category menu first ("Edit the sofa" — Swap it / Find similar items / Adjust it / Remove
+  // it); the individual actions are destinations reached FROM the menu (see setSourcingView).
+  // `stagedEditId` is the edit currently on that item, if any, so Swap/Similar supersede it
+  // rather than stack a second one. A fresh "+ Add" does NOT come through here (it uses
+  // placeAddLocation/skipAddLocation → view "compose", hasMenu false) since a not-yet-placed
+  // item has nothing to categorize — sourcing is the only thing you can do to it.
+  const openSourcing = (label: string, mode: "swap" | "add", stagedEditId: string | null = null) =>
+    setSourcing({ label, mode, view: "menu", stagedEditId, hasMenu: true });
+  // Similar: a clean product-card list for an item that already has something placed — reached
+  // straight from a ShopLook/QueuedChanges card (hasMenu false; the panel's X closes it). The
+  // menu's own "Find similar" row uses setSourcingView("similar") instead, keeping hasMenu true.
   const openSimilar = (label: string, mode: "swap" | "add", stagedEditId: string | null) =>
-    setSourcing({ label, mode, view: "similar", stagedEditId });
+    setSourcing({ label, mode, view: "similar", stagedEditId, hasMenu: false });
+  // Navigate within an already-open sourcing session (menu ↔ compose/adjust) without losing
+  // label/mode/stagedEditId — used for the "Swap it"/"Adjust it" menu rows and their Back links.
+  const setSourcingView = (view: NonNullable<Sourcing>["view"]) => setSourcing((s) => (s ? { ...s, view } : s));
   const closeSourcing = () => { setSourcing(null); setPendingAddPlacement(null); };
 
-  // Start the "+ Add" flow: location FIRST (a pin on the original photo), then what it is, then
-  // how to source it — rather than sourcing first and only being asked where it goes afterward.
-  // `pinRequest.editId: null` signals "no edit exists yet" to RestyleCanvas/PinPlacementLayer.
+  // Start the "+ Add" flow: location FIRST (a pin on whatever's on screen — the CURRENT render,
+  // not the bare original), then what it is, then how to source it. `pinRequest.editId: null`
+  // signals "no edit exists yet" to RestyleCanvas/PinPlacementLayer.
   const startAddFlow = () => {
     setSourcing(null);
     setPendingAddPlacement(null);
-    if (restyle) setPreviewUrl(restyle.original_url);
     setPinRequest({ editId: null, label: "" });
   };
   // Location chosen — remember it locally (nothing to attach it TO yet) and move on to "what is
@@ -238,27 +280,25 @@ export function useRestyleWorkspace(id: string) {
   const placeAddLocation = (x: number, y: number, note?: string | null) => {
     setPendingAddPlacement({ x, y, note: note ?? null });
     setPinRequest(null);
-    setSourcing({ label: "", mode: "add", view: "compose", stagedEditId: null });
+    setSourcing({ label: "", mode: "add", view: "compose", stagedEditId: null, hasMenu: false });
   };
   // Location skipped — proceed anyway; the classic post-hoc pin offer (requestPin) still fires
   // after staging in case they change their mind.
   const skipAddLocation = () => {
     setPendingAddPlacement(null);
     setPinRequest(null);
-    setSourcing({ label: "", mode: "add", view: "compose", stagedEditId: null });
+    setSourcing({ label: "", mode: "add", view: "compose", stagedEditId: null, hasMenu: false });
   };
   // The "what is it" step confirms into sourcing.label so the existing staging calls (which all
   // read the label from here) pick it up automatically.
   const setSourcingLabel = (label: string) => setSourcing((s) => (s ? { ...s, label } : s));
 
-  // Offer to pin an add edit's location — forces the original photo into view (pins are
-  // captured in the same 0–1000 coordinate space as detected_objects) and closes any open
-  // sourcing panel so the pin layer has the canvas to itself. This is the FALLBACK path now —
-  // used only when the upfront location step (above) was skipped, so the user still gets one
-  // more chance right after the item actually stages.
+  // Offer to pin an add edit's location — closes any open sourcing panel so the pin layer has
+  // the canvas to itself (pins are captured over the current image, in the same 0–1000 space as
+  // detected_objects). This is the FALLBACK path now — used only when the upfront location step
+  // was skipped, so the user still gets one more chance right after the item actually stages.
   const requestPin = (editId: string, label: string) => {
     setSourcing(null);
-    if (restyle) setPreviewUrl(restyle.original_url);
     setPinRequest({ editId, label });
   };
   const cancelPin = () => setPinRequest(null);
@@ -274,7 +314,7 @@ export function useRestyleWorkspace(id: string) {
         body: JSON.stringify({ editId, placement }),
       });
       const data = await r.json();
-      if (r.ok) updateEdits(data.edits);
+      if (r.ok) updateEdits(data.edits, data.current_url);
     } catch { /* best effort — optimistic is already set */ }
   };
 
@@ -300,7 +340,7 @@ export function useRestyleWorkspace(id: string) {
       const r = await fetch(`/api/restyle/${id}/edits`, { method: "POST", body: fd });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error ?? "Failed");
-      updateEdits(data.edits);
+      updateEdits(data.edits, data.current_url);
       // The route always appends the new row last (position = the old edit count) — the newly
       // inserted edit is reliably the final element of the ordered list it returns.
       const created = (data.edits as RestyleEdit[]).at(-1);
@@ -383,7 +423,7 @@ export function useRestyleWorkspace(id: string) {
       });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error ?? "Couldn't fetch that product");
-      updateEdits(data.edits);
+      updateEdits(data.edits, data.current_url);
       setSourcing((s) => s && s.label === label
         ? { ...s, stagedEditId: data.added.id, lastStaged: { title: data.added.target_label, retailer: data.added.retailer } }
         : s);
@@ -425,7 +465,6 @@ export function useRestyleWorkspace(id: string) {
       buy_url: null, product_title: null, product_price: null, placement: null,
     };
     updateEdits([...prevEdits.filter((e) => e.id !== replaceEditId), optimisticEdit]);
-    setSourcing(null); // the item already shows as queued — no need to keep the panel open
 
     try {
       const ext = file.type.split("/")[1] || "jpg";
@@ -441,7 +480,14 @@ export function useRestyleWorkspace(id: string) {
       });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error ?? "Couldn't add that photo");
-      updateEdits(data.edits);
+      updateEdits(data.edits, data.current_url);
+      // Keep the panel open with a success banner, same as the link/pick paths — a photo upload
+      // used to close the panel silently, leaving no confirmation of what just happened. Empty
+      // `retailer` (not a real store) routes SourcePanel's banner to the plain "Swapping/Adding
+      // X" copy rather than the "switched from a retailer" phrasing meant for a real pick.
+      setSourcing((s) => s && s.label === label
+        ? { ...s, stagedEditId: data.added.id, lastStaged: { title: data.added.target_label, retailer: "" } }
+        : s);
       if (data.added.kind === "add") finalizeAddPlacement(data.added.id, data.added.target_label ?? label);
     } catch (err) {
       updateEdits(prevEdits); // roll back the optimistic edit
@@ -479,7 +525,7 @@ export function useRestyleWorkspace(id: string) {
       });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error ?? "Couldn't fetch that product");
-      updateEdits(data.edits);
+      updateEdits(data.edits, data.current_url);
       setSourcing((s) => s && s.label === label
         ? { ...s, stagedEditId: data.added.id, lastStaged: { title: data.added.target_label, retailer: data.added.retailer } }
         : s);
@@ -499,7 +545,7 @@ export function useRestyleWorkspace(id: string) {
   // server-side edit-state change (toggle one edit, or empty the room) atomically before
   // rendering, so those flows never depend on a client-side loop surviving to the end.
   const generate = async (body?: { toggle?: { editId: string; active: boolean }; emptyRoom?: boolean }) => {
-    setError(null); setPreviewUrl(null); setPinRequest(null);
+    setError(null); setPinRequest(null);
     try {
       const r = await fetch(`/api/restyle/${id}/generate`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body ?? {}),
@@ -521,24 +567,32 @@ export function useRestyleWorkspace(id: string) {
   // edit" atomically before rendering (see the generate route's `emptyRoom` handling).
   const emptyRoom = () => generate({ emptyRoom: true });
 
+  // A batch on/off switch — flips the flag (optimistically, for instant card/hotspot feedback)
+  // and PATCHes it. It does NOT trigger a Gemini render — but if the resulting active-edit
+  // combination has ALREADY been rendered before (e.g. toggling something off then back on
+  // lands back on a signature we've seen), the server adopts that cached image as `current_url`
+  // instantly (see `adoptCachedRenderIfKnown`), so the photo updates for free with no Generate
+  // click needed. A genuinely new combination just leaves `current_url` untouched — the status
+  // chips / `pendingCount` already tell the user they need to hit Generate for that one. This
+  // replaced an earlier `toggleAndRegenerate` that fired a full render per flip regardless of
+  // whether one was actually needed, and bounced the card between two separate rail sections.
+  // Deliberately NOT optimistic on `edits`/`active` (unlike almost everything else in this
+  // hook) — an immediate local flip would make `pendingCount`/status chips briefly compute
+  // against the guessed new active set BEFORE the server's cache-adopt check runs, flashing a
+  // "Generate 1" badge that vanishes a moment later once a cache hit resolves. Applying `edits`
+  // and `current_url` together, only once the response lands, means the badge/chips jump
+  // straight from correct-before to correct-after with no wrong-guess frame in between. The
+  // switch itself still feels instant — `ChangesPanel`'s `SwitchRow` keeps its own local
+  // override for that, independent of this round trip.
   const toggle = async (editId: string, active: boolean) => {
-    updateEdits((restyle?.edits ?? []).map((e) => (e.id === editId ? { ...e, active } : e)));
     try {
-      await fetch(`/api/restyle/${id}/edits`, {
+      const r = await fetch(`/api/restyle/${id}/edits`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ editId, active }),
       });
-    } catch { /* best effort — optimistic is already set */ }
-  };
-
-  // A simple on/off switch for a single item already in the picture: flip it (optimistically,
-  // for instant hotspot/list feedback) and regenerate right away, with the toggle itself
-  // applied server-side as part of the same generate call — a combination already seen before
-  // is an instant cache hit (restyle_renders' signature cache), a new one pays the real render
-  // cost, surfaced via the ProgressOverlay.
-  const toggleAndRegenerate = async (editId: string, active: boolean) => {
-    updateEdits((restyle?.edits ?? []).map((e) => (e.id === editId ? { ...e, active } : e)));
-    await generate({ toggle: { editId, active } });
+      const data = await r.json();
+      if (r.ok) updateEdits(data.edits, data.current_url);
+    } catch { /* best effort */ }
   };
 
   // Batch-deactivate every active edit in one call (used by "Start from original" — GenerateBar
@@ -555,7 +609,7 @@ export function useRestyleWorkspace(id: string) {
         method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ states }),
       });
       const data = await r.json();
-      if (r.ok) updateEdits(data.edits);
+      if (r.ok) updateEdits(data.edits, data.current_url);
     } catch { /* best effort — optimistic is already set */ }
   };
 
@@ -569,10 +623,29 @@ export function useRestyleWorkspace(id: string) {
       const r = await fetch(`/api/restyle/${id}/edits`, { method: "POST", body: fd });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error ?? "Couldn't remove that item");
-      updateEdits(data.edits);
+      updateEdits(data.edits, data.current_url);
       setSourcing(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't remove that item");
+    }
+  };
+
+  // A free-text adjustment to an item ALREADY in the room — "mount it on the wall", "move it a
+  // bit to the left" — rather than sourcing a replacement product. Server-side dedupe (see
+  // edits/route.ts) replaces any previous refine instruction for the same label instead of
+  // stacking them, so a second "move it right" cleanly supersedes an earlier "move it left".
+  const stageRefine = async (label: string, instruction: string) => {
+    if (!instruction.trim()) return;
+    setError(null);
+    try {
+      const fd = new FormData();
+      fd.append("kind", "refine"); fd.append("targetLabel", label); fd.append("instruction", instruction.trim());
+      const r = await fetch(`/api/restyle/${id}/edits`, { method: "POST", body: fd });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error ?? "Couldn't apply that instruction");
+      updateEdits(data.edits, data.current_url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't apply that instruction");
     }
   };
 
@@ -582,7 +655,7 @@ export function useRestyleWorkspace(id: string) {
     try {
       const r = await fetch(`/api/restyle/${id}/edits?editId=${editId}`, { method: "DELETE" });
       const data = await r.json();
-      if (r.ok) updateEdits(data.edits);
+      if (r.ok) updateEdits(data.edits, data.current_url);
     } catch { /* best effort */ }
     finally { setBusy(false); }
   };
@@ -610,7 +683,8 @@ export function useRestyleWorkspace(id: string) {
   };
 
   const downloadImage = async () => {
-    const url = previewUrl ?? restyle?.current_url;
+    // Always the active generation — there's one image, no version navigation to reconcile.
+    const url = restyle?.current_url;
     if (!url) return;
     try {
       const blob = await (await fetch(url)).blob();
@@ -625,32 +699,73 @@ export function useRestyleWorkspace(id: string) {
   const loading = !restyle || objects === null;
   const edits = restyle?.edits ?? [];
   const activeEdits = edits.filter((e) => e.active);
-  const stagedItems = activeEdits.filter((e) => e.kind === "item" || e.kind === "add" || (e.kind === "remove" && e.target_label));
-  const displayUrl = previewUrl ?? restyle?.current_url ?? "";
+  const stagedItems = activeEdits.filter((e) =>
+    e.kind === "item" || e.kind === "add" || (e.kind === "remove" && e.target_label) || (e.kind === "refine" && e.target_label),
+  );
+  // ONE image: always the current generation. There's no version navigation / "viewing the
+  // original" state anymore — the original + past renders are pure backend machinery (recompose
+  // composites from the original; `restyle_renders` caches per-signature for instant toggle).
+  // `viewingOriginal` is therefore true only in the pristine pre-first-generate state, where
+  // `current_url` literally IS `original_url` (nothing has been rendered yet) — which still
+  // correctly gates the "never show placed/priced UI before anything's generated" rule.
+  const displayUrl = restyle?.current_url ?? "";
   const viewingOriginal = !!restyle && displayUrl === restyle.original_url;
-  const showSlider = !previewUrl && !!restyle && !viewingOriginal;
   const confirmingCount = activeEdits.filter((e) => e.id.startsWith(OPTIMISTIC_PREFIX)).length;
   const hasOptimistic = confirmingCount > 0;
-  const canGenerate = activeEdits.length > 0 && !hasOptimistic;
   const atMaxCustom = (restyle?.custom_items?.length ?? 0) >= 5;
 
-  // "Shop this look" reflects only the product(s) in the image currently on screen.
+  // What's actually in the image currently on screen — the render's signature IS the set of
+  // active-edit ids it was composed from (see restyle-render.ts), so this doubles as both "is
+  // this edit visible right now" (below) and the input to the pending-changes diff.
   const displayedRender = renders.find((r) => r.image_url === displayUrl);
   const shownProductIds: Set<string> | null =
     viewingOriginal ? new Set()
     : displayedRender ? new Set(displayedRender.signature.split(","))
     : null;
-  const productEdits = edits.filter((e) => e.buy_url && (shownProductIds ? shownProductIds.has(e.id) : e.active));
-  // Inspo-only items in the current render — staged from a photo, no product link yet.
-  // "Shop this look" looks up buyable options for these once a render exists.
-  const inspoEdits = edits.filter((e) =>
-    e.reference_url && !e.buy_url && e.target_label && (shownProductIds ? shownProductIds.has(e.id) : e.active),
+  const inShown = (e: RestyleEdit) => (shownProductIds ? shownProductIds.has(e.id) : e.active);
+
+  // How many changes wouldn't be reflected if the user looked at the current image right now —
+  // the symmetric diff between what's active and what's actually rendered. Replaces the old
+  // "just count active edits" badge, which stayed nonzero forever once anything was staged
+  // (edits don't deactivate themselves after a successful render).
+  const pendingCount = (() => {
+    if (shownProductIds === null) return 0;
+    const activeIds = new Set(activeEdits.filter((e) => !e.id.startsWith(OPTIMISTIC_PREFIX)).map((e) => e.id));
+    let diff = 0;
+    for (const eid of activeIds) if (!shownProductIds.has(eid)) diff++;
+    for (const eid of shownProductIds) if (!activeIds.has(eid)) diff++;
+    return diff;
+  })();
+  const canGenerate = pendingCount > 0 && !hasOptimistic;
+
+  // The unified changes rail (ChangesPanel): one persistent card per relevant edit, whether it's
+  // currently in the room, staged but not yet generated, switched off but still in the room (a
+  // pending regenerate will remove it), or switched off and already out of the room. Toggling in
+  // ChangesPanel only ever flips `active` (see `toggle`) — it never moves an edit between lists,
+  // so a card never jumps around; only its status/switch changes until the next Generate.
+  const RAIL_KINDS = new Set(["item", "add", "refine", "remove"]);
+  const activeRelevant = activeEdits.filter((e) => RAIL_KINDS.has(e.kind) && e.target_label);
+  const labelsWithActive = new Set(
+    activeRelevant.map((e) => e.target_label!.toLowerCase()),
   );
-  // Targeted removes actually in the current render — shown as a "Removed" section with a
-  // Restore action rather than a hotspot (an empty floor isn't something to tap).
-  const removedEdits = edits.filter((e) =>
-    e.kind === "remove" && e.target_label && (shownProductIds ? shownProductIds.has(e.id) : e.active),
-  );
+  // Edits switched off whose label has no active edit — i.e. genuinely toggled off by the user,
+  // not superseded by a newer active change on the same label (couch A→B leaves A inactive, but
+  // that's history, not something to re-offer). Deduped to the most recent per label.
+  const offByLabel = new Map<string, RestyleEdit>();
+  for (const e of edits) {
+    if (e.active || !RAIL_KINDS.has(e.kind) || !e.target_label) continue;
+    const key = e.target_label.toLowerCase();
+    if (labelsWithActive.has(key)) continue;
+    const cur = offByLabel.get(key);
+    if (!cur || e.position > cur.position) offByLabel.set(key, e);
+  }
+  const railEdits: RailItem[] = [
+    ...activeRelevant.map((e) => ({ edit: e, status: (inShown(e) ? "in-room" : "pending") as RailStatus })),
+    ...[...offByLabel.values()].map((e) => ({ edit: e, status: (inShown(e) ? "turning-off" : "off") as RailStatus })),
+  ];
+
+  // In-room, buyable product edits — feeds the canvas's floating shop-summary pill.
+  const productEdits = railEdits.filter((r) => r.status === "in-room" && r.edit.buy_url).map((r) => r.edit);
 
   // Unified hotspots for whichever image is on screen — the render is a canvas too, not a
   // dead end: every detected item stays tappable so the user can keep swapping/adding and
@@ -698,10 +813,7 @@ export function useRestyleWorkspace(id: string) {
     if (e.kind !== "add" || !e.placement || !e.target_label) continue;
     const s = stateFor(e);
     if (!s) continue; // inactive and never rendered — nothing to show
-    const box: DetectedObject["box_2d"] = [
-      Math.max(0, e.placement.y - 40), Math.max(0, e.placement.x - 40),
-      Math.min(1000, e.placement.y + 40), Math.min(1000, e.placement.x + 40),
-    ];
+    const box = boxFromPlacement(e.placement);
     canvasHotspots.push({ label: e.target_label, box_2d: box, state: s, edit: e });
   }
 
@@ -715,16 +827,14 @@ export function useRestyleWorkspace(id: string) {
     id, restyle, renders, objects: objects ?? [], customItems: restyle?.custom_items ?? [], detecting, loading,
     busy, generating, generatingStartedAt, expectedSeconds, error, setError,
     titleDraft, setTitleDraft, saveTitle,
-    sourcing, openSourcing, openSimilar, closeSourcing, setSourcingLabel,
+    sourcing, openSourcing, openSimilar, closeSourcing, setSourcingLabel, setSourcingView,
     pinRequest, requestPin, cancelPin, setPlacement, startAddFlow, placeAddLocation, skipAddLocation,
     searches, runVisualSearchByUrl, runTextSearch, pickCandidate, pickingKey,
-    stagePhoto, stageProductLink, stagingLink, stageRemove,
-    // preview
-    previewUrl, setPreviewUrl,
+    stagePhoto, stageProductLink, stagingLink, stageRemove, stageRefine,
     // handlers
-    addEdit, toggle, toggleAndRegenerate, deactivateAll, remove, addCustomItem, removeCustomItem, generate, emptyRoom, downloadImage,
+    addEdit, toggle, deactivateAll, remove, addCustomItem, removeCustomItem, generate, emptyRoom, downloadImage,
     // derived
-    edits, activeEdits, stagedItems, displayUrl, viewingOriginal, showSlider, canGenerate, confirmingCount, atMaxCustom, productEdits, inspoEdits, removedEdits,
+    edits, activeEdits, stagedItems, displayUrl, viewingOriginal, canGenerate, pendingCount, confirmingCount, atMaxCustom, productEdits, railEdits,
     canvasHotspots,
   };
 }

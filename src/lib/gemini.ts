@@ -298,6 +298,11 @@ export async function composeEdits(params: {
       case "remove":
         if (e.targetLabel) return `${n}. Remove the ${label} from the room entirely. Realistically fill in the floor, wall, or surface it used to cover — match the surrounding material, lighting, and shadows. Do not add anything in its place and do not change any other furniture or decor.`;
         return `${n}. Remove all furniture, decor, rugs, and clutter — leave a clean empty room with bare floor and walls.`;
+      case "refine":
+        // A user-typed adjustment to an EXISTING item already in the room — "mount it on the
+        // wall", "move it a bit to the left", "make it face the window". Deliberately scoped to
+        // just that item so a free-text instruction can't accidentally rewrite the whole room.
+        return `${n}. Adjust the ${label} as follows: ${e.instruction?.trim() ?? ""}. Make ONLY this specific change to the ${label} — keep its design/material/color and everything else in the room (other furniture, walls, floor, lighting) exactly as it is, unless the instruction explicitly says otherwise.`;
       default:
         return `${n}. ${e.instruction ?? ""}.`;
     }
@@ -380,6 +385,32 @@ export async function detectObjectsGemini(params: {
 }
 
 /**
+ * Turn a user's free-text description of something they're adding ("floor plant next to the tv,
+ * kind of tall") into a short, clean item name ("Floor Plant") for use as the label EVERYWHERE
+ * (menu title, canvas hotspot, changes-rail card) — the raw input is often a full sentence with
+ * placement/style detail baked in, which reads terribly as a label once it's stuck there forever.
+ * Returns null if the input doesn't describe a real, addable furniture/decor item — empty,
+ * gibberish, or inappropriate/offensive — so the caller can ask again instead of accepting it
+ * (this doubles as the content-moderation gate on free-text "add" labels).
+ */
+export async function normalizeItemLabel(rawInput: string): Promise<string | null> {
+  const prompt =
+    `A user is adding a piece of furniture or decor to a room-design app and typed: "${rawInput}". ` +
+    'Reply with ONLY a short, clean item name (1-3 words, e.g. "floor lamp", "area rug", ' +
+    '"console table") naming WHAT it is — strip out placement, color, and style detail, just the ' +
+    "item type. If the input doesn't describe a real furniture/decor item (empty, gibberish, or " +
+    'inappropriate/offensive), reply with exactly: null. No punctuation, no quotes, no explanation.';
+  try {
+    const data = await geminiPost(GEMINI_VISION_MODEL, { contents: [{ parts: [{ text: prompt }] }] });
+    const text = (data.candidates?.[0]?.content?.parts?.find((p) => p.text)?.text ?? "").trim();
+    if (!text || text.toLowerCase() === "null") return null;
+    return text.replace(/^["']|["']$/g, "").slice(0, 60) || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Item-aware description of a reference product, injected into the replacement
  * prompt so swaps reproduce its real proportions/details. Describes only what
  * defines THAT kind of item (a TV → screen/stand; a cabinet → doors; a lamp →
@@ -406,6 +437,23 @@ export async function describeProduct(params: {
   } catch {
     return ""; // description is best-effort; replacement still works without it
   }
+}
+
+/** Pull a `[ymin,xmin,ymax,xmax]` box out of a Gemini JSON reply. Gemini has been observed to
+ *  drop the "box_" prefix under `responseMimeType: "application/json"` (returning `{"2d":[...]}`
+ *  instead of the requested `{"box_2d":[...]}`) — silently treating that as "no box found" would
+ *  discard a perfectly good detection, so this falls back to ANY 4-number array value in the
+ *  parsed object before giving up. */
+function extractBox2d(parsed: unknown): [number, number, number, number] | null {
+  if (!parsed || typeof parsed !== "object") return null;
+  const isBox = (v: unknown): v is [number, number, number, number] =>
+    Array.isArray(v) && v.length === 4 && v.every((n) => typeof n === "number");
+  const obj = parsed as Record<string, unknown>;
+  const box = isBox(obj.box_2d) ? obj.box_2d : Object.values(obj).find(isBox);
+  if (!box) return null;
+  const [ymin, xmin, ymax, xmax] = box;
+  if (xmax <= xmin || ymax <= ymin) return null;
+  return [ymin, xmin, ymax, xmax];
 }
 
 /**
@@ -437,17 +485,48 @@ export async function locateProductPhoto(params: {
     });
     const text = data.candidates?.[0]?.content?.parts?.find((p) => p.text)?.text ?? "{}";
     const parsed = JSON.parse(text.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim());
-    const box = parsed.box_2d;
-    if (!Array.isArray(box) || box.length !== 4 || !box.every((n: unknown) => typeof n === "number")) return null;
-    const [ymin, xmin, ymax, xmax] = box as [number, number, number, number];
+    const box = extractBox2d(parsed);
+    if (!box) return null;
+    const [ymin, xmin, ymax, xmax] = box;
     // Reject implausible boxes outright — a bad detection (e.g. locking onto a thumbnail
     // strip or icon) is worse than skipping the crop and using the full screenshot.
-    if (xmax <= xmin || ymax <= ymin) return null;
     const areaFrac = ((xmax - xmin) * (ymax - ymin)) / (1000 * 1000);
     if (areaFrac < 0.06) return null; // suspiciously tiny — likely mis-detected a UI element
-    return [ymin, xmin, ymax, xmax];
+    return box;
   } catch {
     return null; // best-effort — caller falls back to the full screenshot
+  }
+}
+
+/**
+ * Find where a specific item ended up in a rendered room photo — used for an "add" edit that
+ * was never manually pinned (Nano Banana chose the placement on its own), so it can still get
+ * a real canvas hotspot instead of only being reachable via "Choose a spot" in the changes rail.
+ * Same shape/precedent as `locateProductPhoto` above (one targeted box, null on no confident
+ * match) but scoped to a known label rather than "find the product photo in this screenshot".
+ */
+export async function locateItemInRoom(params: {
+  imageBase64: string;
+  mimeType: string;
+  label: string;
+}): Promise<[number, number, number, number] | null> {
+  const prompt =
+    `This is a photo of a room. Find the ${params.label} in it and return a tight bounding box ` +
+    `around just that item. ` +
+    'Reply as JSON: {"box_2d":[ymin,xmin,ymax,xmax]} as integers 0-1000 (relative to the full ' +
+    `image), or {"box_2d":null} if you can't confidently find a ${params.label}. JSON only, no preamble.`;
+  try {
+    const data = await geminiPost(GEMINI_VISION_MODEL, {
+      contents: [
+        { parts: [{ text: prompt }, { inline_data: { mime_type: params.mimeType, data: params.imageBase64 } }] },
+      ],
+      generationConfig: { responseMimeType: "application/json", temperature: 0 },
+    });
+    const text = data.candidates?.[0]?.content?.parts?.find((p) => p.text)?.text ?? "{}";
+    const parsed = JSON.parse(text.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim());
+    return extractBox2d(parsed);
+  } catch {
+    return null; // best-effort — the item just stays reachable only via "Choose a spot"
   }
 }
 

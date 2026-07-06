@@ -14,7 +14,10 @@ export default function RestylePage({ params }: { params: Promise<{ id: string }
   const ws = useRestyleWorkspace(id);
   const router = useRouter();
 
-  if (ws.loading || !ws.restyle) {
+  // Gate the full-page spinner on the project itself, not on detection finishing too — the room
+  // photo + editor shell can render immediately once the project loads, with a small pill (see
+  // RestyleStudio) covering the brief window before detected items/hotspots are ready.
+  if (!ws.restyle) {
     return (
       <div className="h-dvh flex items-center justify-center">
         <div className="flex flex-col items-center gap-3 text-[var(--muted-foreground)]">

@@ -1,7 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { del } from "@vercel/blob";
-import { uploadImage } from "@/lib/restyle-render";
+import { uploadImage, adoptCachedRenderIfKnown } from "@/lib/restyle-render";
 import { fetchProduct, ProductFetchError, type ProductInfo } from "@/lib/product";
 import { describeProductImages, describeScreenshotForSearch, locateProductPhoto } from "@/lib/gemini";
 import { resolveImmersiveToken } from "@/lib/shopping-search";
@@ -193,5 +193,5 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     edits = await editsFor(id);
   }
 
-  return NextResponse.json({ edits, added: result.added });
+  return NextResponse.json({ edits, added: result.added, current_url: await adoptCachedRenderIfKnown(id) });
 }

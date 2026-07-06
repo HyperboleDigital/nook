@@ -92,8 +92,16 @@ export function Switch({
       className={cn(
         "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors",
         disabled
+          // Genuinely locked (can't interact at all) — pale, matches other disabled controls.
           ? "bg-[var(--muted)] cursor-not-allowed"
-          : cn("cursor-pointer", checked ? "bg-[var(--accent)]" : "bg-[var(--border)]"),
+          : cn(
+              "cursor-pointer",
+              // An OFF-but-toggleable switch used to share this exact pale shade with the
+              // disabled state above (--border and --muted are nearly the same near-white
+              // beige), which read as "this is locked" rather than "tap to turn back on" — a
+              // clearly mid-gray, saturated-enough track fixes that ambiguity.
+              checked ? "bg-[var(--accent)]" : "bg-[var(--muted-foreground)]/45",
+            ),
       )}
     >
       <span
@@ -300,17 +308,20 @@ export const GENERATE_MESSAGES = [
   "Adding the finishing touches…",
 ];
 
-// Full-bleed overlay for the canvas during generate. Self-ticking: given `startedAt` (epoch ms)
-// and `expectedSeconds`, it computes its own % / seconds-left / rotating message on a 300ms
-// interval — nothing above it re-renders on every tick (that used to live in the shared
-// workspace hook and re-rendered the whole editor tree once per interval). The percentage and
-// "time left" are a time-based ESTIMATE, not a real signal — Gemini's image-generation call has
-// no streaming/progress API — so this is honest-but-fake, tuned to feel right, not to be exact.
+// Full-bleed overlay for the canvas during generate. Self-ticking: given `startedAt` (epoch
+// ms), it computes its own rotating message index on a 300ms interval — nothing above it
+// re-renders on every tick (that used to live in the shared workspace hook and re-rendered the
+// whole editor tree once per interval). Deliberately no %/"time left" anymore — a time-based
+// estimate (Gemini's image-generation call has no real progress signal) read as more precise
+// than it actually was; the spinner + rotating warm message carries the "this is working" signal
+// without pretending to know how far along it is. `expectedSeconds` is kept as a prop so callers
+// don't need updating, but is no longer used here.
 export function ProgressOverlay({
-  status = "Generating your room…", startedAt, expectedSeconds = 45, messages = GENERATE_MESSAGES,
+  status = "Generating your room…", startedAt, expectedSeconds, messages = GENERATE_MESSAGES,
 }: {
   status?: string; startedAt: number; expectedSeconds?: number; messages?: string[];
 }) {
+  void expectedSeconds; // kept as a prop so existing callers don't need updating; no longer used
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 300);
@@ -318,28 +329,12 @@ export function ProgressOverlay({
   }, []);
 
   const elapsedSeconds = Math.max(0, (now - startedAt) / 1000);
-  // Asymptotic curve scaled to expectedSeconds: ~63% at 1x, ~86% at 2x, caps at 95% until the
-  // real image lands (the caller stops rendering this overlay the moment it does).
-  const progress = Math.min(95, 100 * (1 - Math.exp(-elapsedSeconds / (expectedSeconds / 1.5))));
-  const secondsLeft = Math.round(expectedSeconds - elapsedSeconds);
   const messageIndex = Math.floor(elapsedSeconds / 3.5) % messages.length;
 
   return (
-    <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[var(--background)]/85 text-center px-4">
+    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-[var(--background)]/85 text-center px-4">
       <Spinner size="lg" className="text-[var(--primary)]" />
       <p className="text-sm font-medium text-[var(--foreground)]">{status}</p>
-      <div className="w-48 space-y-1">
-        <div className="h-1.5 w-full rounded-full bg-[var(--muted)] overflow-hidden">
-          <div
-            className="h-full rounded-full bg-[var(--primary)] transition-[width] duration-300 ease-out"
-            style={{ width: `${progress}%` }}
-          />
-        </div>
-        <div className="flex items-center justify-between text-[11px] text-[var(--muted-foreground)] tabular-nums">
-          <span>{Math.round(progress)}%</span>
-          <span>{secondsLeft > 0 ? `~${secondsLeft}s left` : "Almost there…"}</span>
-        </div>
-      </div>
       <p key={messageIndex} className="text-xs text-[var(--muted-foreground)] animate-[fade-in_0.3s_ease-out]">
         {messages[messageIndex]}
       </p>

@@ -55,8 +55,12 @@ export interface RestyleEdit {
   product_title: string | null;
   /** Product price string (e.g. "$899.00"), shown on the Buy button. */
   product_price: string | null;
-  /** Pin for an "add" edit — 0–1000 coords in the original photo (box_2d space) + optional note. */
-  placement: { x: number; y: number; note?: string | null } | null;
+  /** Pin for an "add" edit — 0–1000 coords in the original photo (box_2d space) + optional note.
+   *  `w`/`h` (also 0–1000 units, half-width/half-height) are set only when this came from
+   *  `locateItemInRoom`'s auto-locate (see the generate route) — they capture the ACTUAL detected
+   *  item's extent so its canvas hotspot is properly sized instead of a generic small square. A
+   *  manual tap-to-place pin has no `w`/`h`; canvasHotspots falls back to a fixed-size box then. */
+  placement: { x: number; y: number; note?: string | null; w?: number; h?: number } | null;
 }
 
 export interface RestyleRender {

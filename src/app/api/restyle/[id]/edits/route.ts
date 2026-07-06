@@ -1,7 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
-import { uploadImage } from "@/lib/restyle-render";
+import { uploadImage, adoptCachedRenderIfKnown } from "@/lib/restyle-render";
 import { describeProduct } from "@/lib/gemini";
 import { fileToBuffer } from "@/lib/file-buf";
 import type { RestyleEditKind } from "@/types";
@@ -60,8 +60,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     await supabaseAdmin.from("restyle_edits").update({ active: false })
       .eq("restyle_id", id).eq("target_label", targetLabel).in("kind", ["item", "add", "remove"]).neq("id", inserted.id);
   }
+  // A "refine" (custom free-text instruction, e.g. "mount it on the wall") is its OWN dedupe
+  // group, independent of item/add/remove — it's additive to whatever's currently in that slot,
+  // not a replacement of it. Only one active refine per label though, so a second instruction
+  // replaces the first rather than stacking (possibly contradictory) adjustments.
+  if (kind === "refine" && targetLabel) {
+    await supabaseAdmin.from("restyle_edits").update({ active: false })
+      .eq("restyle_id", id).eq("target_label", targetLabel).eq("kind", "refine").neq("id", inserted.id);
+  }
 
-  return NextResponse.json({ edits: await editsFor(id) });
+  return NextResponse.json({ edits: await editsFor(id), current_url: await adoptCachedRenderIfKnown(id) });
 }
 
 // PATCH — toggle active state and/or set placement.
@@ -115,7 +123,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     }
   }
 
-  return NextResponse.json({ edits: await editsFor(id) });
+  return NextResponse.json({ edits: await editsFor(id), current_url: await adoptCachedRenderIfKnown(id) });
 }
 
 // DELETE — remove a layer. ?editId=
@@ -131,5 +139,5 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
   if (!editId) return NextResponse.json({ error: "editId required" }, { status: 400 });
   await supabaseAdmin.from("restyle_edits").delete().eq("id", editId).eq("restyle_id", id);
 
-  return NextResponse.json({ edits: await editsFor(id) });
+  return NextResponse.json({ edits: await editsFor(id), current_url: await adoptCachedRenderIfKnown(id) });
 }

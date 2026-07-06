@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { Sparkles, ShoppingCart } from "lucide-react";
+import { Sparkles, ShoppingCart, ChevronLeft } from "lucide-react";
 import type { RestyleWorkspace } from "./useRestyleWorkspace";
 import type { ShoppingResult } from "@/lib/shopping-search";
 import { Button, SkeletonProductCard, Spinner, StatusBanner } from "./ui";
@@ -44,6 +44,14 @@ export default function SimilarItemsPanel({ ws }: { ws: RestyleWorkspace }) {
 
   return (
     <div className="space-y-3">
+      {/* Back to the "Edit item" menu when we came from it (a tapped item); a similar-search
+          opened straight from a rail card has no menu to return to and just uses the X to close. */}
+      {sourcing.hasMenu && (
+        <button type="button" onClick={() => ws.setSourcingView("menu")}
+          className="flex items-center gap-1 text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors">
+          <ChevronLeft className="h-3.5 w-3.5" /> Back
+        </button>
+      )}
       <div className="flex items-center gap-3">
         {stagedEdit?.reference_url ? (
           /* eslint-disable-next-line @next/next/no-img-element */
