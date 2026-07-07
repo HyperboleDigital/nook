@@ -439,6 +439,37 @@ export function SheetChrome({ title, onClose }: { title?: string; onClose: () =>
   );
 }
 
+// ── Modal ─────────────────────────────────────────────────────────────────────
+// Centered card + backdrop, usable on BOTH breakpoints — unlike `Sheet` above, which is
+// deliberately mobile-only (the desktop editor docks a persistent right column instead). For
+// a transient picker (e.g. StagePicker's style grid) that needs real screen space and isn't a
+// permanent rail, a centered dialog is the right shape on desktop too. Reuses `SheetChrome` for
+// the header/close button so there's no second chrome style to maintain.
+export function Modal({
+  open, onClose, title, children, widthClassName,
+}: { open: boolean; onClose: () => void; title?: string; children: ReactNode; widthClassName?: string }) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="fixed inset-0 bg-black/40" onClick={onClose} />
+      <div className={cn(
+        "relative z-10 w-full max-h-[85vh] flex flex-col rounded-3xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow-pop)]",
+        widthClassName ?? "max-w-md",
+      )}>
+        <SheetChrome title={title} onClose={onClose} />
+        <div className="overflow-y-auto px-4 pb-4">{children}</div>
+      </div>
+    </div>
+  );
+}
+
 // ── Shop summary ──────────────────────────────────────────────────────────────
 // Shared "n items · from $X" math + a floating pill for the canvas (see RestyleCanvas).
 export function parsePrice(p: string | null | undefined): number {

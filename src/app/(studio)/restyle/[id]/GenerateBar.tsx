@@ -1,9 +1,11 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { MoreHorizontal, Eraser, RotateCcw, Loader2 } from "lucide-react";
+import { MoreHorizontal, Eraser, RotateCcw, Loader2, Sparkles } from "lucide-react";
 import type { RestyleWorkspace } from "./useRestyleWorkspace";
 import { Button, IconButton } from "./ui";
+import StagePicker from "./StagePicker";
+import type { RestyleThemeKey } from "@/lib/restyle-themes";
 import { cn } from "@/lib/utils";
 
 /**
@@ -13,6 +15,7 @@ import { cn } from "@/lib/utils";
  */
 export default function GenerateBar({ ws, variant = "sticky" }: { ws: RestyleWorkspace; variant?: "sticky" | "floating" }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -27,6 +30,11 @@ export default function GenerateBar({ ws, variant = "sticky" }: { ws: RestyleWor
     if (window.confirm("Empty the room? Furniture and decor get removed — walls, floors, windows and built-ins stay put.")) {
       ws.emptyRoom();
     }
+  };
+
+  const pickStage = (theme: RestyleThemeKey) => {
+    setPickerOpen(false);
+    ws.stageRoom(theme);
   };
 
   // Turn every change off and re-render — with no active edits, recompose returns the original
@@ -60,6 +68,10 @@ export default function GenerateBar({ ws, variant = "sticky" }: { ws: RestyleWor
                 className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left hover:bg-[var(--muted)] transition-colors">
                 <Eraser className="h-4 w-4 text-[var(--muted-foreground)]" /> Empty the room
               </button>
+              <button type="button" onClick={() => { setMenuOpen(false); setPickerOpen(true); }}
+                className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left hover:bg-[var(--muted)] transition-colors border-t border-[var(--border)]">
+                <Sparkles className="h-4 w-4 text-[var(--muted-foreground)]" /> Stage this room
+              </button>
               <button type="button" onClick={startFromOriginal}
                 className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left hover:bg-[var(--muted)] transition-colors border-t border-[var(--border)]">
                 <RotateCcw className="h-4 w-4 text-[var(--muted-foreground)]" /> Start from original
@@ -88,6 +100,7 @@ export default function GenerateBar({ ws, variant = "sticky" }: { ws: RestyleWor
           Fetching product details — this can take up to a minute.
         </p>
       )}
+      <StagePicker open={pickerOpen} onClose={() => setPickerOpen(false)} onPick={pickStage} />
     </div>
   );
 }

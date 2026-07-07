@@ -94,6 +94,19 @@ function keywordType(text: string): string {
   return "item";
 }
 
+// Retailer galleries routinely include a dimensions/assembly diagram alongside real photos —
+// sometimes even AS `main_image` — and a diagram makes a much worse render reference and a much
+// worse "here's what you're getting" thumbnail than an actual listing photo. Skip anything whose
+// URL hints at being a diagram/spec sheet rather than a photo of the item itself, preferring the
+// first clean-looking candidate in [main_image, ...gallery] order (main_image is usually right;
+// this is just a guard against the cases where it isn't) — falls back to the first non-empty
+// candidate at all if literally everything matches (better than no image).
+const DIAGRAM_HINT = /(dimension|diagram|spec[-_]?sheet|specs?[-_]|size[-_]?chart|sizing|schematic|assembly|measurement|linedrawing|line[-_]?drawing)/i;
+function pickHeroImage(...candidates: (string | undefined)[]): string {
+  const nonEmpty = candidates.filter((c): c is string => !!c);
+  return nonEmpty.find((c) => !DIAGRAM_HINT.test(c)) ?? nonEmpty[0] ?? "";
+}
+
 function cleanText(s: unknown): string {
   return String(s ?? "").replace(/[【】\[\]]/g, " ").replace(/\s+/g, " ").trim();
 }
@@ -237,7 +250,7 @@ export async function fetchProduct(rawUrl: string): Promise<ProductInfo> {
 function mapUnwrangle(detail: Record<string, unknown>, retailerName: string, cleanUrl: string): ProductInfo {
   const title = String(detail.name || "").trim();
   const gallery = Array.isArray(detail.images) ? detail.images.map(String).filter(Boolean) : [];
-  const imageUrl = String(detail.main_image || gallery[0] || "");
+  const imageUrl = pickHeroImage(detail.main_image ? String(detail.main_image) : undefined, ...gallery);
   if (!title || !imageUrl) {
     throw new ProductFetchError("Couldn't read that product's details.", 422);
   }
@@ -299,7 +312,7 @@ async function fetchAmazonRainforest(url: URL, cleanUrl: string): Promise<Produc
   const gallery = Array.isArray(p.images)
     ? (p.images as { link?: string }[]).map((i) => String(i?.link || "")).filter(Boolean)
     : [];
-  const imageUrl = String(mainImage || gallery[0] || "");
+  const imageUrl = pickHeroImage(mainImage || undefined, ...gallery);
   if (!title || !imageUrl) {
     throw new ProductFetchError("Couldn't read that product's details.", 422);
   }

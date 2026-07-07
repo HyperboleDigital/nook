@@ -1,10 +1,11 @@
 import { auth } from "@clerk/nextjs/server";
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { del } from "@vercel/blob";
 import { uploadImage, adoptCachedRenderIfKnown } from "@/lib/restyle-render";
 import { fetchProduct, ProductFetchError, type ProductInfo } from "@/lib/product";
 import { describeProductImages, describeScreenshotForSearch, locateProductPhoto } from "@/lib/gemini";
 import { resolveImmersiveToken } from "@/lib/shopping-search";
+import { searchProductByImageUrl } from "@/lib/restyle-search";
 import { editsFor, loadOwnedRestyle, stageEdit, type StagedProduct } from "@/lib/restyle-edits";
 import { supabaseAdmin } from "@/lib/supabase";
 import { cropToBox } from "@/lib/image-crop";
@@ -135,6 +136,13 @@ async function fromUpload(userId: string, rawUrl: string): Promise<StagedProduct
 // `targetLabel` force-targets a specific slot (the chip/hotspot the user tapped) instead of
 // relying on auto-detection. `replaceEditId` — when this staging supersedes an already-staged
 // edit for the same slot, deletes that edit in the same request instead of a separate round-trip.
+//
+// "Dupe finder": a `url`/`token` stage (a CONFIRMED real product, unlike an inspo photo) fires an
+// immediate, fire-and-forget search for cheaper alternatives (`searchProductByImageUrl`, same
+// pipeline "Shop similar items" uses) — a deliberate exception to the deferred-until-generate
+// policy above. That policy exists to avoid spending API cost on something the user might not
+// commit to; pasting a real product link is already a much more deliberate, high-intent action,
+// and the whole point of surfacing savings is that they're there immediately, not after a render.
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { userId } = await auth();
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -145,6 +153,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   let staged: StagedProduct;
   let forcedTarget: string | undefined;
   let replaceEditId: string | undefined;
+  let fromLink = false;
   try {
     const body = await req.json().catch(() => ({}));
     const { url: rawUrl, token, imageUrl, targetLabel: ft, replaceEditId: re } = body as {
@@ -170,6 +179,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         return NextResponse.json({ error: "A product link is required." }, { status: 400 });
       }
       staged = await fromListing(userId, await fetchProduct(url));
+      fromLink = true;
     }
   } catch (err) {
     if (err instanceof ProductFetchError) {
@@ -191,6 +201,17 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (replaceEditId && replaceEditId !== result.added.id) {
     await supabaseAdmin.from("restyle_edits").delete().eq("id", replaceEditId).eq("restyle_id", id);
     edits = await editsFor(id);
+  }
+
+  if (fromLink && result.added.target_label) {
+    // Labels are always lowercased in `restyle_searches` (matches every other caller — the
+    // deferred inspo search, runVisualSearchByUrl/runTextSearch on the client).
+    const label = result.added.target_label.toLowerCase();
+    const titleHint = staged.productTitle ?? undefined;
+    after(async () => {
+      const search = await searchProductByImageUrl({ restyleId: id, imageUrl: staged.referenceUrl, label, titleHint });
+      if (search.ok) await search.finish();
+    });
   }
 
   return NextResponse.json({ edits, added: result.added, current_url: await adoptCachedRenderIfKnown(id) });

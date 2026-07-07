@@ -28,7 +28,6 @@ export async function POST(req: Request) {
       email: primaryEmail,
       plan: "free",
       tours_used: 0,
-      reels_used: 0,
     });
   }
 

@@ -4,6 +4,8 @@ import { supabaseAdmin } from "@/lib/supabase";
 import { recompose } from "@/lib/restyle-render";
 import { searchProductByImageUrl } from "@/lib/restyle-search";
 import { locateItemInRoom } from "@/lib/gemini";
+import { ensureWholeRoomEdit } from "@/lib/restyle-whole-room-edit";
+import { RESTYLE_THEMES, type RestyleThemeKey } from "@/lib/restyle-themes";
 import type { RestyleEdit } from "@/types";
 
 // Render (Gemini compose) + the deferred inspo product search both run in after() below, so
@@ -11,11 +13,11 @@ import type { RestyleEdit } from "@/types";
 export const maxDuration = 300;
 
 // POST — fire-and-forget. Optionally applies a server-side edit-state change first (so
-// toggling an item or emptying the room is one atomic call instead of a client for-loop that
-// dies if the tab closes mid-sequence), then responds 202 immediately and does the actual
-// render (+ deferred product search) in after() — the client polls GET /api/restyles/[id]
-// (see useRestyleWorkspace's pollGenerating) until generating_started_at clears.
-// Body (all optional): { toggle?: {editId, active}, emptyRoom?: boolean }.
+// toggling an item, emptying the room, or staging it is one atomic call instead of a client
+// for-loop that dies if the tab closes mid-sequence), then responds 202 immediately and does the
+// actual render (+ deferred product search) in after() — the client polls GET
+// /api/restyles/[id] (see useRestyleWorkspace's pollGenerating) until generating_started_at
+// clears. Body (all optional): { toggle?: {editId, active}, emptyRoom?: boolean, stageRoom?: {theme} }.
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { userId } = await auth();
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -34,15 +36,27 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (body.emptyRoom) {
     await supabaseAdmin.from("restyle_edits").update({ active: false })
       .eq("restyle_id", id).eq("active", true).neq("kind", "remove");
-    const { data: existingRemove } = await supabaseAdmin
-      .from("restyle_edits").select("id").eq("restyle_id", id).eq("kind", "remove").is("target_label", null).maybeSingle();
-    if (existingRemove) {
-      await supabaseAdmin.from("restyle_edits").update({ active: true }).eq("id", existingRemove.id);
-    } else {
-      const { data: existing } = await supabaseAdmin.from("restyle_edits").select("id").eq("restyle_id", id);
-      await supabaseAdmin.from("restyle_edits").insert({
-        restyle_id: id, kind: "remove", target_label: null, active: true, position: existing?.length ?? 0,
-      });
+    await ensureWholeRoomEdit(id, "remove");
+  }
+  // "Stage this room" — empty the room AND furnish it in a curated style, in one generate: a
+  // whole-room "remove" edit (identical to plain "Empty the room") PLUS a whole-room "style"
+  // edit whose instruction is the picked theme's furnish-oriented blurb. Both compose into ONE
+  // Gemini call via the normal composeEdits path (see gemini.ts's `case "style"`/`case "remove"`)
+  // — no separate render pipeline needed. Deactivates everything else first, same "start fresh"
+  // semantics as Empty the room, just also staging a style on top.
+  if (body.stageRoom?.theme) {
+    const theme = RESTYLE_THEMES[body.stageRoom.theme as RestyleThemeKey];
+    if (theme) {
+      const { data: activeNow } = await supabaseAdmin
+        .from("restyle_edits").select("id, kind").eq("restyle_id", id).eq("active", true);
+      const toDeactivate = (activeNow ?? [])
+        .filter((e) => e.kind !== "remove" && e.kind !== "style")
+        .map((e) => e.id);
+      if (toDeactivate.length > 0) {
+        await supabaseAdmin.from("restyle_edits").update({ active: false }).in("id", toDeactivate);
+      }
+      await ensureWholeRoomEdit(id, "remove");
+      await ensureWholeRoomEdit(id, "style", theme.stagingInstruction);
     }
   }
 

@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { upload } from "@vercel/blob/client";
 import type { DetectedObject, Restyle, RestyleEdit, RestyleRender } from "@/types";
 import type { ShoppingResult } from "@/lib/shopping-search";
+import type { RestyleThemeKey } from "@/lib/restyle-themes";
 
 export type SearchState = {
   status: "idle" | "loading" | "ready" | "error";
@@ -356,7 +357,11 @@ export function useRestyleWorkspace(id: string) {
     }));
 
   // Poll the persisted search row until Gemini scoring + Wayfair token resolution land
-  // (the response we already applied is unscored so the user isn't staring at nothing).
+  // (the response we already applied is unscored so the user isn't staring at nothing). If
+  // nothing ever shows up (e.g. the auto-triggered "dupe finder" search on a pasted link found
+  // no matches at all, so `searchProductByImageUrl` never even wrote a row — see product/
+  // route.ts), fall back to an empty "ready" state instead of leaving the caller's UI stuck on
+  // a spinner forever once the retries run out.
   const pollScored = useCallback(async (label: string) => {
     for (let i = 0; i < 8; i++) {
       await new Promise((r) => setTimeout(r, 2500));
@@ -368,6 +373,7 @@ export function useRestyleWorkspace(id: string) {
         if (row?.scored) { setSearchState(label, { status: "ready", scored: true, results: row.results ?? [] }); return; }
       } catch { /* keep polling */ }
     }
+    setSearchState(label, (prev) => (prev.status === "loading" ? { status: "ready", scored: true, results: [] } : prev));
   }, [id]);
 
   // Search using a photo that's ALREADY staged (its reference_url) rather than a fresh
@@ -430,6 +436,13 @@ export function useRestyleWorkspace(id: string) {
       // stageEdit may reclassify a would-be add into a swap when the label matches a
       // detected object — only offer a pin for a genuine, still-unplaced add.
       if (data.added.kind === "add") finalizeAddPlacement(data.added.id, data.added.target_label ?? label);
+      // "Dupe finder" — staging a real product link fires an immediate server-side search for
+      // cheaper alternatives (see product/route.ts's `after()`), unlike an inspo photo (deferred
+      // until generate). Mark the search loading right away and poll for it — same "poll
+      // /searches until scored" loop already used for the deferred-search cases, just kicked off
+      // here instead of after a render.
+      setSearchState(label.toLowerCase(), { status: "loading", scored: false });
+      pollScored(label.toLowerCase());
     } catch (err) {
       setError(err instanceof DOMException && err.name === "TimeoutError" ? "That took too long — the product service may be unavailable. Try again." : err instanceof Error ? err.message : "Couldn't fetch that product");
     } finally {
@@ -544,7 +557,7 @@ export function useRestyleWorkspace(id: string) {
   // now or a page reload resumed an already-in-flight one. An optional body can apply a
   // server-side edit-state change (toggle one edit, or empty the room) atomically before
   // rendering, so those flows never depend on a client-side loop surviving to the end.
-  const generate = async (body?: { toggle?: { editId: string; active: boolean }; emptyRoom?: boolean }) => {
+  const generate = async (body?: { toggle?: { editId: string; active: boolean }; emptyRoom?: boolean; stageRoom?: { theme: RestyleThemeKey } }) => {
     setError(null); setPinRequest(null);
     try {
       const r = await fetch(`/api/restyle/${id}/generate`, {
@@ -566,6 +579,12 @@ export function useRestyleWorkspace(id: string) {
   // Whole-room reset — server applies "deactivate everything, ensure a whole-room remove
   // edit" atomically before rendering (see the generate route's `emptyRoom` handling).
   const emptyRoom = () => generate({ emptyRoom: true });
+
+  // "Stage this room" — server deactivates everything else and ensures both a whole-room
+  // "remove" edit AND a whole-room "style" edit (the picked theme's furnish instruction) are
+  // active, then renders both together in one call (see the generate route's `stageRoom`
+  // handling). Mirrors emptyRoom's one-liner shape.
+  const stageRoom = (theme: RestyleThemeKey) => generate({ stageRoom: { theme } });
 
   // A batch on/off switch — flips the flag (optimistically, for instant card/hotspot feedback)
   // and PATCHes it. It does NOT trigger a Gemini render — but if the resulting active-edit
@@ -832,7 +851,7 @@ export function useRestyleWorkspace(id: string) {
     searches, runVisualSearchByUrl, runTextSearch, pickCandidate, pickingKey,
     stagePhoto, stageProductLink, stagingLink, stageRemove, stageRefine,
     // handlers
-    addEdit, toggle, deactivateAll, remove, addCustomItem, removeCustomItem, generate, emptyRoom, downloadImage,
+    addEdit, toggle, deactivateAll, remove, addCustomItem, removeCustomItem, generate, emptyRoom, stageRoom, downloadImage,
     // derived
     edits, activeEdits, stagedItems, displayUrl, viewingOriginal, canGenerate, pendingCount, confirmingCount, atMaxCustom, productEdits, railEdits,
     canvasHotspots,

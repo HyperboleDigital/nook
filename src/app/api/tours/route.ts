@@ -25,7 +25,7 @@ export async function POST(req: Request) {
   const { error: userError } = await supabaseAdmin
     .from("users")
     .upsert(
-      { clerk_id: userId, email, plan: "free", tours_used: 0, reels_used: 0 },
+      { clerk_id: userId, email, plan: "free", tours_used: 0 },
       { onConflict: "clerk_id", ignoreDuplicates: true }
     );
   if (userError) {

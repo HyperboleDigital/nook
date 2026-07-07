@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import Link from "next/link";
-import { ShoppingBag, ExternalLink, X } from "lucide-react";
-import { ProductCard, storeName } from "@/app/(studio)/restyle/[id]/ui";
+import { ExternalLink, Sparkles, ShoppingBag, X } from "lucide-react";
+import { Button, ProductCard, storeName } from "@/app/(studio)/restyle/[id]/ui";
+import { actionIcon, anchorFor, declutter, HotspotMarker, HotspotRegion, toBox } from "@/app/(studio)/restyle/[id]/hotspot-visuals";
 import type { DetectedObject, RestyleEdit } from "@/types";
 
 export type ShareHotspot = { label: string; box_2d: DetectedObject["box_2d"]; edit: RestyleEdit };
@@ -13,21 +14,23 @@ const parsePrice = (p: string | null) => { const n = Number(String(p ?? "").repl
 
 /**
  * Full-viewport, read-only mirror of the editor's immersive canvas (see `(studio)/restyle/[id]/
- * RestyleCanvas.tsx` for the original) — same measured-pixel-box technique for shrink-wrapping
- * a portrait photo without letterboxing, same tap-a-hotspot interaction, but no edit actions:
- * a tap just opens a thumbnail/price/Buy popover, there's no Show similar / toggle / sourcing.
- * `hotspots` is empty whenever nothing has ever been generated (current_url === original_url —
- * see page.tsx), so the "never show placed UI on the unedited photo" rule holds here too.
+ * RestyleCanvas.tsx` for the original) — same measured-pixel-box technique for shrink-wrapping a
+ * portrait photo without letterboxing, same highlighted-region hotspots (`HotspotRegion`/
+ * `HotspotMarker`/`actionIcon`, shared with the studio's `ObjectHotspots.tsx` via
+ * `hotspot-visuals.tsx` so the two can't visually drift apart), but no edit actions: a tap just
+ * opens an info/Buy popover, there's no Show similar / toggle / sourcing. `hotspots` is empty
+ * whenever nothing has ever been generated (current_url === original_url — see page.tsx), so the
+ * "never show placed UI on the unedited photo" rule holds here too.
  */
 export default function ShareCanvas({
-  imageUrl, width, height, title, hotspots, products,
+  imageUrl, width, height, title, hotspots, edits,
 }: {
   imageUrl: string;
   width: number | null;
   height: number | null;
   title: string | null;
   hotspots: ShareHotspot[];
-  products: RestyleEdit[];
+  edits: RestyleEdit[];
 }) {
   const [openHotspot, setOpenHotspot] = useState<{ label: string; cx: number; cy: number; edit: RestyleEdit } | null>(null);
   const frameRef = useRef<HTMLDivElement>(null);
@@ -72,105 +75,159 @@ export default function ShareCanvas({
     : "relative block w-full rounded-3xl overflow-hidden shadow-[var(--shadow-pop)]";
   const imgClass = imgBoxStyle ? "block w-full h-full object-cover" : "block w-full h-auto max-h-[85dvh] object-contain";
 
+  // "Shop this look" is deliberately product-only — a real, buyable item with a resolved
+  // buy_url. A swap/add sourced from a photo or description with nothing resolved yet, or a
+  // removal, is a real change to the room (it still gets a hotspot on the photo — see
+  // renderHotspots below) but isn't something to shop, so it doesn't belong in this list. This
+  // was a deliberate product decision, not an oversight — don't re-add a catch-all "everything
+  // else" section here without checking with the user first.
+  const products = edits.filter((e) => e.buy_url);
   const total = products.reduce((s, e) => s + parsePrice(e.product_price), 0);
   const priced = products.filter((e) => e.product_price).length;
 
-  const shopPanel = (
+  // With nothing shoppable yet, a "Shop this look" heading over an empty state reads as a
+  // broken promise — the panel led with a CTA nobody could act on. Swap the whole panel for a
+  // real call-to-action instead: no "Shop this look" label at all when there's nothing to shop.
+  const shopPanel = products.length > 0 ? (
     <div className="bg-[var(--card)] p-4 space-y-3">
       <div className="flex items-center gap-2">
         <ShoppingBag className="h-4 w-4 text-[var(--foreground)]" />
         <p className="text-sm font-semibold">Shop this look</p>
       </div>
-      {products.length > 0 ? (
-        <>
-          <p className="text-[11px] text-[var(--muted-foreground)]">
-            {products.length} item{products.length === 1 ? "" : "s"}
-            {priced > 0 && <> · from <span className="font-semibold text-[var(--foreground)]">${total.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span></>}
-          </p>
-          <div className="space-y-2">
-            {products.map((e) => (
-              <ProductCard key={e.id} image={e.reference_url} title={e.product_title ?? e.target_label ?? "Item"}
-                retailer={storeName(e.buy_url)} price={e.product_price} viewUrl={e.buy_url}>
-                {e.buy_url && (
-                  <a href={e.buy_url} target="_blank" rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-[11px] text-[var(--accent)] hover:underline mt-1">
-                    View on {storeName(e.buy_url)} <ExternalLink className="h-3 w-3" />
-                  </a>
-                )}
-              </ProductCard>
-            ))}
-          </div>
-        </>
-      ) : (
-        <p className="text-xs text-[var(--muted-foreground)]">No shoppable products in this design.</p>
-      )}
+      <p className="text-[11px] text-[var(--muted-foreground)]">
+        {products.length} item{products.length === 1 ? "" : "s"}
+        {priced > 0 && <> · from <span className="font-semibold text-[var(--foreground)]">${total.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span></>}
+      </p>
+      <div className="space-y-2">
+        {products.map((e) => (
+          <ProductCard key={e.id} image={e.reference_url} title={e.product_title ?? e.target_label ?? "Item"}
+            retailer={storeName(e.buy_url)} price={e.product_price} viewUrl={e.buy_url}>
+            {e.buy_url && (
+              <a href={e.buy_url} target="_blank" rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-[11px] text-[var(--accent)] hover:underline mt-1">
+                View on {storeName(e.buy_url)} <ExternalLink className="h-3 w-3" />
+              </a>
+            )}
+          </ProductCard>
+        ))}
+      </div>
+    </div>
+  ) : (
+    <div className="bg-[var(--card)] p-6 text-center space-y-3">
+      <div className="h-12 w-12 rounded-full bg-[var(--accent-soft)] flex items-center justify-center mx-auto">
+        <Sparkles className="h-5 w-5 text-[var(--accent-soft-foreground)]" />
+      </div>
+      <div className="space-y-1">
+        <p className="text-sm font-semibold">Like what you see?</p>
+        <p className="text-xs text-[var(--muted-foreground)]">
+          Upload a photo of your own room and get a design like this in minutes.
+        </p>
+      </div>
+      <Link href="/restyle/new">
+        <Button variant="primary" className="w-full">Try this design →</Button>
+      </Link>
+      {/* "Try this design" links to a blank /restyle/new — it doesn't actually clone THIS room's
+          specific edits onto yours, so it reads as "try this experience," not "recreate this
+          exact look." This line makes that explicit: it's a fresh start on the viewer's OWN
+          room, not a preset applied to it. */}
+      <p className="text-[11px] text-[var(--muted-foreground)]">
+        Start your own room restyle — completely from scratch.
+      </p>
+    </div>
+  );
+
+  const renderHotspots = () => {
+    const boxes = hotspots.map((h) => toBox(h.box_2d));
+    const markers = declutter(boxes.map((b) => anchorFor(b, boxes)));
+    const order = hotspots.map((_, i) => i).sort((a, b) => boxes[b].area - boxes[a].area);
+    return order.map((i) => {
+      const h = hotspots[i];
+      const b = boxes[i];
+      const m = markers[i];
+      const isActive = openHotspot?.label.toLowerCase() === h.label.toLowerCase();
+      return (
+        <Fragment key={`${h.label}-${i}`}>
+          <HotspotRegion box={b} label={h.label} isActive={isActive}
+            ariaLabel={`${h.label} (${h.edit.buy_url ? "shop this" : "added"})`}
+            onClick={() => setOpenHotspot({ label: h.label, cx: (b.x0 + b.x1) / 2, cy: (b.y0 + b.y1) / 2, edit: h.edit })} />
+          <span className="absolute pointer-events-none -translate-x-1/2 -translate-y-1/2 flex items-center justify-center"
+            style={{ left: `${m.x}%`, top: `${m.y}%` }}>
+            <HotspotMarker bg="bg-[var(--accent)]" icon={actionIcon(h.edit, "h-3.5 w-3.5 text-white")} />
+          </span>
+        </Fragment>
+      );
+    });
+  };
+
+  const popover = (widthClass: string, thumbClass: string, halfWidthPx: number) => openHotspot && (
+    <div className={`absolute z-10 ${widthClass} rounded-2xl border border-[var(--border)] bg-white shadow-[var(--shadow-pop)]`}
+      style={{
+        left: `clamp(${halfWidthPx}px, ${openHotspot.cx}%, calc(100% - ${halfWidthPx}px))`,
+        top: openHotspot.cy <= 50 ? `${Math.min(openHotspot.cy + 5, 90)}%` : undefined,
+        bottom: openHotspot.cy > 50 ? `${Math.min(100 - openHotspot.cy + 5, 90)}%` : undefined,
+        transform: "translateX(-50%)",
+      }}>
+      <div className="flex items-start gap-3 p-3">
+        {openHotspot.edit.reference_url ? (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img src={openHotspot.edit.reference_url} alt="" className={`${thumbClass} object-cover rounded-xl border border-[var(--border)] shrink-0`} />
+        ) : (
+          <span className={`${thumbClass} rounded-xl bg-[var(--muted)] border border-[var(--border)] shrink-0 flex items-center justify-center text-[var(--muted-foreground)]`}>
+            {actionIcon(openHotspot.edit, "h-4 w-4")}
+          </span>
+        )}
+        <div className="min-w-0 flex-1 space-y-0.5">
+          <p className="text-sm font-semibold capitalize leading-snug">{openHotspot.edit.product_title ?? openHotspot.label}</p>
+          {openHotspot.edit.buy_url ? (
+            <>
+              <p className="text-[11px] text-[var(--muted-foreground)]">
+                {openHotspot.edit.product_price ?? "See price"} · {storeName(openHotspot.edit.buy_url)}
+              </p>
+              <a href={openHotspot.edit.buy_url} target="_blank" rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-[11px] text-[var(--accent)] hover:underline">
+                Buy <ExternalLink className="h-3 w-3" />
+              </a>
+            </>
+          ) : (
+            <p className="text-[11px] text-[var(--muted-foreground)]">
+              {openHotspot.edit.kind === "add" ? "Added to this room" : "Swapped in this room"}
+            </p>
+          )}
+        </div>
+        <button type="button" onClick={() => setOpenHotspot(null)} aria-label="Close"
+          className="h-6 w-6 shrink-0 -mt-1 -mr-1 flex items-center justify-center rounded-full hover:bg-[var(--muted)]">
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
     </div>
   );
 
   return (
     <div className="h-dvh flex flex-col">
-      <header className="h-12 shrink-0 flex items-center justify-between px-3 border-b border-[var(--border)] bg-[var(--card)]">
+      <header className="h-14 shrink-0 flex items-center justify-between px-4 border-b border-[var(--border)] bg-[var(--card)]">
         <Link href="/" className="font-bold tracking-tight text-sm">Nook</Link>
-        <Link href="/" className="text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors">Design your own →</Link>
+        <Link href="/restyle/new">
+          <Button variant="primary" size="sm">Try this design →</Button>
+        </Link>
       </header>
 
-      {/* Desktop immersive stage */}
-      <div className="hidden md:block relative flex-1 min-h-0">
-        <div ref={frameRef} className="relative h-full w-full bg-[var(--muted)] flex items-center justify-center overflow-hidden">
+      {/* Desktop immersive stage — a REAL docked flex row, same as the editor's RestyleStudio.tsx,
+          not an absolute overlay: a floating panel on top of the stage would sit on top of real
+          hotspots near the right edge (untappable) and, on a landscape photo close to the stage's
+          own aspect ratio, visibly overlap the image with little or no gutter to float in. Docking
+          it as a sibling column means the stage's own measured width naturally excludes the rail. */}
+      <div className="hidden md:flex flex-1 min-h-0">
+        <div ref={frameRef} className="relative flex-1 min-w-0 h-full bg-[var(--muted)] flex items-center justify-center overflow-hidden">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={imageUrl} alt="" aria-hidden className="absolute inset-0 h-full w-full object-cover blur-2xl brightness-50 scale-110" />
           <div className={imgWrapClass} style={imgBoxStyle}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={imageUrl} alt={title ?? "Room design"} className={imgClass} onLoad={onImgLoad} />
-            {hotspots.map((h, i) => {
-              const [ymin, xmin, ymax, xmax] = h.box_2d;
-              const cx = (xmin + xmax) / 2 / 10, cy = (ymin + ymax) / 2 / 10;
-              return (
-                <button key={`${h.label}-${i}`} type="button"
-                  onClick={() => setOpenHotspot({ label: h.label, cx, cy, edit: h.edit })}
-                  className="absolute -translate-x-1/2 -translate-y-1/2 h-9 w-9 flex items-center justify-center group"
-                  style={{ left: `${cx}%`, top: `${cy}%` }} aria-label={`Shop the ${h.label}`}>
-                  <span className="h-6 w-6 rounded-full bg-[var(--accent)] border-2 border-white shadow-[var(--shadow-soft)] flex items-center justify-center group-hover:scale-110 transition-transform">
-                    <ShoppingBag className="h-3.5 w-3.5 text-white" strokeWidth={2.5} />
-                  </span>
-                </button>
-              );
-            })}
-            {openHotspot && (
-              <div className="absolute z-10 w-64 rounded-2xl border border-[var(--border)] bg-white shadow-[var(--shadow-pop)]"
-                style={{
-                  left: `clamp(128px, ${openHotspot.cx}%, calc(100% - 128px))`,
-                  top: openHotspot.cy <= 50 ? `${Math.min(openHotspot.cy + 5, 90)}%` : undefined,
-                  bottom: openHotspot.cy > 50 ? `${Math.min(100 - openHotspot.cy + 5, 90)}%` : undefined,
-                  transform: "translateX(-50%)",
-                }}>
-                <div className="flex items-start gap-3 p-3">
-                  {openHotspot.edit.reference_url && (
-                    /* eslint-disable-next-line @next/next/no-img-element */
-                    <img src={openHotspot.edit.reference_url} alt="" className="h-14 w-14 object-cover rounded-xl border border-[var(--border)] shrink-0" />
-                  )}
-                  <div className="min-w-0 flex-1 space-y-0.5">
-                    <p className="text-sm font-semibold capitalize leading-snug">{openHotspot.edit.product_title ?? openHotspot.label}</p>
-                    <p className="text-[11px] text-[var(--muted-foreground)]">
-                      {openHotspot.edit.product_price ?? "See price"} · {storeName(openHotspot.edit.buy_url)}
-                    </p>
-                    {openHotspot.edit.buy_url && (
-                      <a href={openHotspot.edit.buy_url} target="_blank" rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-[11px] text-[var(--accent)] hover:underline">
-                        Buy <ExternalLink className="h-3 w-3" />
-                      </a>
-                    )}
-                  </div>
-                  <button type="button" onClick={() => setOpenHotspot(null)} aria-label="Close"
-                    className="h-6 w-6 shrink-0 -mt-1 -mr-1 flex items-center justify-center rounded-full hover:bg-[var(--muted)]">
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              </div>
-            )}
+            {renderHotspots()}
+            {popover("w-64", "h-14 w-14", 128)}
           </div>
         </div>
-        <div className="absolute right-4 top-4 bottom-4 w-[360px] rounded-3xl bg-white shadow-[var(--shadow-pop)] border border-[var(--border)] overflow-y-auto">
+        <div className="w-[380px] shrink-0 border-l border-[var(--border)] bg-white overflow-y-auto">
           {title && <p className="px-4 pt-4 text-sm font-semibold">{title}</p>}
           {shopPanel}
         </div>
@@ -183,52 +240,8 @@ export default function ShareCanvas({
           <div className="relative rounded-3xl border border-[var(--border)] bg-[var(--muted)] overflow-hidden">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={imageUrl} alt={title ?? "Room design"} className="block w-full h-auto object-contain" />
-            {hotspots.map((h, i) => {
-              const [ymin, xmin, ymax, xmax] = h.box_2d;
-              const cx = (xmin + xmax) / 2 / 10, cy = (ymin + ymax) / 2 / 10;
-              return (
-                <button key={`${h.label}-${i}`} type="button"
-                  onClick={() => setOpenHotspot({ label: h.label, cx, cy, edit: h.edit })}
-                  className="absolute -translate-x-1/2 -translate-y-1/2 h-9 w-9 flex items-center justify-center"
-                  style={{ left: `${cx}%`, top: `${cy}%` }} aria-label={`Shop the ${h.label}`}>
-                  <span className="h-6 w-6 rounded-full bg-[var(--accent)] border-2 border-white shadow-[var(--shadow-soft)] flex items-center justify-center">
-                    <ShoppingBag className="h-3.5 w-3.5 text-white" strokeWidth={2.5} />
-                  </span>
-                </button>
-              );
-            })}
-            {openHotspot && (
-              <div className="absolute z-10 w-56 max-w-[80vw] rounded-2xl border border-[var(--border)] bg-white shadow-[var(--shadow-pop)]"
-                style={{
-                  left: `clamp(112px, ${openHotspot.cx}%, calc(100% - 112px))`,
-                  top: openHotspot.cy <= 50 ? `${Math.min(openHotspot.cy + 5, 90)}%` : undefined,
-                  bottom: openHotspot.cy > 50 ? `${Math.min(100 - openHotspot.cy + 5, 90)}%` : undefined,
-                  transform: "translateX(-50%)",
-                }}>
-                <div className="flex items-start gap-3 p-3">
-                  {openHotspot.edit.reference_url && (
-                    /* eslint-disable-next-line @next/next/no-img-element */
-                    <img src={openHotspot.edit.reference_url} alt="" className="h-12 w-12 object-cover rounded-xl border border-[var(--border)] shrink-0" />
-                  )}
-                  <div className="min-w-0 flex-1 space-y-0.5">
-                    <p className="text-xs font-semibold capitalize leading-snug">{openHotspot.edit.product_title ?? openHotspot.label}</p>
-                    <p className="text-[11px] text-[var(--muted-foreground)]">
-                      {openHotspot.edit.product_price ?? "See price"} · {storeName(openHotspot.edit.buy_url)}
-                    </p>
-                    {openHotspot.edit.buy_url && (
-                      <a href={openHotspot.edit.buy_url} target="_blank" rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-[11px] text-[var(--accent)] hover:underline">
-                        Buy <ExternalLink className="h-3 w-3" />
-                      </a>
-                    )}
-                  </div>
-                  <button type="button" onClick={() => setOpenHotspot(null)} aria-label="Close"
-                    className="h-6 w-6 shrink-0 -mt-1 -mr-1 flex items-center justify-center rounded-full hover:bg-[var(--muted)]">
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              </div>
-            )}
+            {renderHotspots()}
+            {popover("w-56 max-w-[80vw]", "h-12 w-12", 112)}
           </div>
           {shopPanel}
         </div>

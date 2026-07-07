@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Eraser, Loader2, MapPin, Plus, Replace, ShoppingBag, Wand2, X } from "lucide-react";
 import { boxFromPlacement, type RailItem, type RailStatus, type RestyleWorkspace } from "./useRestyleWorkspace";
 import type { RestyleEdit } from "@/types";
-import { Button, IconButton, Switch, shopSummary, storeName } from "./ui";
+import { Button, IconButton, Switch, parsePrice, shopSummary, storeName } from "./ui";
 import { cn } from "@/lib/utils";
 import CroppedThumb from "./CroppedThumb";
 
@@ -157,6 +157,15 @@ function ChangeCard({
   const isInspo = !isRemove && !!e.reference_url && !e.buy_url;
   const isProduct = !isRemove && !!e.buy_url;
 
+  // "Dupe finder" — a pasted product link auto-triggers a search for cheaper alternatives (see
+  // product/route.ts); once it lands, surface it here too, not just inside "Shop similar items",
+  // so the savings aren't only discoverable by clicking in first.
+  const search = isProduct ? ws.searches[label.toLowerCase()] : undefined;
+  const refPrice = isProduct && e.product_price ? parsePrice(e.product_price) : 0;
+  const cheaperCount = search?.status === "ready" && refPrice > 0
+    ? search.results.filter((r) => { const p = parsePrice(r.price); return p > 0 && p < refPrice; }).length
+    : 0;
+
   return (
     <div className="rounded-xl border border-[var(--border)] p-2.5 space-y-2">
       <div className="flex items-start gap-3">
@@ -189,6 +198,12 @@ function ChangeCard({
               {e.product_price && e.buy_url && " · "}
               {e.buy_url && storeName(e.buy_url)}
             </p>
+          )}
+          {cheaperCount > 0 && (
+            <button type="button" onClick={() => ws.openSimilar(label, e.kind === "add" ? "add" : "swap", e.id)}
+              className="inline-flex items-center gap-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-medium px-2 py-0.5 hover:bg-emerald-100 transition-colors">
+              {cheaperCount} cheaper option{cheaperCount === 1 ? "" : "s"} found
+            </button>
           )}
           {isInspo && <p className="text-xs text-[var(--muted-foreground)]">From your photo</p>}
           {e.kind === "add" && (

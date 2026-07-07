@@ -16,29 +16,39 @@ export async function upsertSearch(
 
 /**
  * Find buyable products for an already-hosted, already-cropped reference photo (an edit's
- * `reference_url`) — the shared pipeline behind both the visual-search route's `imageUrl`
- * path and generate's deferred inspo search (run server-side in generate's `after()` so it
- * survives the client disconnecting). Returns fast, unscored results (already persisted) plus
- * a `finish()` continuation that does Gemini scoring + Wayfair token resolution and persists
- * the final set — callers decide whether to await `finish()` inline or hand it to `after()`.
+ * `reference_url`) — the shared pipeline behind the visual-search route's `imageUrl` path,
+ * generate's deferred inspo search, and the "dupe finder" auto-search on a pasted product link
+ * (run server-side in `after()` so it survives the client disconnecting). Returns fast, unscored
+ * results (already persisted) plus a `finish()` continuation that does Gemini scoring + Wayfair
+ * token resolution and persists the final set — callers decide whether to await `finish()`
+ * inline or hand it to `after()`.
+ *
+ * `titleHint` — when the caller already knows the product's real title (a pasted retailer link
+ * via `fetchProduct`, unlike an inspo photo with no listing to read from), skip the
+ * `describeScreenshotForSearch` vision call entirely and search on the confirmed title instead —
+ * cheaper AND a more targeted "find this exact item elsewhere" query than re-describing the photo.
  */
 export async function searchProductByImageUrl(params: {
-  restyleId: string; imageUrl: string; label: string;
+  restyleId: string; imageUrl: string; label: string; titleHint?: string;
 }): Promise<
   | { ok: true; results: ShoppingResult[]; finish: () => Promise<void> }
   | { ok: false; error: string; status: number }
 > {
-  const { restyleId, imageUrl, label } = params;
+  const { restyleId, imageUrl, label, titleHint } = params;
   const res = await fetch(imageUrl);
   if (!res.ok) return { ok: false, error: "Couldn't load that image.", status: 502 };
   const rawBuf = Buffer.from(await res.arrayBuffer());
   const mimeType = res.headers.get("content-type") || "image/jpeg";
   const rawBase64 = rawBuf.toString("base64");
 
-  const identified = await describeScreenshotForSearch({ imageBase64: rawBase64, mimeType }).catch(() => null);
-  if (!identified) return { ok: false, error: "Couldn't identify an item in that image.", status: 422 };
-
-  const searchQuery = [identified.productTitle, identified.description, identified.itemType].filter(Boolean).join(" ").trim();
+  let searchQuery: string;
+  if (titleHint?.trim()) {
+    searchQuery = titleHint.trim();
+  } else {
+    const identified = await describeScreenshotForSearch({ imageBase64: rawBase64, mimeType }).catch(() => null);
+    if (!identified) return { ok: false, error: "Couldn't identify an item in that image.", status: 422 };
+    searchQuery = [identified.productTitle, identified.description, identified.itemType].filter(Boolean).join(" ").trim();
+  }
 
   const [exact, keyword] = await Promise.all([
     searchByImage(imageUrl).catch((err) => { console.error("[restyle-search] Lens failed:", err); return [] as ShoppingResult[]; }),

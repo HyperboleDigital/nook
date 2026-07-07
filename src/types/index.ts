@@ -19,16 +19,6 @@ export interface Tour {
   created_at: string;
 }
 
-export interface Reel {
-  id: string;
-  user_id: string;
-  status: JobStatus;
-  higgsfield_generation_id: string | null;
-  output_url: string | null;
-  thumbnail_url: string | null;
-  title: string;
-  created_at: string;
-}
 
 export interface DetectedObject {
   label: string;

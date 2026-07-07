@@ -14,13 +14,13 @@ export default function HomePage() {
           Turn any property video into
           <br />
           <span className="text-transparent bg-clip-text bg-gradient-to-r from-slate-600 to-slate-900">
-            a 3D tour or viral Reel
+            an immersive 3D tour
           </span>
         </h1>
         <p className="text-xl text-[var(--muted-foreground)] max-w-2xl mx-auto mb-10">
-          Upload a walkthrough video. Nook creates an immersive 3D tour and
-          cinematic Instagram Reels — ready to share in minutes. Built for real
-          estate agents who want to close faster.
+          Upload a walkthrough video. Nook creates an immersive 3D tour —
+          ready to share in minutes. Built for real estate agents who want to
+          close faster.
         </p>
         <div className="flex flex-col sm:flex-row gap-4 justify-center">
           <SignUpButton mode="modal">
@@ -67,17 +67,17 @@ export default function HomePage() {
           <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-8">
             <div className="w-12 h-12 rounded-xl bg-slate-900 flex items-center justify-center mb-6">
               <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.069A1 1 0 0121 8.845v6.31a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
               </svg>
             </div>
-            <h2 className="text-2xl font-bold mb-3">Reel Creator</h2>
+            <h2 className="text-2xl font-bold mb-3">Room Restyle</h2>
             <p className="text-[var(--muted-foreground)] mb-6">
-              Upload property photos or clips. Pick a style — cinematic, luxury,
-              modern, or warm. Get a polished 9:16 MP4 ready for Instagram Reels,
-              TikTok, or YouTube Shorts.
+              Upload a room photo, tap any item, and swap it in with AI —
+              sourced from a photo, a product link, or a description. Share a
+              client link with the same tappable, shop-the-look experience.
             </p>
             <ul className="space-y-2 text-sm text-[var(--muted-foreground)]">
-              {["Upload photos or short video clips", "Choose cinematic style preset", "AI generates smooth motion video", "Download MP4 for social posting"].map((f) => (
+              {["Upload or take a photo of the room", "Tap an item to swap, adjust, or remove it", "Matched to real, buyable products", "Shareable client link, ready to shop"].map((f) => (
                 <li key={f} className="flex items-center gap-2">
                   <span className="text-green-500">✓</span> {f}
                 </li>
@@ -93,7 +93,7 @@ export default function HomePage() {
           <h2 className="text-3xl font-bold mb-4">Ready to stand out?</h2>
           <p className="text-[var(--muted-foreground)] mb-8 max-w-lg mx-auto">
             Join agents already using Nook to close listings faster with
-            immersive 3D tours and scroll-stopping social content.
+            immersive 3D tours and AI-powered room restyles.
           </p>
           <SignUpButton mode="modal">
             <button className="bg-[var(--primary)] text-[var(--primary-foreground)] px-8 py-3.5 rounded-xl text-base font-medium hover:opacity-90 transition-opacity">

@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import { Sparkles, ShoppingCart, ChevronLeft } from "lucide-react";
 import type { RestyleWorkspace } from "./useRestyleWorkspace";
 import type { ShoppingResult } from "@/lib/shopping-search";
-import { Button, SkeletonProductCard, Spinner, StatusBanner } from "./ui";
+import { Button, SkeletonProductCard, Spinner, StatusBanner, parsePrice } from "./ui";
 import CroppedThumb from "./CroppedThumb";
 
 /**
@@ -22,6 +22,10 @@ export default function SimilarItemsPanel({ ws }: { ws: RestyleWorkspace }) {
   const search = ws.searches[key] ?? { status: "idle" as const, scored: false, results: [] };
   const stagedEdit = ws.stagedItems.find((e) => e.target_label?.toLowerCase() === key) ?? null;
   const detected = ws.objects.find((o) => o.label.toLowerCase() === key) ?? null;
+  // "Dupe finder" reference price — only real when the currently-staged item has a confirmed
+  // price (a pasted product link, not a photo/description with nothing resolved yet). Passed
+  // down so each candidate can show "X% cheaper" when it genuinely beats this price.
+  const refPrice = stagedEdit?.product_price ? parsePrice(stagedEdit.product_price) : 0;
 
   // Kick off a search if this slot hasn't been searched yet. Prefers an already-staged
   // photo/product's own image (no re-upload needed); otherwise falls back to the ORIGINAL
@@ -81,14 +85,24 @@ export default function SimilarItemsPanel({ ws }: { ws: RestyleWorkspace }) {
         const pickKey = `similar:${key}:${i}`;
         const picking = ws.pickingKey === pickKey;
         const inUse = stagedEdit?.buy_url && c.productUrl === stagedEdit.buy_url;
-        return <SimilarCard key={i} c={c} picking={picking} inUse={!!inUse}
+        return <SimilarCard key={i} c={c} picking={picking} inUse={!!inUse} refPrice={refPrice}
           onTry={() => ws.pickCandidate(c as ShoppingResult, label, pickKey, sourcing.stagedEditId ?? undefined)} />;
       })}
     </div>
   );
 }
 
-function SimilarCard({ c, picking, inUse, onTry }: { c: ShoppingResult; picking: boolean; inUse: boolean; onTry: () => void }) {
+function SimilarCard({
+  c, picking, inUse, refPrice, onTry,
+}: { c: ShoppingResult; picking: boolean; inUse: boolean; refPrice: number; onTry: () => void }) {
+  // Only ever a positive, real savings — never fabricate or round up to a claim the candidate
+  // doesn't actually beat (no refPrice, no candidate price, or candidate not actually cheaper →
+  // no badge at all, rather than a misleading "0% cheaper").
+  const candPrice = parsePrice(c.price);
+  const savingsPct = refPrice > 0 && candPrice > 0 && candPrice < refPrice
+    ? Math.round((1 - candPrice / refPrice) * 100)
+    : 0;
+
   return (
     <div className="flex gap-3 p-3 rounded-2xl border border-[var(--border)] bg-white shadow-[var(--shadow-soft)]">
       {c.thumbnail ? (
@@ -98,6 +112,11 @@ function SimilarCard({ c, picking, inUse, onTry }: { c: ShoppingResult; picking:
         <div className="h-16 w-16 rounded-xl bg-[var(--muted)] border border-[var(--border)] shrink-0" />
       )}
       <div className="min-w-0 flex-1 space-y-0.5">
+        {savingsPct > 0 && (
+          <span className="inline-block rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-semibold px-1.5 py-0.5 mb-0.5">
+            {savingsPct}% cheaper
+          </span>
+        )}
         <p className="text-sm font-medium line-clamp-2 leading-snug">{c.title}</p>
         <p className="text-xs text-[var(--muted-foreground)]">
           {c.retailer}

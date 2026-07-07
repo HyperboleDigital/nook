@@ -14,9 +14,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Nook — 3D Tours & Reels for Real Estate Agents",
+  title: "Nook — AI Room Restyle & Shop the Look",
   description:
-    "Create stunning 3D walkthroughs and cinematic Instagram Reels from your property videos in minutes.",
+    "Upload a room photo, swap in real furniture with AI, and share a shoppable client link in minutes.",
 };
 
 export default function RootLayout({

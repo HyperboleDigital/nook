@@ -52,7 +52,7 @@ export async function POST(req: Request) {
     // Ensure the user row exists (FK), mirroring the tours route.
     const user = await currentUser();
     await supabaseAdmin.from("users").upsert(
-      { clerk_id: userId, email: user?.emailAddresses?.[0]?.emailAddress ?? "", plan: "free", tours_used: 0, reels_used: 0 },
+      { clerk_id: userId, email: user?.emailAddresses?.[0]?.emailAddress ?? "", plan: "free", tours_used: 0 },
       { onConflict: "clerk_id", ignoreDuplicates: true }
     );
 

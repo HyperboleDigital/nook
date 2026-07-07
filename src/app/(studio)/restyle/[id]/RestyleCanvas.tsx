@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Columns2, Download, Plus, Share2, Check, ArrowLeftRight } from "lucide-react";
+import { Columns2, Download, Plus, Share2, ArrowLeftRight } from "lucide-react";
 import type { CSSProperties } from "react";
 import type { CanvasHotspot, RestyleWorkspace } from "./useRestyleWorkspace";
 import { Button, IconButton, ProgressOverlay, ShopSummaryPill, Spinner } from "./ui";
 import ObjectHotspots from "./ObjectHotspots";
 import PinPlacementLayer from "./PinPlacementLayer";
+import ShareMenu from "./ShareMenu";
 
 // Fallback for the brief window before the frame/image have been measured (or if width/height
 // are ever unknown): natural aspect, full width, height follows. Rounded + shadowed like the
@@ -38,7 +39,7 @@ const FALLBACK_IMG = "block w-full h-auto max-h-[85dvh] object-contain";
 export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
   const { restyle, generating, displayUrl } = ws;
   const [showCompare, setShowCompare] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
 
   // Desktop image-box measurement (see doc comment above). `naturalSize` is measured directly
   // off the actual rendered <img> (onLoad) rather than trusted solely from `restyle.width`/
@@ -145,14 +146,8 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
     ws.openSourcing(h.label, isDetected ? "swap" : "add", h.edit?.id ?? null);
   };
 
-  const share = async () => {
-    const url = `${window.location.origin}/r/${ws.id}`;
-    try {
-      if (navigator.share) { await navigator.share({ title: restyle.title ?? "Room design", url }); return; }
-      await navigator.clipboard.writeText(url);
-      setCopied(true); setTimeout(() => setCopied(false), 2000);
-    } catch { /* user cancelled share sheet */ }
-  };
+  const shareUrl = `${window.location.origin}/r/${ws.id}`;
+  const shareTitle = restyle.title ?? "Room design";
 
   // Skip the pin step: for the upfront add flow (no edit yet) proceed to sourcing without a
   // location; for the post-hoc offer (edit exists) just close the pin layer.
@@ -169,7 +164,7 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
           <span className="font-medium">Tap the photo to place {pinLabel}</span>
           <button type="button" onClick={skipPin}
             className="rounded-full px-3 py-1 bg-white/15 hover:bg-white/25 transition-colors shrink-0">
-            Skip
+            Cancel
           </button>
         </div>
       )}
@@ -239,16 +234,18 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
         )}
 
         <div className="absolute top-3 right-3 flex items-center gap-2">
-          {copied && <span className="text-[11px] px-2 py-1 rounded-full bg-[var(--foreground)] text-[var(--background)]">Link copied</span>}
           {!viewingOriginal && (
             <IconButton onClick={() => setShowCompare((v) => !v)} aria-label="Compare before / after"
               className={showCompare ? "bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)] hover:text-[var(--background)]" : ""}>
               <Columns2 className="h-4 w-4" />
             </IconButton>
           )}
-          <IconButton onClick={share} aria-label="Share link">
-            {copied ? <Check className="h-4 w-4 text-emerald-600" /> : <Share2 className="h-4 w-4" />}
-          </IconButton>
+          <div className="relative">
+            <IconButton onClick={() => setShareOpen((v) => !v)} aria-label="Share link">
+              <Share2 className="h-4 w-4" />
+            </IconButton>
+            {shareOpen && <ShareMenu url={shareUrl} title={shareTitle} onClose={() => setShareOpen(false)} />}
+          </div>
           <IconButton onClick={ws.downloadImage} aria-label="Download image">
             <Download className="h-4 w-4" />
           </IconButton>

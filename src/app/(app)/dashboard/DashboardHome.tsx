@@ -2,11 +2,11 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowUpRight, Clapperboard, Plus, Rotate3d, Search, Sofa, Sparkles, UploadCloud } from "lucide-react";
+import { ArrowUpRight, Plus, Rotate3d, Search, Sofa, Sparkles, UploadCloud } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export type DashboardProject = {
-  kind: "restyle" | "tour" | "reel";
+  kind: "restyle" | "tour";
   id: string;
   title: string;
   href: string;
@@ -15,17 +15,18 @@ export type DashboardProject = {
   status?: string;
 };
 
+// Tours isn't shipping in the MVP — its filter pill and quick-action link were removed below
+// (nav-visibility only; see the layout.tsx NAV comment). KIND_ICON still maps "tour" since any
+// pre-existing tour project still needs an icon to render in the list below. Reels was fully
+// sunset (app code deleted entirely, see layout.tsx's NAV comment) — no "reel" kind exists anymore.
 const FILTERS: { value: "all" | DashboardProject["kind"]; label: string }[] = [
   { value: "all", label: "All" },
   { value: "restyle", label: "Restyles" },
-  { value: "tour", label: "Tours" },
-  { value: "reel", label: "Reels" },
 ];
 
 const KIND_ICON: Record<DashboardProject["kind"], typeof Sofa> = {
   restyle: Sofa,
   tour: Rotate3d,
-  reel: Clapperboard,
 };
 
 const STATUS_STYLES: Record<string, string> = {
@@ -99,12 +100,6 @@ export default function DashboardHome({ projects }: { projects: DashboardProject
       <div className="flex flex-wrap gap-2 mb-8">
         <Link href="/restyle/new" className="rounded-full border border-[var(--border)] bg-[var(--card)] px-4 py-2 text-sm font-medium hover:border-[var(--foreground)] transition-colors inline-flex items-center gap-1.5">
           <Plus className="h-3.5 w-3.5" /> New Restyle
-        </Link>
-        <Link href="/tours/new" className="rounded-full border border-[var(--border)] bg-[var(--card)] px-4 py-2 text-sm font-medium hover:border-[var(--foreground)] transition-colors inline-flex items-center gap-1.5">
-          <Plus className="h-3.5 w-3.5" /> New 3D Tour
-        </Link>
-        <Link href="/reels/new" className="rounded-full border border-[var(--border)] bg-[var(--card)] px-4 py-2 text-sm font-medium hover:border-[var(--foreground)] transition-colors inline-flex items-center gap-1.5">
-          <Plus className="h-3.5 w-3.5" /> New Reel
         </Link>
       </div>
 
