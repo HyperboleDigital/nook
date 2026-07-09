@@ -3,7 +3,7 @@
 import { useRef } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
-import { House, Images, Camera } from "lucide-react";
+import { House, Images, Plus } from "lucide-react";
 import { stashCapturedFile } from "./restyle/new/capture-handoff";
 
 const TABS = [
@@ -16,19 +16,25 @@ const TABS = [
  * both destinations live here). Mounted from (app)/layout.tsx only, so it never appears in the
  * (studio) editor, marketing pages, or the public share page (separate route groups).
  *
- * The center camera button owns a hidden file input directly (rather than the wizard page owning
- * it) because opening the OS picker from a tap requires a same-gesture click on a real
- * `<input type="file">` — a `.click()` fired after a client-side navigation is unreliable,
- * especially on iOS Safari. The captured/picked file is handed to the wizard via
- * capture-handoff's module-scope stash, picked up on mount at /restyle/new?captured=1.
+ * The center button always starts a new room restyle (the only flow that fully exists today —
+ * standalone "find this product" with no room isn't built, sourcing a product photo only
+ * happens inside an already-created project). It's a Plus icon, not a camera one: the action is
+ * "start something new," and a camera icon over-promised camera-only capture when the button
+ * (like the icon it triggers, see below) has always also supported picking an existing photo.
  *
- * Deliberately NO `capture="environment"` here — that attribute forces the OS straight into a
- * camera-only capture view with no way to pick an existing photo (iOS's stripped-down camera
- * view has no "Photo Library" shortcut the way the full Camera app does; Android is worse, often
- * no gallery affordance at all). Plain `accept="image/*"` instead opens the native chooser
- * (iOS: Take Photo / Photo Library / Choose Files; Android: an app picker including Camera and
- * Gallery) — one tap still gets to the camera (it's always offered), but a photo already on the
- * phone is reachable too, which `capture` made impossible.
+ * It owns a hidden file input directly (rather than the wizard page owning it) because opening
+ * the OS picker from a tap requires a same-gesture click on a real `<input type="file">` — a
+ * `.click()` fired after a client-side navigation is unreliable, especially on iOS Safari. The
+ * captured/picked file is handed to the wizard via capture-handoff's module-scope stash, picked
+ * up on mount at /restyle/new?captured=1.
+ *
+ * Deliberately NO `capture="environment"` on the input — that attribute forces the OS straight
+ * into a camera-only capture view with no way to pick an existing photo (iOS's stripped-down
+ * camera view has no "Photo Library" shortcut the way the full Camera app does; Android is
+ * worse, often no gallery affordance at all). Plain `accept="image/*"` instead opens the native
+ * chooser (iOS: Take Photo / Photo Library / Choose Files; Android: an app picker including
+ * Camera and Gallery) — one tap still gets to the camera (it's always offered), but a photo
+ * already on the phone is reachable too, which `capture` made impossible.
  */
 export default function AppTabBar() {
   const pathname = usePathname();
@@ -38,9 +44,9 @@ export default function AppTabBar() {
   const isActive = (href: string) =>
     href === "/dashboard" ? pathname === href : pathname.startsWith(href);
 
-  const onCapture = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const onPick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    e.target.value = ""; // allow capturing the same shot again next time
+    e.target.value = ""; // allow picking/capturing the same file again next time
     if (!file) return;
     stashCapturedFile(file);
     router.push("/restyle/new?captured=1");
@@ -58,17 +64,17 @@ export default function AppTabBar() {
           <button
             type="button"
             onClick={() => inputRef.current?.click()}
-            aria-label="Take a photo of a room"
+            aria-label="Start a new room restyle"
             className="relative -translate-y-3 h-14 w-14 rounded-full bg-[var(--primary)] text-[var(--primary-foreground)] shadow-[var(--shadow-pop)] flex items-center justify-center active:scale-95 transition-transform"
           >
-            <Camera className="h-6 w-6" />
+            <Plus className="h-6 w-6" />
           </button>
           <input
             ref={inputRef}
             type="file"
             accept="image/*"
             hidden
-            onChange={onCapture}
+            onChange={onPick}
           />
         </div>
 
