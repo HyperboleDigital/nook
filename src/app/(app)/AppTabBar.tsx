@@ -17,10 +17,18 @@ const TABS = [
  * (studio) editor, marketing pages, or the public share page (separate route groups).
  *
  * The center camera button owns a hidden file input directly (rather than the wizard page owning
- * it) because opening the OS camera from a tap requires a same-gesture click on a real
- * `<input capture>` — a `.click()` fired after a client-side navigation is unreliable, especially
- * on iOS Safari. The captured file is handed to the wizard via capture-handoff's module-scope
- * stash, picked up on mount at /restyle/new?captured=1.
+ * it) because opening the OS picker from a tap requires a same-gesture click on a real
+ * `<input type="file">` — a `.click()` fired after a client-side navigation is unreliable,
+ * especially on iOS Safari. The captured/picked file is handed to the wizard via
+ * capture-handoff's module-scope stash, picked up on mount at /restyle/new?captured=1.
+ *
+ * Deliberately NO `capture="environment"` here — that attribute forces the OS straight into a
+ * camera-only capture view with no way to pick an existing photo (iOS's stripped-down camera
+ * view has no "Photo Library" shortcut the way the full Camera app does; Android is worse, often
+ * no gallery affordance at all). Plain `accept="image/*"` instead opens the native chooser
+ * (iOS: Take Photo / Photo Library / Choose Files; Android: an app picker including Camera and
+ * Gallery) — one tap still gets to the camera (it's always offered), but a photo already on the
+ * phone is reachable too, which `capture` made impossible.
  */
 export default function AppTabBar() {
   const pathname = usePathname();
@@ -59,7 +67,6 @@ export default function AppTabBar() {
             ref={inputRef}
             type="file"
             accept="image/*"
-            capture="environment"
             hidden
             onChange={onCapture}
           />

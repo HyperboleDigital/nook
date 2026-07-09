@@ -78,17 +78,22 @@ function NewRestyleForm() {
     select(f);
   }, [select]);
 
-  // Picked up a photo captured from the bottom tab bar's camera button (a same-gesture click on
-  // its own hidden input, before this navigation — see capture-handoff.ts). Runs it through the
-  // same portrait check as an in-wizard capture, landing on roomType (skipping the "ready" tips
-  // step, since the user already committed to the camera by tapping the tab bar).
+  // Picked up a photo from the bottom tab bar's button (a same-gesture click on its own hidden
+  // input, before this navigation — see capture-handoff.ts). That input has no `capture`
+  // attribute (see AppTabBar's comment — it needed to offer a library option too), so the result
+  // could be a fresh camera shot OR an existing photo, and a File gives no reliable way to tell
+  // which. Goes through the plain `select` path (no portrait-retake nag — that's only meaningful
+  // for a photo just taken, and would be a false nag on a library pick), landing on roomType
+  // directly (skipping the "ready" tips step, since the user already committed by tapping the
+  // tab bar). A genuine camera capture still gets the portrait check via the wizard's own
+  // in-flow "Take a photo" button, which keeps `capture="environment"`.
   useEffect(() => {
     if (searchParams.get("captured") !== "1") return;
     const f = takeCapturedFile();
     if (!f) return;
-    // Deferred a tick — selectFromCamera sets state, and effects shouldn't call setState
-    // synchronously in their body (same pattern as this file's old isMobile-detection effect).
-    Promise.resolve().then(() => selectFromCamera(f));
+    // Deferred a tick — select() sets state, and effects shouldn't call setState synchronously
+    // in their body (same pattern as this file's old isMobile-detection effect).
+    Promise.resolve().then(() => select(f));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
