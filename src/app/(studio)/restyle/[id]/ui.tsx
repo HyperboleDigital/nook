@@ -2,7 +2,7 @@
 
 import { cva, type VariantProps } from "class-variance-authority";
 import { ExternalLink, ShoppingBag, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import type { RestyleEdit } from "@/types";
@@ -47,11 +47,14 @@ export function Button({
 
 // ── IconButton ────────────────────────────────────────────────────────────────
 // Round floating button for canvas overlays — soft shadow lifts it off the photo
+// `before:-inset-1.5` extends the actual hit area to ~48px without growing the 36px visual —
+// keeps desktop density unchanged while meeting the 44px touch-target guideline on mobile.
 export function IconButton({ className, ...props }: ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
     <button
       className={cn(
-        "h-9 w-9 inline-flex items-center justify-center rounded-full",
+        "relative h-9 w-9 inline-flex items-center justify-center rounded-full",
+        "before:absolute before:-inset-1.5 before:rounded-full before:content-['']",
         "bg-white border border-[var(--border)] text-[var(--muted-foreground)] shadow-[var(--shadow-soft)]",
         "hover:border-[var(--foreground)] hover:text-[var(--foreground)]",
         "cursor-pointer disabled:opacity-40 transition-colors",
@@ -91,6 +94,9 @@ export function Switch({
       onClick={() => (disabled ? onDisabledClick?.() : onChange())}
       className={cn(
         "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors",
+        // Extends the hit area to a real touch target without growing the visible track —
+        // ChangesPanel's SwitchRow already gives the row vertical room for this.
+        "before:absolute before:-inset-y-3 before:-inset-x-2 before:content-['']",
         disabled
           // Genuinely locked (can't interact at all) — pale, matches other disabled controls.
           ? "bg-[var(--muted)] cursor-not-allowed"
@@ -399,29 +405,89 @@ export function SegmentedTabs<T extends string>({
   );
 }
 
+// Locks/restores document scroll while `active` is true — shared by Sheet and Modal so the
+// page underneath can't scroll behind an open overlay on touch.
+function useBodyScrollLock(active: boolean) {
+  useEffect(() => {
+    if (!active) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, [active]);
+}
+
 // ── Sheet ─────────────────────────────────────────────────────────────────────
 // Mobile-only fixed bottom sheet + backdrop. On desktop the caller docks a persistent right
 // column instead (see RestyleStudio) — the studio's right rail is always present there
 // (defaults to "Shop this look"), so a modal overlay doesn't fit; SheetChrome is exported so
 // that docked column can reuse the same title-bar + close-button styling.
-// No drag-to-dismiss — X button + backdrop tap only.
 export function Sheet({
   open, onClose, title, children,
 }: { open: boolean; onClose: () => void; title?: string; children: ReactNode }) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{ startY: number; startTime: number } | null>(null);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
+  useBodyScrollLock(open);
+
+  // Drag-to-dismiss on the grabber/header only (not the scrollable body, so it doesn't fight
+  // list scrolling). Direct ref mutation during the drag, never React state — the same
+  // drag-perf pattern as the canvas compare slider (state on every pointermove re-renders
+  // whatever's mounted above it).
+  const onDragStart = (e: React.PointerEvent) => {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dragRef.current = { startY: e.clientY, startTime: Date.now() };
+  };
+  const onDragMove = (e: React.PointerEvent) => {
+    if (!dragRef.current || !panelRef.current) return;
+    const dy = Math.max(0, e.clientY - dragRef.current.startY);
+    panelRef.current.style.transition = "none";
+    panelRef.current.style.transform = `translateY(${dy}px)`;
+  };
+  const onDragEnd = (e: React.PointerEvent) => {
+    if (!dragRef.current || !panelRef.current) return;
+    const dy = Math.max(0, e.clientY - dragRef.current.startY);
+    const elapsedMs = Math.max(1, Date.now() - dragRef.current.startTime);
+    const velocity = dy / elapsedMs; // px/ms
+    panelRef.current.style.transition = "transform 150ms cubic-bezier(0,0,0.2,1)";
+    if (dy > 100 || velocity > 0.5) {
+      onClose();
+    } else {
+      panelRef.current.style.transform = "translateY(0)";
+    }
+    dragRef.current = null;
+  };
 
   if (!open) return null;
   return (
     <div className="md:hidden">
       <div className="fixed inset-0 z-40 bg-black/40" onClick={onClose} />
-      <div className="fixed inset-x-0 bottom-0 z-50 max-h-[85dvh] flex flex-col rounded-t-3xl border-t border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow-pop)] pb-[env(safe-area-inset-bottom)]">
-        <div className="flex justify-center pt-1.5 shrink-0"><span className="h-1 w-10 rounded-full bg-[var(--border)]" /></div>
-        <SheetChrome title={title} onClose={onClose} />
+      <div
+        ref={panelRef}
+        className="fixed inset-x-0 bottom-0 z-50 max-h-[85dvh] flex flex-col rounded-t-3xl border-t border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow-pop)] pb-[env(safe-area-inset-bottom)] animate-[sheet-up_200ms_ease-out]"
+      >
+        <div
+          className="flex justify-center pt-1.5 shrink-0 touch-none cursor-grab active:cursor-grabbing"
+          onPointerDown={onDragStart}
+          onPointerMove={onDragMove}
+          onPointerUp={onDragEnd}
+          onPointerCancel={onDragEnd}
+        >
+          <span className="h-1 w-10 rounded-full bg-[var(--border)]" />
+        </div>
+        <div
+          onPointerDown={onDragStart}
+          onPointerMove={onDragMove}
+          onPointerUp={onDragEnd}
+          onPointerCancel={onDragEnd}
+        >
+          <SheetChrome title={title} onClose={onClose} />
+        </div>
         <div className="overflow-y-auto px-4 pb-4">{children}</div>
       </div>
     </div>
@@ -454,6 +520,7 @@ export function Modal({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
+  useBodyScrollLock(open);
 
   if (!open) return null;
   return (
@@ -467,6 +534,43 @@ export function Modal({
         <div className="overflow-y-auto px-4 pb-4">{children}</div>
       </div>
     </div>
+  );
+}
+
+// ── ConfirmDialog ─────────────────────────────────────────────────────────────
+// Replaces native window.confirm()/alert() — blocking OS dialogs that are jarring and
+// off-brand, especially mid-edit in the immersive studio. Built on Modal (same primitive
+// StagePicker already uses), full-width button pair for easy mobile tapping.
+export function ConfirmDialog({
+  open, onClose, onConfirm, title, body, confirmLabel = "Confirm", destructive,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+  title: string;
+  body: ReactNode;
+  confirmLabel?: string;
+  destructive?: boolean;
+}) {
+  return (
+    <Modal open={open} onClose={onClose} title={title}>
+      <div className="space-y-4">
+        <div className="text-sm text-[var(--muted-foreground)]">{body}</div>
+        <div className="flex gap-2">
+          <Button variant="outline" size="lg" className="flex-1" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            variant={destructive ? "destructive" : "primary"}
+            size="lg"
+            className="flex-1"
+            onClick={() => { onConfirm(); onClose(); }}
+          >
+            {confirmLabel}
+          </Button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

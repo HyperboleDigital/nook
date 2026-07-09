@@ -9,6 +9,12 @@ const isPublicRoute = createRouteMatcher([
   "/sign-in(.*)",
   "/sign-up(.*)",
   "/api/webhooks/(.*)",
+  // PWA manifest + icons: browsers fetch these unauthenticated (install-check, tab icon on the
+  // public marketing/share pages) — without this they 307 to /sign-in, which silently breaks
+  // installability instead of erroring loudly.
+  "/manifest.webmanifest",
+  "/apple-touch-icon.png",
+  "/icons/(.*)",
 ]);
 
 export default clerkMiddleware(async (auth, req) => {

@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useState, useRef, useEffect, useCallback } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { upload } from "@vercel/blob/client";
 import {
@@ -11,6 +11,7 @@ import {
 import { downscaleImage } from "@/lib/image-client";
 import { Button, Input, Spinner, StatusBanner } from "@/app/(studio)/restyle/[id]/ui";
 import { cn } from "@/lib/utils";
+import { takeCapturedFile } from "./capture-handoff";
 
 type Step = "ready" | "photo" | "roomType" | "confirm";
 const STEPS: Step[] = ["ready", "photo", "roomType", "confirm"];
@@ -25,7 +26,16 @@ const ROOM_TYPES: { value: string; label: string; icon: typeof Sofa }[] = [
 ];
 
 export default function NewRestylePage() {
+  return (
+    <Suspense>
+      <NewRestyleForm />
+    </Suspense>
+  );
+}
+
+function NewRestyleForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [step, setStep] = useState<Step>("ready");
   const [file, setFile] = useState<File | null>(null);
   const [roomType, setRoomType] = useState<string | null>(null);
@@ -35,22 +45,9 @@ export default function NewRestylePage() {
   const [loading, setLoading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [isMobile, setIsMobile] = useState(false); // only phones can actually take a photo
   const [portraitFile, setPortraitFile] = useState<File | null>(null); // camera shot taken upright — offer a retake before committing
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null); // capture="environment" → opens the camera on mobile
-
-  useEffect(() => {
-    let active = true;
-    Promise.resolve().then(() => {
-      if (!active) return;
-      setIsMobile(
-        /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ||
-        (navigator.maxTouchPoints > 1 && matchMedia("(pointer: coarse)").matches),
-      );
-    });
-    return () => { active = false; };
-  }, []);
 
   // Selecting a photo only previews it — nothing is uploaded or processed until the
   // user confirms, so a wrong pick can be swapped out first. Advances to the room-type step.
@@ -80,6 +77,20 @@ export default function NewRestylePage() {
     } catch { /* couldn't check dimensions — proceed rather than block on it */ }
     select(f);
   }, [select]);
+
+  // Picked up a photo captured from the bottom tab bar's camera button (a same-gesture click on
+  // its own hidden input, before this navigation — see capture-handoff.ts). Runs it through the
+  // same portrait check as an in-wizard capture, landing on roomType (skipping the "ready" tips
+  // step, since the user already committed to the camera by tapping the tab bar).
+  useEffect(() => {
+    if (searchParams.get("captured") !== "1") return;
+    const f = takeCapturedFile();
+    if (!f) return;
+    // Deferred a tick — selectFromCamera sets state, and effects shouldn't call setState
+    // synchronously in their body (same pattern as this file's old isMobile-detection effect).
+    Promise.resolve().then(() => selectFromCamera(f));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Paste from clipboard (Cmd+V / Ctrl+V)
   useEffect(() => {
@@ -248,17 +259,24 @@ export default function NewRestylePage() {
           >
             <UploadCloud className="h-8 w-8 mx-auto mb-2 text-[var(--muted-foreground)]" strokeWidth={1.5} />
             <div className="text-sm">Drag &amp; drop, paste, or tap to choose</div>
-            <div className="text-xs text-[var(--muted-foreground)] mt-1">JPG or PNG · Cmd+V to paste from clipboard</div>
+            {/* Both device-specific hint lines render always; CSS (not a UA-sniffed JS state)
+                picks the right one per-device — no first-paint flash between "drag & drop /
+                Cmd+V" (meaningless on a phone) and a touch-appropriate hint. */}
+            <div className="text-xs text-[var(--muted-foreground)] mt-1 [@media(pointer:fine)]:hidden">
+              JPG or PNG · tap to choose
+            </div>
+            <div className="text-xs text-[var(--muted-foreground)] mt-1 [@media(pointer:coarse)]:hidden">
+              JPG or PNG · Cmd+V to paste from clipboard
+            </div>
           </div>
-          {isMobile ? (
-            <Button variant="primary" size="lg" className="w-full" onClick={() => cameraInputRef.current?.click()}>
-              <Camera className="h-4 w-4" /> Take a photo
-            </Button>
-          ) : (
-            <Button variant="primary" size="lg" className="w-full" onClick={() => fileInputRef.current?.click()}>
-              <ImagePlus className="h-4 w-4" /> Choose a photo
-            </Button>
-          )}
+          {/* Same device-split via CSS, not a UA-sniffed isMobile state — that used to flash
+              "Choose a photo" before flipping to "Take a photo" on first paint. */}
+          <Button variant="primary" size="lg" className="w-full [@media(pointer:fine)]:hidden" onClick={() => cameraInputRef.current?.click()}>
+            <Camera className="h-4 w-4" /> Take a photo
+          </Button>
+          <Button variant="primary" size="lg" className="w-full [@media(pointer:coarse)]:hidden" onClick={() => fileInputRef.current?.click()}>
+            <ImagePlus className="h-4 w-4" /> Choose a photo
+          </Button>
         </div>
       )}
 
@@ -324,6 +342,10 @@ export default function NewRestylePage() {
                 <h1 className="text-xl font-bold tracking-tight">Your room is ready</h1>
                 <p className="text-sm text-[var(--muted-foreground)] mt-0.5">Is this the room you want to restyle?</p>
               </div>
+              {/* Rendered right under the step it belongs to — was at the very bottom of the
+                  page, outside every step block, easy to miss below the fold after a failed
+                  submit landed the user back here. */}
+              {error && <StatusBanner variant="error">{error}</StatusBanner>}
               <div className="space-y-1">
                 <label className="text-xs font-medium">Name this room</label>
                 {/* No autoFocus — it popped the mobile keyboard the instant this screen loaded,
@@ -349,8 +371,6 @@ export default function NewRestylePage() {
         </div>
       )}
 
-      {error && <StatusBanner variant="error" className="mt-4">{error}</StatusBanner>}
-
       {portraitFile && (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
           onClick={() => setPortraitFile(null)}>
@@ -362,11 +382,11 @@ export default function NewRestylePage() {
                 That photo is upright — turning your phone sideways fits more of the room in frame. You can retake it, or use this one as-is.
               </p>
             </div>
-            <div className="flex gap-2">
-              <Button variant="primary" className="flex-1" onClick={() => { setPortraitFile(null); cameraInputRef.current?.click(); }}>
+            <div className="flex flex-col gap-2">
+              <Button variant="primary" size="lg" className="w-full" onClick={() => { setPortraitFile(null); cameraInputRef.current?.click(); }}>
                 Retake
               </Button>
-              <Button variant="outline" onClick={() => { const f = portraitFile; setPortraitFile(null); select(f); }}>
+              <Button variant="outline" size="lg" className="w-full" onClick={() => { const f = portraitFile; setPortraitFile(null); select(f); }}>
                 Use it anyway
               </Button>
             </div>

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Eraser, Loader2, MapPin, Plus, Replace, ShoppingBag, Wand2, X } from "lucide-react";
 import { boxFromPlacement, type RailItem, type RailStatus, type RestyleWorkspace } from "./useRestyleWorkspace";
 import type { RestyleEdit } from "@/types";
-import { Button, IconButton, Switch, parsePrice, shopSummary, storeName } from "./ui";
+import { Button, ConfirmDialog, IconButton, Switch, parsePrice, shopSummary, storeName } from "./ui";
 import { cn } from "@/lib/utils";
 import CroppedThumb from "./CroppedThumb";
 
@@ -31,9 +31,24 @@ function StatusChip({ status }: { status: RailStatus }) {
 
 // Deleting a change is permanent (unlike a switch flip, which just queues the flag change — see
 // the toggle gotcha) — there's no "Turn back on" for something that's been deleted, so confirm
-// first, same pattern as GenerateBar's "Empty the room".
-function confirmDelete(what: string, onConfirm: () => void) {
-  if (window.confirm(`Delete ${what}? This can't be undone.`)) onConfirm();
+// first, same pattern as GenerateBar's "Empty the room". `useDeleteConfirm` gives each card its
+// own dialog state (a ConfirmDialog, not window.confirm — no blocking OS dialog) and returns a
+// `request(what, onConfirm)` to call from the delete button's onClick.
+function useDeleteConfirm() {
+  const [pending, setPending] = useState<{ what: string; onConfirm: () => void } | null>(null);
+  const request = (what: string, onConfirm: () => void) => setPending({ what, onConfirm });
+  const dialog = (
+    <ConfirmDialog
+      open={!!pending}
+      onClose={() => setPending(null)}
+      onConfirm={() => pending?.onConfirm()}
+      title="Delete this change?"
+      body={<>Delete {pending?.what}? This can&apos;t be undone.</>}
+      confirmLabel="Delete"
+      destructive
+    />
+  );
+  return { request, dialog };
 }
 
 /**
@@ -154,6 +169,8 @@ function ChangeCard({
   const { edit: e, status } = item;
   const label = e.target_label ?? "item";
   const isRemove = e.kind === "remove";
+  const deleteConfirm = useDeleteConfirm();
+  const refineDeleteConfirm = useDeleteConfirm();
   const isInspo = !isRemove && !!e.reference_url && !e.buy_url;
   const isProduct = !isRemove && !!e.buy_url;
 
@@ -218,11 +235,12 @@ function ChangeCard({
         </div>
         {!e.id.startsWith("optimistic-") && (
           <IconButton aria-label="Delete this change" className="h-7 w-7 shrink-0"
-            onClick={() => confirmDelete(isRemove ? `"Removed the ${label}"` : label, () => ws.remove(e.id))}>
+            onClick={() => deleteConfirm.request(isRemove ? `"Removed the ${label}"` : label, () => ws.remove(e.id))}>
             <X className="h-3.5 w-3.5" />
           </IconButton>
         )}
       </div>
+      {deleteConfirm.dialog}
 
       {e.id.startsWith("optimistic-") ? (
         <p className="text-[11px] text-[var(--muted-foreground)] flex items-center gap-1">
@@ -251,7 +269,7 @@ function ChangeCard({
               &quot;{refine.edit.instruction}&quot;
             </p>
             <IconButton aria-label="Delete this instruction" className="h-6 w-6 shrink-0"
-              onClick={() => confirmDelete("this instruction", () => ws.remove(refine.edit.id))}>
+              onClick={() => refineDeleteConfirm.request("this instruction", () => ws.remove(refine.edit.id))}>
               <X className="h-3 w-3" />
             </IconButton>
           </div>
@@ -259,6 +277,7 @@ function ChangeCard({
             <StatusChip status={refine.status} />
             <SwitchRow active={refine.edit.active} toggling={toggling} onToggle={() => onToggle(refine.edit.id, !refine.edit.active)} />
           </div>
+          {refineDeleteConfirm.dialog}
         </div>
       )}
     </div>
@@ -269,6 +288,7 @@ function RefineCard({
   ws, item, toggling, onToggle,
 }: { ws: RestyleWorkspace; item: RailItem; toggling: boolean; onToggle: (editId: string, active: boolean) => void }) {
   const e: RestyleEdit = item.edit;
+  const deleteConfirm = useDeleteConfirm();
   return (
     <div className="rounded-xl border border-[var(--border)] p-2.5 space-y-2">
       <div className="flex items-start gap-3">
@@ -281,13 +301,14 @@ function RefineCard({
           <p className="text-[11px] text-[var(--muted-foreground)] truncate">&quot;{e.instruction}&quot;</p>
         </div>
         <IconButton aria-label="Delete this instruction" className="h-7 w-7 shrink-0"
-          onClick={() => confirmDelete("this instruction", () => ws.remove(e.id))}>
+          onClick={() => deleteConfirm.request("this instruction", () => ws.remove(e.id))}>
           <X className="h-3.5 w-3.5" />
         </IconButton>
       </div>
       <div className="flex justify-end">
         <SwitchRow active={e.active} toggling={toggling} onToggle={() => onToggle(e.id, !e.active)} />
       </div>
+      {deleteConfirm.dialog}
     </div>
   );
 }

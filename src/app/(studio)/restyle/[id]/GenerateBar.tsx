@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { MoreHorizontal, Eraser, RotateCcw, Loader2, Sparkles } from "lucide-react";
 import type { RestyleWorkspace } from "./useRestyleWorkspace";
-import { Button, IconButton } from "./ui";
+import { Button, ConfirmDialog, IconButton } from "./ui";
 import StagePicker from "./StagePicker";
 import type { RestyleThemeKey } from "@/lib/restyle-themes";
 import { cn } from "@/lib/utils";
@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 export default function GenerateBar({ ws, variant = "sticky" }: { ws: RestyleWorkspace; variant?: "sticky" | "floating" }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [emptyRoomConfirmOpen, setEmptyRoomConfirmOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -27,9 +28,7 @@ export default function GenerateBar({ ws, variant = "sticky" }: { ws: RestyleWor
 
   const emptyRoom = () => {
     setMenuOpen(false);
-    if (window.confirm("Empty the room? Furniture and decor get removed — walls, floors, windows and built-ins stay put.")) {
-      ws.emptyRoom();
-    }
+    setEmptyRoomConfirmOpen(true);
   };
 
   const pickStage = (theme: RestyleThemeKey) => {
@@ -101,6 +100,15 @@ export default function GenerateBar({ ws, variant = "sticky" }: { ws: RestyleWor
         </p>
       )}
       <StagePicker open={pickerOpen} onClose={() => setPickerOpen(false)} onPick={pickStage} />
+      <ConfirmDialog
+        open={emptyRoomConfirmOpen}
+        onClose={() => setEmptyRoomConfirmOpen(false)}
+        onConfirm={() => ws.emptyRoom()}
+        title="Empty the room?"
+        body="Furniture and decor get removed — walls, floors, windows and built-ins stay put."
+        confirmLabel="Empty the room"
+        destructive
+      />
     </div>
   );
 }

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowUpRight, Plus, Trash2, UploadCloud } from "lucide-react";
-import { Button, IconButton, Skeleton, Spinner } from "@/app/(studio)/restyle/[id]/ui";
+import { Button, ConfirmDialog, IconButton, Skeleton, Spinner, StatusBanner } from "@/app/(studio)/restyle/[id]/ui";
 
 interface RestyleCard {
   id: string;
@@ -15,6 +15,8 @@ interface RestyleCard {
 export default function RestyleHistoryPage() {
   const [items, setItems] = useState<RestyleCard[] | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<{ id: string; title: string | null } | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/restyles")
@@ -23,8 +25,8 @@ export default function RestyleHistoryPage() {
       .catch(() => setItems([]));
   }, []);
 
-  const remove = async (id: string, title: string | null) => {
-    if (!confirm(`Delete "${title ?? "Untitled"}"? This can't be undone.`)) return;
+  const remove = async (id: string) => {
+    setDeleteError(null);
     setDeleting(id);
     const prev = items;
     setItems((cur) => cur?.filter((r) => r.id !== id) ?? cur); // optimistic
@@ -33,7 +35,7 @@ export default function RestyleHistoryPage() {
       if (!res.ok) throw new Error();
     } catch {
       setItems(prev ?? null); // restore on failure
-      alert("Couldn't delete that room. Try again.");
+      setDeleteError("Couldn't delete that room. Try again.");
     } finally {
       setDeleting(null);
     }
@@ -54,6 +56,8 @@ export default function RestyleHistoryPage() {
           </Button>
         </Link>
       </div>
+
+      {deleteError && <StatusBanner variant="error" className="mb-4">{deleteError}</StatusBanner>}
 
       {items === null ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
@@ -83,7 +87,7 @@ export default function RestyleHistoryPage() {
                 </div>
               </Link>
               <IconButton disabled={deleting === r.id}
-                onClick={() => remove(r.id, r.title)}
+                onClick={() => setPendingDelete({ id: r.id, title: r.title })}
                 aria-label="Delete room"
                 className="absolute top-2 right-2 bg-white/90 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 hover:text-red-600 hover:border-red-300 transition-opacity">
                 {deleting === r.id ? <Spinner size="xs" /> : <Trash2 className="h-3.5 w-3.5" />}
@@ -92,6 +96,16 @@ export default function RestyleHistoryPage() {
           ))}
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!pendingDelete}
+        onClose={() => setPendingDelete(null)}
+        onConfirm={() => { if (pendingDelete) remove(pendingDelete.id); }}
+        title="Delete this room?"
+        body={<>Delete &quot;{pendingDelete?.title ?? "Untitled"}&quot;? This can&apos;t be undone.</>}
+        confirmLabel="Delete"
+        destructive
+      />
     </div>
   );
 }

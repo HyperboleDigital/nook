@@ -4,10 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { Columns2, Download, Plus, Share2, ArrowLeftRight } from "lucide-react";
 import type { CSSProperties } from "react";
 import type { CanvasHotspot, RestyleWorkspace } from "./useRestyleWorkspace";
-import { Button, IconButton, ProgressOverlay, ShopSummaryPill, Spinner } from "./ui";
+import { Button, IconButton, ProgressOverlay, Sheet, ShopSummaryPill, Spinner } from "./ui";
 import ObjectHotspots from "./ObjectHotspots";
 import PinPlacementLayer from "./PinPlacementLayer";
-import ShareMenu from "./ShareMenu";
+import ShareMenu, { ShareOptions } from "./ShareMenu";
 
 // Fallback for the brief window before the frame/image have been measured (or if width/height
 // are ever unknown): natural aspect, full width, height follows. Rounded + shadowed like the
@@ -218,22 +218,25 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
           <ProgressOverlay startedAt={lastStartedAt} expectedSeconds={ws.expectedSeconds} />
         )}
 
+        {/* Was desktop-only ("hidden md:block") — mobile lost the at-a-glance total entirely,
+            even though it fits fine (+Add sits bottom-right, no collision). */}
         {!viewingOriginal && !generating && !holdingOverlay && !showCompare && ws.productEdits.length > 0 && (
-          <div className="absolute bottom-3 left-3 hidden md:block">
+          <div className="absolute bottom-3 left-3">
             <ShopSummaryPill edits={ws.productEdits} />
           </div>
         )}
 
         {!generating && !holdingOverlay && !showCompare && !ws.pinRequest && (
           <div className="absolute bottom-3 right-3">
-            <Button variant="primary" size="sm" className="shadow-[var(--shadow-pop)]"
+            <Button variant="primary" size="sm"
+              className="relative shadow-[var(--shadow-pop)] before:absolute before:-inset-2 before:rounded-full before:content-['']"
               onClick={() => ws.startAddFlow()}>
               <Plus className="h-3.5 w-3.5" /> Add
             </Button>
           </div>
         )}
 
-        <div className="absolute top-3 right-3 flex items-center gap-2">
+        <div className="absolute top-3 right-3 flex items-center gap-3">
           {!viewingOriginal && (
             <IconButton onClick={() => setShowCompare((v) => !v)} aria-label="Compare before / after"
               className={showCompare ? "bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)] hover:text-[var(--background)]" : ""}>
@@ -250,6 +253,14 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
             <Download className="h-4 w-4" />
           </IconButton>
         </div>
+      </div>
+
+      {/* Mobile share is a bottom sheet, not the edge-anchored popover — consistent with every
+          other mobile surface in the editor. */}
+      <div className="md:hidden">
+        <Sheet open={shareOpen} onClose={() => setShareOpen(false)} title="Share this room">
+          <ShareOptions url={shareUrl} title={shareTitle} onDone={() => setShareOpen(false)} />
+        </Sheet>
       </div>
       {/* pinRequest is handled by the instruction bar above the photo, so it's omitted here. */}
       {!ws.pinRequest && (

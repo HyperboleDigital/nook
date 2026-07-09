@@ -85,16 +85,56 @@ function buildChannels(): Channel[] {
 }
 
 /**
- * A custom, branded share popover — replaces relying on `navigator.share` alone, which only
+ * The channel grid itself — extracted so both the desktop popover below AND a mobile bottom
+ * Sheet (rendered by RestyleCanvas) can share it, instead of the popover being the only shape
+ * available (it used to render edge-anchored on mobile too, inconsistent with every other
+ * mobile surface in the app being a bottom sheet). `copies` channels (copy link, Instagram — see
+ * above) show their own checkmark instead of calling `onDone`, so a mis-tap doesn't feel like
+ * nothing happened.
+ */
+export function ShareOptions({ url, title, onDone }: { url: string; title: string; onDone: () => void }) {
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const channels = buildChannels();
+
+  const trigger = (c: Channel) => {
+    c.go(url, title);
+    if (c.copies) {
+      setCopiedKey(c.key);
+      setTimeout(() => setCopiedKey((k) => (k === c.key ? null : k)), 1800);
+    } else {
+      onDone();
+    }
+  };
+
+  return (
+    <div className="grid grid-cols-3 gap-3">
+      {channels.map((c) => (
+        <button key={c.key} type="button" onClick={() => trigger(c)}
+          className="flex flex-col items-center gap-1.5 group">
+          <span className={cn(
+            "h-11 w-11 rounded-full flex items-center justify-center shadow-[var(--shadow-soft)] transition-transform group-hover:scale-105",
+            c.bg,
+          )}>
+            {copiedKey === c.key ? <Check className="h-5 w-5 text-white" /> : c.icon}
+          </span>
+          <span className="text-[10px] text-[var(--muted-foreground)]">
+            {copiedKey === c.key ? "Copied!" : c.label}
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Desktop-only edge-anchored popover — replaces relying on `navigator.share` alone, which only
  * exists on some platforms (nothing on most desktop browsers) and, where it DOES exist, hands
- * control of the whole UI to the OS with zero say over how it looks. This gives every user the
- * same modern, on-brand set of options regardless of device: copy link, WhatsApp, Messages,
- * Facebook, Instagram, Email. `copies` channels (copy link, Instagram — see above) show their own
- * checkmark instead of closing the menu, so a mis-tap doesn't feel like nothing happened.
+ * control of the whole UI to the OS with zero say over how it looks. Mobile gets the SAME
+ * `ShareOptions` grid, but in a bottom Sheet (rendered by RestyleCanvas) — consistent with every
+ * other mobile surface in this editor, instead of an edge-anchored card near the screen border.
  */
 export default function ShareMenu({ url, title, onClose }: { url: string; title: string; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
-  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   useEffect(() => {
     const onClick = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) onClose(); };
@@ -104,37 +144,10 @@ export default function ShareMenu({ url, title, onClose }: { url: string; title:
     return () => { window.removeEventListener("mousedown", onClick); window.removeEventListener("keydown", onKey); };
   }, [onClose]);
 
-  const channels = buildChannels();
-
-  const trigger = (c: Channel) => {
-    c.go(url, title);
-    if (c.copies) {
-      setCopiedKey(c.key);
-      setTimeout(() => setCopiedKey((k) => (k === c.key ? null : k)), 1800);
-    } else {
-      onClose();
-    }
-  };
-
   return (
-    <div ref={ref} className="absolute top-full right-0 mt-2 w-72 rounded-2xl border border-[var(--border)] bg-white shadow-[var(--shadow-pop)] p-4 z-10">
+    <div ref={ref} className="hidden md:block absolute top-full right-0 mt-2 w-72 rounded-2xl border border-[var(--border)] bg-white shadow-[var(--shadow-pop)] p-4 z-10">
       <p className="text-sm font-semibold mb-3">Share this room</p>
-      <div className="grid grid-cols-3 gap-3">
-        {channels.map((c) => (
-          <button key={c.key} type="button" onClick={() => trigger(c)}
-            className="flex flex-col items-center gap-1.5 group">
-            <span className={cn(
-              "h-11 w-11 rounded-full flex items-center justify-center shadow-[var(--shadow-soft)] transition-transform group-hover:scale-105",
-              c.bg,
-            )}>
-              {copiedKey === c.key ? <Check className="h-5 w-5 text-white" /> : c.icon}
-            </span>
-            <span className="text-[10px] text-[var(--muted-foreground)]">
-              {copiedKey === c.key ? "Copied!" : c.label}
-            </span>
-          </button>
-        ))}
-      </div>
+      <ShareOptions url={url} title={title} onDone={onClose} />
     </div>
   );
 }

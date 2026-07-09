@@ -1,7 +1,7 @@
 "use client";
 
 import type { RestyleWorkspace } from "./useRestyleWorkspace";
-import { Sheet, SheetChrome } from "./ui";
+import { Sheet, SheetChrome, StatusBanner } from "./ui";
 import RestyleCanvas from "./RestyleCanvas";
 import SourcePanel from "./SourcePanel";
 import SimilarItemsPanel from "./SimilarItemsPanel";
@@ -73,8 +73,10 @@ export default function RestyleStudio({ ws }: { ws: RestyleWorkspace }) {
       <div className="md:hidden h-full overflow-y-auto flex flex-col">
         <RestyleCanvas ws={ws} />
         <div className="p-3 space-y-3 flex-1">
+          {/* Directly under the canvas, visible without scrolling — used to sit below the whole
+              changes list, easy to miss on a long list. */}
+          {ws.error && !ws.sourcing && <StatusBanner variant="error">{ws.error}</StatusBanner>}
           <ChangesPanel ws={ws} />
-          {ws.error && !ws.sourcing && <p className="text-xs text-red-600">{ws.error}</p>}
         </div>
         <GenerateBar ws={ws} />
       </div>

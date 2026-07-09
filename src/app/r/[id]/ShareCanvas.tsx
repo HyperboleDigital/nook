@@ -195,7 +195,7 @@ export default function ShareCanvas({
           )}
         </div>
         <button type="button" onClick={() => setOpenHotspot(null)} aria-label="Close"
-          className="h-6 w-6 shrink-0 -mt-1 -mr-1 flex items-center justify-center rounded-full hover:bg-[var(--muted)]">
+          className="relative h-6 w-6 shrink-0 -mt-1 -mr-1 flex items-center justify-center rounded-full hover:bg-[var(--muted)] before:absolute before:-inset-1.5 before:rounded-full before:content-['']">
           <X className="h-3.5 w-3.5" />
         </button>
       </div>
@@ -243,6 +243,13 @@ export default function ShareCanvas({
             {renderHotspots()}
             {popover("w-56 max-w-[80vw]", "h-12 w-12", 112)}
           </div>
+          {/* The editor has an equivalent hint below its canvas; the share page's dots had no
+              such affordance — a first-time viewer had no hint the small markers were tappable. */}
+          {hotspots.length > 0 && (
+            <p className="text-[11px] text-[var(--muted-foreground)] text-center">
+              Tap an item to see what changed
+            </p>
+          )}
           {shopPanel}
         </div>
       </div>
