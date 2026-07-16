@@ -5,7 +5,7 @@ import { Check, ChevronLeft, ChevronRight, Eraser, Replace, ShoppingBag, Sparkle
 import { boxFromPlacement, type RestyleWorkspace } from "./useRestyleWorkspace";
 import type { ShoppingResult } from "@/lib/shopping-search";
 import { downscaleImage } from "@/lib/image-client";
-import { Button, Input, ProductCard, SegmentedTabs, SkeletonProductCard, Spinner, StatusBanner, matchWord } from "./ui";
+import { Button, ConfirmDialog, Input, ProductCard, SegmentedTabs, SkeletonProductCard, Spinner, StatusBanner, matchWord } from "./ui";
 import CroppedThumb from "./CroppedThumb";
 
 type SrcMode = "link" | "photo" | "describe";
@@ -43,6 +43,14 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
   const [normalizing, setNormalizing] = useState(false);
   const [normalizeError, setNormalizeError] = useState<string | null>(null);
   const [refineText, setRefineText] = useState("");
+  // Results under "Describe it" only appear for a search the user ran HERE, in this panel session.
+  // ws.searches[label] can be pre-populated by other flows (the post-generate cheaper search, a
+  // prior "Shop similar") — without this flag those stale results popped up the moment the
+  // Describe tab opened, before the user typed anything.
+  const [didSearch, setDidSearch] = useState(false);
+  // Accidental-tap guard for the menu's "Remove it" — staging a remove is easy to hit by mistake
+  // and (while reversible via the changes rail) reads as destructive, so confirm first.
+  const [confirmRemove, setConfirmRemove] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   // Reset local sourcing UI whenever the target item changes.
@@ -51,6 +59,7 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
     Promise.resolve().then(() => {
       if (!active) return;
       setSrcMode("link"); setProductUrl(""); setDescText(""); setItemDraft(""); setRefineText("");
+      setDidSearch(false); setConfirmRemove(false);
       setNormalizing(false); setNormalizeError(null);
       setPendingFile(null);
       setPendingPreview((prev) => { if (prev) URL.revokeObjectURL(prev); return null; });
@@ -214,8 +223,17 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
             subtitle={activeRefine ? `"${activeRefine.instruction}"` : "Keep it, just reposition or reorient it"}
             onClick={() => ws.setSourcingView("adjust")} />
           <MenuRow icon={Eraser} title="Remove it" subtitle="Take it out of the room entirely" tone="remove"
-            onClick={removeIt} />
+            onClick={() => setConfirmRemove(true)} />
         </div>
+        <ConfirmDialog
+          open={confirmRemove}
+          onClose={() => setConfirmRemove(false)}
+          onConfirm={removeIt}
+          title={`Remove the ${label}?`}
+          body={<>The {label} will be taken out of the room on your next Generate. You can switch it back on from Your changes.</>}
+          confirmLabel="Remove it"
+          destructive
+        />
       </div>
     );
   }
@@ -278,17 +296,17 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
 
       <SegmentedTabs options={tabs} value={srcMode} onChange={setSrcMode} />
 
-      {/* Search results belong ONLY to the "Describe it" tab (the one that runs a text search).
-          They used to render above EVERY tab, so switching to "Upload a photo" / "Paste a link"
-          for an item that already had results (e.g. one first sourced via search) buried that
-          tab's own input under a list of products — the "only the similar items show up" bug. */}
-      {srcMode === "describe" && search.status === "loading" && (
+      {/* Search results belong ONLY to the "Describe it" tab (the one that runs a text search),
+          and only for a search the user ran HERE (`didSearch`) — ws.searches[label] can be
+          pre-populated by other flows (post-generate cheaper search, a prior "Shop similar"),
+          and those used to pop up the moment the Describe tab opened. */}
+      {srcMode === "describe" && didSearch && search.status === "loading" && (
         <div className="space-y-2">
           <SkeletonProductCard /><SkeletonProductCard /><SkeletonProductCard />
         </div>
       )}
-      {srcMode === "describe" && search.status === "error" && <StatusBanner variant="error">{search.error}</StatusBanner>}
-      {srcMode === "describe" && search.status === "ready" && search.results.length > 0 && (
+      {srcMode === "describe" && didSearch && search.status === "error" && <StatusBanner variant="error">{search.error}</StatusBanner>}
+      {srcMode === "describe" && didSearch && search.status === "ready" && search.results.length > 0 && (
         <div className="space-y-2">
           <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
             {search.scored ? `Options for ${label || "this item"}` : "Found options — ranking best matches…"}
@@ -376,13 +394,14 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
           <p className="text-[11px] text-[var(--muted-foreground)]">No link or photo? Describe it — color, material, style.</p>
           <div className="flex gap-2">
             <Input type="text" value={descText} onChange={(e) => setDescText(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter" && descText.trim()) ws.runTextSearch(descText, label.toLowerCase()); }}
+              onKeyDown={(e) => { if (e.key === "Enter" && descText.trim()) { setDidSearch(true); ws.runTextSearch(descText, label.toLowerCase()); } }}
               placeholder={`e.g. a low walnut ${label} with brass legs`} />
-            <Button disabled={search.status === "loading" || !descText.trim()} onClick={() => ws.runTextSearch(descText, label.toLowerCase())} className="shrink-0">
-              {search.status === "loading" ? <Spinner size="sm" className="text-current" /> : "Find"}
+            <Button disabled={(didSearch && search.status === "loading") || !descText.trim()}
+              onClick={() => { setDidSearch(true); ws.runTextSearch(descText, label.toLowerCase()); }} className="shrink-0">
+              {didSearch && search.status === "loading" ? <Spinner size="sm" className="text-current" /> : "Find"}
             </Button>
           </div>
-          {search.status === "loading" && (
+          {didSearch && search.status === "loading" && (
             <p className="text-[11px] text-[var(--muted-foreground)]">Searching retailers — this can take a few seconds.</p>
           )}
           <Button variant="outline" className="w-full" disabled={ws.busy || !descText.trim()}
