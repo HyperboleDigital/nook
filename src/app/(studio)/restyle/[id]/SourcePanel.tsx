@@ -39,6 +39,11 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
   const [descText, setDescText] = useState("");
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [pendingPreview, setPendingPreview] = useState<string | null>(null);
+  // stagePhoto (unlike the link path) sets no shared busy flag, and confirmPending clears the
+  // preview immediately — so the tab used to silently revert to the empty picker while the
+  // downscale + Blob upload ran for several seconds with zero feedback. This drives a real
+  // "adding your photo…" state for that whole window.
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [itemDraft, setItemDraft] = useState("");
   const [normalizing, setNormalizing] = useState(false);
   const [normalizeError, setNormalizeError] = useState<string | null>(null);
@@ -59,7 +64,7 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
     Promise.resolve().then(() => {
       if (!active) return;
       setSrcMode("link"); setProductUrl(""); setDescText(""); setItemDraft(""); setRefineText("");
-      setDidSearch(false); setConfirmRemove(false);
+      setDidSearch(false); setConfirmRemove(false); setUploadingPhoto(false);
       setNormalizing(false); setNormalizeError(null);
       setPendingFile(null);
       setPendingPreview((prev) => { if (prev) URL.revokeObjectURL(prev); return null; });
@@ -157,13 +162,19 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
   };
   const confirmPending = async () => {
     const f = pendingFile; if (!f) return;
+    setUploadingPhoto(true);
     setPendingFile(null);
     setPendingPreview((prev) => { if (prev) URL.revokeObjectURL(prev); return null; });
-    const small = await downscaleImage(f);
-    // Just stages the photo as inspo — no shopping search here. Search (and its API cost)
-    // is deferred until generate, scoped to whatever inspo photos actually made it into the
-    // render, surfaced in "Shop this look" instead of mid-composition.
-    ws.stagePhoto(small, label.toLowerCase());
+    try {
+      const small = await downscaleImage(f);
+      // Just stages the photo as inspo — no shopping search here. Search (and its API cost)
+      // is deferred until generate, scoped to whatever inspo photos actually made it into the
+      // render, surfaced in "Shop this look" instead of mid-composition. Awaited so the
+      // "adding your photo…" state covers the whole downscale + upload window.
+      await ws.stagePhoto(small, label.toLowerCase());
+    } finally {
+      setUploadingPhoto(false);
+    }
   };
 
   const staged = !!sourcing.lastStaged;
@@ -379,7 +390,11 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
           <input ref={fileRef} type="file" accept="image/*" className="hidden"
             onChange={(e) => { const f = e.target.files?.[0]; if (f) pickPending(f); e.target.value = ""; }} />
 
-          {pendingFile && !ws.stagingLink ? (
+          {uploadingPhoto ? (
+            <div className="w-full rounded-2xl border border-[var(--border)] bg-[var(--muted)] py-4 flex items-center justify-center gap-2 text-xs text-[var(--foreground)]">
+              <Spinner size="sm" /> Adding your photo to the room…
+            </div>
+          ) : pendingFile ? (
             <div className="space-y-2">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={pendingPreview ?? ""} alt="Selected" className="w-full max-h-44 object-contain rounded-xl border border-[var(--border)] bg-[var(--muted)]" />
@@ -389,9 +404,9 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
               </div>
             </div>
           ) : (
-            <button type="button" disabled={ws.stagingLink} onClick={() => fileRef.current?.click()}
-              className="w-full rounded-2xl border border-dashed border-[var(--border)] py-3 text-xs text-[var(--muted-foreground)] hover:border-[var(--foreground)] hover:text-[var(--foreground)] transition-colors disabled:opacity-40 flex items-center justify-center gap-2">
-              {ws.stagingLink ? <><Spinner size="sm" /> Placing it in your room…</> : "Choose or paste a photo"}
+            <button type="button" onClick={() => fileRef.current?.click()}
+              className="w-full rounded-2xl border border-dashed border-[var(--border)] py-3 text-xs text-[var(--muted-foreground)] hover:border-[var(--foreground)] hover:text-[var(--foreground)] transition-colors flex items-center justify-center gap-2">
+              Choose or paste a photo
             </button>
           )}
         </div>
