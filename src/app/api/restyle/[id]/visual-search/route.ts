@@ -8,6 +8,7 @@ import { fileToBuffer } from "@/lib/file-buf";
 import { cropToBox } from "@/lib/image-crop";
 import { loadOwnedRestyle } from "@/lib/restyle-edits";
 import { searchProductByImageUrl, upsertSearch } from "@/lib/restyle-search";
+import { getUserPlan, searchTierForPlan } from "@/lib/plan";
 
 // Google Lens visual match + Gemini identify (parallel) + four parallel SerpApi searches.
 // Scoring + Wayfair token resolution happen in after() once the response is already sent.
@@ -35,6 +36,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const restyle = await loadOwnedRestyle(id, userId);
   if (!restyle) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
+  // Plan gate: free = one keyword-only match + a "locked" flag (the UI shows an upgrade card for
+  // more); paid = full Lens + keyword search. See searchTierForPlan for the cost reasoning.
+  const tier = searchTierForPlan(await getUserPlan(userId));
+
   const form = await req.formData();
   const file = form.get("image") as File | null;
   const imageUrl = (form.get("imageUrl") as string | null)?.trim() || undefined;
@@ -46,14 +51,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!file && !imageUrl && query) {
     try {
       const all = await searchShopping(query);
-      const supported = all.filter((r) => r.supported);
+      const supported = all.filter((r) => r.supported).slice(0, tier.limit);
       if (supported.length === 0) {
         return NextResponse.json({ error: "No shoppable products found. Try a different search." }, { status: 404 });
       }
       // Text search has no Lens scoring to defer and we no longer eagerly resolve tokens (lazy
       // on pick — see restyle-search.ts), so these results are already final. Persist as scored.
       await upsertSearch(id, label, { query, results: supported, scored: true });
-      return NextResponse.json({ results: supported, scored: true });
+      return NextResponse.json({ results: supported, scored: true, locked: tier.locked });
     } catch (err) {
       if (err instanceof ShoppingSearchError) return NextResponse.json({ error: err.message }, { status: err.status });
       return NextResponse.json({ error: "Product search failed." }, { status: 502 });
@@ -78,10 +83,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         }
       } catch { /* fall back to searching the uncropped photo rather than failing outright */ }
     }
-    const search = await searchProductByImageUrl({ restyleId: id, imageUrl: searchImageUrl, label });
+    const search = await searchProductByImageUrl({ restyleId: id, imageUrl: searchImageUrl, label, tier });
     if (!search.ok) return NextResponse.json({ error: search.error }, { status: search.status });
     after(search.finish);
-    return NextResponse.json({ results: search.results, scored: false });
+    return NextResponse.json({ results: search.results, scored: false, locked: tier.locked });
   }
 
   if (!file) return NextResponse.json({ error: "An image is required." }, { status: 400 });
@@ -120,7 +125,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   // Always run both — this used to gate the keyword fallback behind "<2 exact matches",
   // which serialized it after Lens instead of overlapping the two independent searches.
   const [exact, keyword] = await Promise.all([
-    shotUrl ? searchByImage(shotUrl).catch((err) => { console.error("[visual-search] Lens failed:", err); return []; }) : Promise.resolve([] as ShoppingResult[]),
+    // Lens is a second SerpApi call — skipped on the free tier (see searchTierForPlan).
+    shotUrl && tier.useLens ? searchByImage(shotUrl).catch((err) => { console.error("[visual-search] Lens failed:", err); return []; }) : Promise.resolve([] as ShoppingResult[]),
     searchQuery ? searchShopping(searchQuery).catch((err) => { console.error("[visual-search] keyword search failed:", err); return []; }) : Promise.resolve([] as ShoppingResult[]),
   ]);
 
@@ -129,8 +135,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const seen = new Set(exact.map((r) => titleKey(r.title)));
   let results = [...exact, ...keyword.filter((r) => !seen.has(titleKey(r.title)))];
 
-  // Never surface "not shoppable" results — a link/price is the whole point.
-  results = results.filter((r) => r.supported).slice(0, 8);
+  // Never surface "not shoppable" results — a link/price is the whole point. Cap by plan tier.
+  results = results.filter((r) => r.supported).slice(0, tier.limit);
   if (results.length === 0) {
     return NextResponse.json({ error: "No matching products found. Try a clearer screenshot." }, { status: 404 });
   }
@@ -166,5 +172,5 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     await upsertSearch(id, label, { query: searchQuery, results: final, scored: true });
   });
 
-  return NextResponse.json({ results, scored: false });
+  return NextResponse.json({ results, scored: false, locked: tier.locked });
 }

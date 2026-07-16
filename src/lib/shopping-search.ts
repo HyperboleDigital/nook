@@ -167,9 +167,19 @@ const ENGINES: {
   },
 ];
 
+// Keyword fan-out is deliberately limited to Google Shopping ONLY (down from Amazon + Walmart +
+// Home Depot + Google Shopping). Each engine is a separate SerpApi search, so at ~4 keyword calls
+// + 1 Lens call we spent ~5 searches per "shop similar" lookup and burned the quota fast. Google
+// Shopping already aggregates those same retailers (Amazon/Walmart/Wayfair/Home Depot/etc.), so
+// this keeps ~all the coverage at ONE keyword call — combined with the Lens visual match that's
+// 2 SerpApi searches per lookup, not 5. To re-widen the fan-out (at higher SerpApi cost), add
+// engine names here. The other ENGINES defs are kept for that, and for `supported` classification.
+const KEYWORD_ENGINE_NAMES = new Set(["google_shopping"]);
+const KEYWORD_ENGINES = ENGINES.filter((e) => KEYWORD_ENGINE_NAMES.has(e.name));
+
 export async function searchShopping(query: string): Promise<ShoppingResult[]> {
   const settled = await Promise.all(
-    ENGINES.map(async (e) => {
+    KEYWORD_ENGINES.map(async (e) => {
       try {
         const data = await callSerpApi(e.params(query));
         return e.rows(data).map(e.toResult).filter((r): r is ShoppingResult => r !== null && !!r.title);
@@ -183,12 +193,15 @@ export async function searchShopping(query: string): Promise<ShoppingResult[]> {
     throw new ShoppingSearchError("No matching products found. Try a clearer screenshot.", 404);
   }
 
-  // Interleave engines (take a few from each) so one retailer doesn't dominate the list,
-  // then dedupe by normalised title and sort renderable candidates first.
+  // Interleave engines (take a few from each) so one retailer doesn't dominate the list, then
+  // dedupe by normalised title and sort renderable candidates first. CAP is sized so a SINGLE
+  // engine (the current keyword fan-out) can still fill the list — a per-engine cap of 4 (from
+  // when this fanned across 4 engines) would otherwise cap the whole result set at 4.
+  const CAP = 8;
   const seen = new Set<string>();
   const out: ShoppingResult[] = [];
-  const perEngine = settled.map((arr) => arr.slice(0, 4));
-  for (let i = 0; i < 4; i++) {
+  const perEngine = settled.map((arr) => arr.slice(0, CAP));
+  for (let i = 0; i < CAP; i++) {
     for (const arr of perEngine) {
       const r = arr[i];
       if (!r) continue;
@@ -200,7 +213,7 @@ export async function searchShopping(query: string): Promise<ShoppingResult[]> {
   }
 
   out.sort((a, b) => Number(b.supported) - Number(a.supported));
-  return out.slice(0, 6);
+  return out.slice(0, CAP);
 }
 
 interface LensMatch {

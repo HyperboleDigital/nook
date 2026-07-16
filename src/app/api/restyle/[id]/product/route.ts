@@ -1,14 +1,14 @@
 import { auth } from "@clerk/nextjs/server";
-import { NextResponse, after } from "next/server";
+import { NextResponse } from "next/server";
 import { del } from "@vercel/blob";
 import { uploadImage, adoptCachedRenderIfKnown } from "@/lib/restyle-render";
 import { fetchProduct, ProductFetchError, type ProductInfo } from "@/lib/product";
 import { describeProductImages, describeScreenshotForSearch, locateProductPhoto } from "@/lib/gemini";
 import { resolveImmersiveToken } from "@/lib/shopping-search";
-import { searchProductByImageUrl } from "@/lib/restyle-search";
 import { editsFor, loadOwnedRestyle, stageEdit, type StagedProduct } from "@/lib/restyle-edits";
 import { supabaseAdmin } from "@/lib/supabase";
 import { cropToBox } from "@/lib/image-crop";
+import type { RestyleEdit } from "@/types";
 
 // Amazon scrapes via Unwrangle can take 60–90s, plus Gemini gallery sizing afterward.
 export const maxDuration = 120;
@@ -135,14 +135,15 @@ async function fromUpload(userId: string, rawUrl: string): Promise<StagedProduct
 //                    resumable Blob transfer, never strand a half-staged edit here.
 // `targetLabel` force-targets a specific slot (the chip/hotspot the user tapped) instead of
 // relying on auto-detection. `replaceEditId` — when this staging supersedes an already-staged
-// edit for the same slot, deletes that edit in the same request instead of a separate round-trip.
+// edit for the same slot, deletes that edit in the same request instead of a separate round-trip
+// (and inherits its placement, so a replace keeps the prior spot — see below).
 //
-// "Dupe finder": a `url`/`token` stage (a CONFIRMED real product, unlike an inspo photo) fires an
-// immediate, fire-and-forget search for cheaper alternatives (`searchProductByImageUrl`, same
-// pipeline "Shop similar items" uses) — a deliberate exception to the deferred-until-generate
-// policy above. That policy exists to avoid spending API cost on something the user might not
-// commit to; pasting a real product link is already a much more deliberate, high-intent action,
-// and the whole point of surfacing savings is that they're there immediately, not after a render.
+// This route NEVER searches. It only stages. Finding cheaper/similar products is always
+// user-initiated (the "Shop similar items" / "Replace" flow → visual-search route). An earlier
+// version auto-fired a "dupe finder" cheaper-alternatives search here the moment a product link
+// was staged; that was removed — staging a pending product the user might discard/replace before
+// generating shouldn't spend a search. (The deferred INSPO-photo search after generate is separate
+// and still runs — that turns a photo into something buyable, which isn't an "alternatives" search.)
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { userId } = await auth();
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -153,7 +154,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   let staged: StagedProduct;
   let forcedTarget: string | undefined;
   let replaceEditId: string | undefined;
-  let fromLink = false;
   try {
     const body = await req.json().catch(() => ({}));
     const { url: rawUrl, token, imageUrl, targetLabel: ft, replaceEditId: re } = body as {
@@ -179,7 +179,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         return NextResponse.json({ error: "A product link is required." }, { status: 400 });
       }
       staged = await fromListing(userId, await fetchProduct(url));
-      fromLink = true;
     }
   } catch (err) {
     if (err instanceof ProductFetchError) {
@@ -195,24 +194,30 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({ error: err instanceof Error ? err.message : "DB error" }, { status: 500 });
   }
 
-  // Delete the edit being replaced (e.g. a staged photo now superseded by a real pick) in
-  // the same request — used to be a separate client-side DELETE round-trip after this POST.
+  // A "replace" no longer DELETES the superseded edit — it's kept (already deactivated by
+  // stageEdit's single-active-per-label dedupe) so it becomes "tried before" history the user can
+  // restore from the compare panel (see useRestyleWorkspace's historyFor/restoreEdit). We only
+  // inherit its pin: a replaced add should keep its spot instead of forcing a re-place (only
+  // "add" edits carry a placement; a swap of a detected item uses its detected box).
   let edits = result.edits;
-  if (replaceEditId && replaceEditId !== result.added.id) {
-    await supabaseAdmin.from("restyle_edits").delete().eq("id", replaceEditId).eq("restyle_id", id);
-    edits = await editsFor(id);
+  let addedPlacement: RestyleEdit["placement"] = null;
+  if (replaceEditId && replaceEditId !== result.added.id && result.added.kind === "add") {
+    const { data: replaced } = await supabaseAdmin
+      .from("restyle_edits").select("placement").eq("id", replaceEditId).eq("restyle_id", id).maybeSingle();
+    if (replaced?.placement) {
+      addedPlacement = replaced.placement as RestyleEdit["placement"];
+      await supabaseAdmin.from("restyle_edits").update({ placement: addedPlacement }).eq("id", result.added.id);
+      edits = await editsFor(id);
+    }
   }
 
-  if (fromLink && result.added.target_label) {
-    // Labels are always lowercased in `restyle_searches` (matches every other caller — the
-    // deferred inspo search, runVisualSearchByUrl/runTextSearch on the client).
-    const label = result.added.target_label.toLowerCase();
-    const titleHint = staged.productTitle ?? undefined;
-    after(async () => {
-      const search = await searchProductByImageUrl({ restyleId: id, imageUrl: staged.referenceUrl, label, titleHint });
-      if (search.ok) await search.finish();
-    });
-  }
+  // NOTE: no automatic "cheaper alternatives" search fires here anymore. Searching for
+  // alternatives is now ALWAYS user-initiated (the "Shop similar items" / "Replace" flow →
+  // visual-search route), never kicked off the moment a product link is staged — staging a
+  // pending product the user might discard shouldn't spend a search. (This removed the former
+  // "dupe finder" auto-search; the deferred INSPO-photo search after generate is unaffected.)
 
-  return NextResponse.json({ edits, added: result.added, current_url: await adoptCachedRenderIfKnown(id) });
+  // Surface the (possibly inherited) placement so the client knows NOT to re-prompt for a pin on
+  // a replace that kept the prior spot (see finalizeAddPlacement's placement guard).
+  return NextResponse.json({ edits, added: { ...result.added, placement: addedPlacement }, current_url: await adoptCachedRenderIfKnown(id) });
 }

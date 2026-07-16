@@ -29,6 +29,40 @@ function StatusChip({ status }: { status: RailStatus }) {
   );
 }
 
+type ChangeTone = "add" | "swap" | "remove" | "refine";
+const TONE_ICON_CLS: Record<ChangeTone, string> = {
+  add: "text-[var(--accent)]",
+  swap: "text-violet-500",
+  remove: "text-red-500",
+  refine: "text-amber-500",
+};
+
+// Plain-language "what happened" for a change card. The user's complaint: a card just showed
+// the item name + "From your photo", so there was no way to tell they'd ADDED something new vs
+// REPLACED an existing item, or where it came from. This leads every card with an explicit
+// verb (Added / Swapped / Removed / Adjusted) and, for adds/swaps, the source (a product, your
+// photo, or a description) — the source is inferred: buy_url → a real product, reference_url only
+// → an inspo photo, neither → a text description. "a product" (not "a product link") stays true
+// whether the user pasted a link OR picked a suggested match, since we can't tell those apart.
+function changeDescriptor(e: RestyleEdit): { text: string; Icon: typeof Plus; tone: ChangeTone } {
+  const label = e.target_label ?? "item";
+  if (e.kind === "remove") return { text: `Removed the ${label}`, Icon: Eraser, tone: "remove" };
+  if (e.kind === "refine") return { text: `Adjusted the ${label}`, Icon: Wand2, tone: "refine" };
+  const source = e.buy_url ? "a product" : e.reference_url ? "your photo" : "a description";
+  if (e.kind === "add") return { text: `Added · from ${source}`, Icon: Plus, tone: "add" };
+  return { text: `Swapped · from ${source}`, Icon: Replace, tone: "swap" };
+}
+
+function ChangeDescriptor({ e }: { e: RestyleEdit }) {
+  const { text, Icon, tone } = changeDescriptor(e);
+  return (
+    <p className="flex items-center gap-1.5 text-[13px] font-semibold text-[var(--foreground)]">
+      <Icon className={cn("h-3.5 w-3.5 shrink-0", TONE_ICON_CLS[tone])} />
+      <span className="truncate">{text}</span>
+    </p>
+  );
+}
+
 // Deleting a change is permanent (unlike a switch flip, which just queues the flag change — see
 // the toggle gotcha) — there's no "Turn back on" for something that's been deleted, so confirm
 // first, same pattern as GenerateBar's "Empty the room". `useDeleteConfirm` gives each card its
@@ -204,11 +238,12 @@ function ChangeCard({
               : <Replace className="h-4 w-4" />}
           </span>
         )}
-        <div className="min-w-0 flex-1 space-y-0.5">
+        <div className="min-w-0 flex-1 space-y-1">
           <StatusChip status={status} />
-          <p className="text-sm font-medium capitalize truncate">
-            {isRemove ? `Removed the ${label}` : e.product_title ?? label}
-          </p>
+          <ChangeDescriptor e={e} />
+          {!isRemove && (
+            <p className="text-sm capitalize truncate">{e.product_title ?? label}</p>
+          )}
           {isProduct && (
             <p className="text-xs text-[var(--muted-foreground)]">
               {e.product_price && <span className="font-semibold text-[var(--foreground)]">{e.product_price}</span>}
@@ -222,7 +257,6 @@ function ChangeCard({
               {cheaperCount} cheaper option{cheaperCount === 1 ? "" : "s"} found
             </button>
           )}
-          {isInspo && <p className="text-xs text-[var(--muted-foreground)]">From your photo</p>}
           {e.kind === "add" && (
             <button type="button" onClick={() => ws.requestPin(e.id, label)}
               className="inline-flex items-center gap-1 text-[11px] text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors">
@@ -295,9 +329,9 @@ function RefineCard({
         <span className="h-10 w-10 rounded-xl bg-[var(--muted)] shrink-0 flex items-center justify-center text-[var(--muted-foreground)]">
           <Wand2 className="h-4 w-4" />
         </span>
-        <div className="min-w-0 flex-1 space-y-0.5">
+        <div className="min-w-0 flex-1 space-y-1">
           <StatusChip status={item.status} />
-          <p className="text-sm capitalize truncate">{e.target_label}</p>
+          <ChangeDescriptor e={e} />
           <p className="text-[11px] text-[var(--muted-foreground)] truncate">&quot;{e.instruction}&quot;</p>
         </div>
         <IconButton aria-label="Delete this instruction" className="h-7 w-7 shrink-0"

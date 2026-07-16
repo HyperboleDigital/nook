@@ -1,6 +1,7 @@
 import { supabaseAdmin } from "@/lib/supabase";
 import { describeScreenshotForSearch, scoreImageMatches } from "@/lib/gemini";
 import { searchByImage, searchShopping, type ShoppingResult } from "@/lib/shopping-search";
+import type { SearchTier } from "@/lib/plan";
 
 const titleKey = (t: string) => t.toLowerCase().replace(/\s+/g, " ").slice(0, 40);
 
@@ -29,12 +30,12 @@ export async function upsertSearch(
  * cheaper AND a more targeted "find this exact item elsewhere" query than re-describing the photo.
  */
 export async function searchProductByImageUrl(params: {
-  restyleId: string; imageUrl: string; label: string; titleHint?: string;
+  restyleId: string; imageUrl: string; label: string; titleHint?: string; tier: SearchTier;
 }): Promise<
   | { ok: true; results: ShoppingResult[]; finish: () => Promise<void> }
   | { ok: false; error: string; status: number }
 > {
-  const { restyleId, imageUrl, label, titleHint } = params;
+  const { restyleId, imageUrl, label, titleHint, tier } = params;
   const res = await fetch(imageUrl);
   if (!res.ok) return { ok: false, error: "Couldn't load that image.", status: 502 };
   const rawBuf = Buffer.from(await res.arrayBuffer());
@@ -51,7 +52,11 @@ export async function searchProductByImageUrl(params: {
   }
 
   const [exact, keyword] = await Promise.all([
-    searchByImage(imageUrl).catch((err) => { console.error("[restyle-search] Lens failed:", err); return [] as ShoppingResult[]; }),
+    // Lens (the visual "find this exact item") is a second SerpApi call — skipped on the free
+    // tier, which only surfaces one keyword match anyway (see searchTierForPlan).
+    tier.useLens
+      ? searchByImage(imageUrl).catch((err) => { console.error("[restyle-search] Lens failed:", err); return [] as ShoppingResult[]; })
+      : Promise.resolve([] as ShoppingResult[]),
     searchQuery
       ? searchShopping(searchQuery).catch((err) => { console.error("[restyle-search] keyword search failed:", err); return [] as ShoppingResult[]; })
       : Promise.resolve([] as ShoppingResult[]),
@@ -59,7 +64,7 @@ export async function searchProductByImageUrl(params: {
 
   const seen = new Set(exact.map((r) => titleKey(r.title)));
   let results = [...exact, ...keyword.filter((r) => !seen.has(titleKey(r.title)))];
-  results = results.filter((r) => r.supported).slice(0, 8);
+  results = results.filter((r) => r.supported).slice(0, tier.limit);
   if (results.length === 0) return { ok: false, error: "No matching products found.", status: 404 };
 
   await upsertSearch(restyleId, label, { query: searchQuery, results, scored: false });

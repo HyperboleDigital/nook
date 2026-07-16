@@ -11,6 +11,10 @@ export type SearchState = {
   scored: boolean;
   results: ShoppingResult[];
   error?: string;
+  // Free plan: the server returned only one match and there are more behind the paywall — the UI
+  // shows a generic "upgrade to see more options" card (see SimilarItemsPanel). Plan-derived at
+  // response time, so an upgrade ungates on the next search/reload. Absent/false = nothing gated.
+  locked?: boolean;
 };
 
 export type Sourcing = {
@@ -149,7 +153,7 @@ export function useRestyleWorkspace(id: string) {
               const sj = await sr.json();
               const hydrated: Record<string, SearchState> = {};
               for (const row of sj.searches ?? []) {
-                hydrated[row.label] = { status: "ready", scored: row.scored, results: row.results ?? [] };
+                hydrated[row.label] = { status: "ready", scored: row.scored, results: row.results ?? [], locked: !!row.locked };
               }
               setSearches((prev) => ({ ...prev, ...hydrated }));
             }
@@ -178,7 +182,7 @@ export function useRestyleWorkspace(id: string) {
         const sj = await searchesRes.json();
         const hydrated: Record<string, SearchState> = {};
         for (const row of sj.searches ?? []) {
-          hydrated[row.label] = { status: "ready", scored: row.scored, results: row.results ?? [] };
+          hydrated[row.label] = { status: "ready", scored: row.scored, results: row.results ?? [], locked: !!row.locked };
         }
         if (active) setSearches(hydrated);
       }
@@ -322,13 +326,16 @@ export function useRestyleWorkspace(id: string) {
   // Called once a fresh "add" edit exists on the server: if the user chose a location UP FRONT
   // (startAddFlow/placeAddLocation), attach it now and skip the old post-hoc prompt entirely;
   // otherwise fall back to offering the pin after the fact, same as before that flow existed.
-  const finalizeAddPlacement = (editId: string, targetLabel: string) => {
+  const finalizeAddPlacement = (edit: { id: string; target_label?: string | null; placement?: RestyleEdit["placement"] }) => {
+    // Already placed — e.g. a "replace" that inherited the prior edit's spot (see the product
+    // route). Don't re-prompt for a pin; the item keeps its location (the user can still Move it).
+    if (edit.placement) return;
     if (pendingAddPlacement) {
       const placement = pendingAddPlacement;
       setPendingAddPlacement(null);
-      setPlacement(editId, placement);
+      setPlacement(edit.id, placement);
     } else {
-      requestPin(editId, targetLabel);
+      requestPin(edit.id, edit.target_label ?? "");
     }
   };
 
@@ -345,7 +352,7 @@ export function useRestyleWorkspace(id: string) {
       // The route always appends the new row last (position = the old edit count) — the newly
       // inserted edit is reliably the final element of the ordered list it returns.
       const created = (data.edits as RestyleEdit[]).at(-1);
-      if (created?.kind === "add") finalizeAddPlacement(created.id, created.target_label ?? fields.targetLabel ?? "");
+      if (created?.kind === "add") finalizeAddPlacement(created);
     } catch (err) { setError(err instanceof Error ? err.message : "Something went wrong"); }
     finally { setBusy(false); }
   };
@@ -370,7 +377,7 @@ export function useRestyleWorkspace(id: string) {
         if (!r.ok) continue;
         const data = await r.json();
         const row = data.searches?.[0];
-        if (row?.scored) { setSearchState(label, { status: "ready", scored: true, results: row.results ?? [] }); return; }
+        if (row?.scored) { setSearchState(label, { status: "ready", scored: true, results: row.results ?? [], locked: !!row.locked }); return; }
       } catch { /* keep polling */ }
     }
     setSearchState(label, (prev) => (prev.status === "loading" ? { status: "ready", scored: true, results: [] } : prev));
@@ -391,7 +398,7 @@ export function useRestyleWorkspace(id: string) {
       const r = await fetch(`/api/restyle/${id}/visual-search`, { method: "POST", body: fd });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error ?? "Couldn't search for that item");
-      setSearchState(label, { status: "ready", scored: !!data.scored, results: data.results ?? [] });
+      setSearchState(label, { status: "ready", scored: !!data.scored, results: data.results ?? [], locked: !!data.locked });
       if (!data.scored) pollScored(label);
     } catch (err) {
       setSearchState(label, { status: "error", error: err instanceof Error ? err.message : "Search failed" });
@@ -407,7 +414,7 @@ export function useRestyleWorkspace(id: string) {
       const r = await fetch(`/api/restyle/${id}/visual-search`, { method: "POST", body: fd });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error ?? "Couldn't search for that item");
-      setSearchState(label, { status: "ready", scored: !!data.scored, results: data.results ?? [] });
+      setSearchState(label, { status: "ready", scored: !!data.scored, results: data.results ?? [], locked: !!data.locked });
       if (!data.scored) pollScored(label);
     } catch (err) {
       setSearchState(label, { status: "error", error: err instanceof Error ? err.message : "Search failed" });
@@ -435,14 +442,10 @@ export function useRestyleWorkspace(id: string) {
         : s);
       // stageEdit may reclassify a would-be add into a swap when the label matches a
       // detected object — only offer a pin for a genuine, still-unplaced add.
-      if (data.added.kind === "add") finalizeAddPlacement(data.added.id, data.added.target_label ?? label);
-      // "Dupe finder" — staging a real product link fires an immediate server-side search for
-      // cheaper alternatives (see product/route.ts's `after()`), unlike an inspo photo (deferred
-      // until generate). Mark the search loading right away and poll for it — same "poll
-      // /searches until scored" loop already used for the deferred-search cases, just kicked off
-      // here instead of after a render.
-      setSearchState(label.toLowerCase(), { status: "loading", scored: false });
-      pollScored(label.toLowerCase());
+      if (data.added.kind === "add") finalizeAddPlacement(data.added);
+      // No automatic cheaper-alternatives search here anymore — searching for alternatives is
+      // now always user-initiated (tap "Shop similar items" / "Replace"), never fired off the
+      // moment a product is staged. Staging a link just stages it.
     } catch (err) {
       setError(err instanceof DOMException && err.name === "TimeoutError" ? "That took too long — the product service may be unavailable. Try again." : err instanceof Error ? err.message : "Couldn't fetch that product");
     } finally {
@@ -501,7 +504,7 @@ export function useRestyleWorkspace(id: string) {
       setSourcing((s) => s && s.label === label
         ? { ...s, stagedEditId: data.added.id, lastStaged: { title: data.added.target_label, retailer: "" } }
         : s);
-      if (data.added.kind === "add") finalizeAddPlacement(data.added.id, data.added.target_label ?? label);
+      if (data.added.kind === "add") finalizeAddPlacement(data.added);
     } catch (err) {
       updateEdits(prevEdits); // roll back the optimistic edit
       setError(err instanceof DOMException && err.name === "TimeoutError" ? "That took too long — the product service may be unavailable. Try again." : err instanceof Error ? err.message : "Couldn't add that photo");
@@ -542,7 +545,7 @@ export function useRestyleWorkspace(id: string) {
       setSourcing((s) => s && s.label === label
         ? { ...s, stagedEditId: data.added.id, lastStaged: { title: data.added.target_label, retailer: data.added.retailer } }
         : s);
-      if (data.added.kind === "add") finalizeAddPlacement(data.added.id, data.added.target_label ?? label);
+      if (data.added.kind === "add") finalizeAddPlacement(data.added);
     } catch (err) {
       updateEdits(prevEdits); // roll back the optimistic edit
       setError(err instanceof DOMException && err.name === "TimeoutError" ? "That took too long — the product service may be unavailable. Try again." : err instanceof Error ? err.message : "Couldn't fetch that product");
@@ -679,6 +682,51 @@ export function useRestyleWorkspace(id: string) {
     finally { setBusy(false); }
   };
 
+  // "Tried before" history for a slot: every product/photo the user staged for this label that
+  // ISN'T the current active pick — kept around now that a replace deactivates the old edit
+  // instead of deleting it (see product/route.ts). Deduped by product/photo so bouncing between
+  // the same two options doesn't stack duplicates; most-recent first.
+  const historyFor = (label: string): RestyleEdit[] => {
+    const key = label.toLowerCase();
+    const candidates = (restyle?.edits ?? []).filter(
+      (e) => (e.kind === "item" || e.kind === "add") && !e.active
+        && e.target_label?.toLowerCase() === key && (e.reference_url || e.buy_url),
+    );
+    const seen = new Set<string>();
+    const out: RestyleEdit[] = [];
+    for (const e of [...candidates].sort((a, b) => b.position - a.position)) {
+      const k = e.buy_url || e.reference_url || e.id;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(e);
+    }
+    return out;
+  };
+
+  // Restore a prior "tried before" pick: re-activate that edit and deactivate whatever's currently
+  // active on the same slot, in one batch PATCH (single-active-per-label). No new edit is created,
+  // so it doesn't add another history entry; adoptCachedRenderIfKnown swaps the image instantly if
+  // that combination was rendered before (a prior try usually was), else it just goes pending.
+  const restoreEdit = async (edit: RestyleEdit) => {
+    const key = edit.target_label?.toLowerCase();
+    const prev = restyle?.edits ?? [];
+    const states: Record<string, boolean> = { [edit.id]: true };
+    for (const e of prev) {
+      if (e.id === edit.id) continue;
+      if (e.active && (e.kind === "item" || e.kind === "add" || e.kind === "remove")
+        && e.target_label?.toLowerCase() === key) states[e.id] = false;
+    }
+    updateEdits(prev.map((e) => (e.id in states ? { ...e, active: states[e.id] } : e)));
+    setSourcing((s) => (s && s.label.toLowerCase() === key ? { ...s, stagedEditId: edit.id } : s));
+    try {
+      const r = await fetch(`/api/restyle/${id}/edits`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ states }),
+      });
+      const data = await r.json();
+      if (r.ok) updateEdits(data.edits, data.current_url);
+    } catch { /* optimistic already applied */ }
+  };
+
   const addCustomItem = async (label: string) => {
     setError(null);
     try {
@@ -750,9 +798,29 @@ export function useRestyleWorkspace(id: string) {
   const pendingCount = (() => {
     if (shownProductIds === null) return 0;
     const activeIds = new Set(activeEdits.filter((e) => !e.id.startsWith(OPTIMISTIC_PREFIX)).map((e) => e.id));
+    const byId = new Map(edits.map((e) => [e.id, e] as const));
+    const activeLabels = new Set(
+      activeEdits.filter((e) => e.target_label).map((e) => e.target_label!.toLowerCase()),
+    );
     let diff = 0;
     for (const eid of activeIds) if (!shownProductIds.has(eid)) diff++;
-    for (const eid of shownProductIds) if (!activeIds.has(eid)) diff++;
+    let staleUncounted = false;
+    for (const eid of shownProductIds) {
+      if (activeIds.has(eid)) continue;
+      const e = byId.get(eid);
+      if (e) {
+        // Superseded by a newer active edit on the same slot (a replace, or restoring a prior
+        // "tried before" pick — the old attempt is kept as inactive history now, not deleted).
+        // That active edit is already counted above, so counting this one too would make a single
+        // swap read as 2 pending changes. A genuinely toggled-off edit (nothing active on its
+        // label) still counts as a pending removal.
+        if (e.target_label && activeLabels.has(e.target_label.toLowerCase())) continue;
+        diff++;
+      } else {
+        staleUncounted = true;   // fully deleted id still in the render (rare now)
+      }
+    }
+    if (staleUncounted && diff === 0) diff = 1;
     return diff;
   })();
   const canGenerate = pendingCount > 0 && !hasOptimistic;
@@ -851,7 +919,7 @@ export function useRestyleWorkspace(id: string) {
     searches, runVisualSearchByUrl, runTextSearch, pickCandidate, pickingKey,
     stagePhoto, stageProductLink, stagingLink, stageRemove, stageRefine,
     // handlers
-    addEdit, toggle, deactivateAll, remove, addCustomItem, removeCustomItem, generate, emptyRoom, stageRoom, downloadImage,
+    addEdit, toggle, deactivateAll, remove, historyFor, restoreEdit, addCustomItem, removeCustomItem, generate, emptyRoom, stageRoom, downloadImage,
     // derived
     edits, activeEdits, stagedItems, displayUrl, viewingOriginal, canGenerate, pendingCount, confirmingCount, atMaxCustom, productEdits, railEdits,
     canvasHotspots,
