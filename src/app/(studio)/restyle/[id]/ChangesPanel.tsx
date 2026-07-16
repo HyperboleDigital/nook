@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Eraser, ExternalLink, Loader2, MapPin, Plus, Replace, ShoppingBag, TrendingDown, Wand2, X } from "lucide-react";
+import { Eraser, ExternalLink, Loader2, MapPin, Plus, Replace, ShoppingBag, Wand2, X } from "lucide-react";
 import { boxFromPlacement, type RailItem, type RailStatus, type RestyleWorkspace } from "./useRestyleWorkspace";
 import type { RestyleEdit } from "@/types";
-import { Button, ConfirmDialog, IconButton, Switch, parsePrice, shopSummary, storeName } from "./ui";
+import { Button, ConfirmDialog, IconButton, Switch, shopSummary, storeName } from "./ui";
 import { cn } from "@/lib/utils";
 import CroppedThumb from "./CroppedThumb";
 
@@ -210,20 +210,6 @@ function ChangeCard({
   const isInspo = !isRemove && !!e.reference_url && !e.buy_url;
   const isProduct = !isRemove && !!e.buy_url;
 
-  // Cheaper-alternatives ("dupe") signal — from the post-generate keyword search (see
-  // generate/route.ts + searchCheaperByTitle). The single cheapest option that genuinely beats the
-  // current price drives the "SAVE $X" thumbnail badge and the accent "See cheaper" button.
-  const search = isProduct ? ws.searches[label.toLowerCase()] : undefined;
-  const refPrice = isProduct && e.product_price ? parsePrice(e.product_price) : 0;
-  const bestDeal = (search?.status === "ready" && refPrice > 0)
-    ? search.results
-        .map((r) => ({ r, p: parsePrice(r.price) }))
-        .filter((x) => x.p > 0 && x.p < refPrice)
-        .sort((a, b) => a.p - b.p)[0]
-    : undefined;
-  const savings = bestDeal ? Math.round(refPrice - bestDeal.p) : 0;
-  const hasDeal = !!bestDeal && savings > 0;
-
   return (
     <div className="rounded-xl border border-[var(--border)] p-2.5 space-y-2">
       <div className="flex items-start gap-3">
@@ -244,13 +230,6 @@ function ChangeCard({
                 : isProduct ? <ShoppingBag className="h-4 w-4" />
                 : e.kind === "add" ? <Plus className="h-4 w-4" />
                 : <Replace className="h-4 w-4" />}
-            </span>
-          )}
-          {/* Option C deal badge — a "SAVE $X" ribbon on the thumbnail when a genuinely cheaper
-              alternative exists, so the saving is the first thing the eye lands on. */}
-          {hasDeal && (
-            <span className="absolute inset-x-0 bottom-0 rounded-b-xl bg-emerald-700 text-white text-[8px] leading-none font-extrabold text-center py-[3px] tracking-wide">
-              SAVE ${savings}
             </span>
           )}
         </div>
@@ -294,35 +273,30 @@ function ChangeCard({
           <Loader2 className="h-3 w-3 animate-spin" /> Confirming — this can take a minute
         </p>
       ) : (
-        // Indented to line up with the text column (48px thumbnail + 12px gap = 60px). Option C's
-        // deal CTA (accent, when a cheaper option exists) sits on top; the current-item "View"
-        // (opens the retailer), "Try something else", and the on/off switch share the row below.
-        <div className="space-y-2 pl-[60px]">
-          {hasDeal && (
-            <Button size="sm" variant="accent" onClick={() => ws.openSimilar(label, e.kind === "add" ? "add" : "swap", e.id)}>
-              <TrendingDown className="h-3.5 w-3.5" /> See cheaper · save ${savings}
-            </Button>
-          )}
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 min-w-0">
-              {isProduct && e.buy_url && (
-                <a href={e.buy_url} target="_blank" rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border)] bg-white text-xs font-medium px-3 py-1.5 hover:border-[var(--foreground)] transition-colors shrink-0">
-                  <ExternalLink className="h-3.5 w-3.5" /> View
-                </a>
-              )}
-              {isProduct ? (
-                <Button size="sm" variant="subtle" onClick={() => ws.openSimilar(label, e.kind === "add" ? "add" : "swap", e.id)}>
-                  <Replace className="h-3.5 w-3.5" /> Try something else
-                </Button>
-              ) : isInspo ? (
-                <Button size="sm" variant="accentSoft" onClick={() => ws.openSimilar(label, e.kind === "add" ? "add" : "swap", e.id)}>
-                  <ShoppingBag className="h-3.5 w-3.5" /> Shop similar items
-                </Button>
-              ) : null}
-            </div>
-            <SwitchRow active={e.active} toggling={toggling} onToggle={() => onToggle(e.id, !e.active)} />
+        // Indented to line up with the text column (48px thumbnail + 12px gap = 60px). The current
+        // item's "View" (opens the retailer) is a compact icon so the row stays uncrowded next to
+        // "Try something else" and the on/off switch. Finding a cheaper/alternative option lives
+        // inside "Try something else" now — where you compare REAL products, not a fabricated badge.
+        <div className="flex items-center justify-between gap-2 pl-[60px]">
+          <div className="flex items-center gap-2 min-w-0">
+            {isProduct && e.buy_url && (
+              <a href={e.buy_url} target="_blank" rel="noopener noreferrer" aria-label="View at store"
+                title="View at store"
+                className="inline-flex items-center justify-center h-8 w-8 rounded-full border border-[var(--border)] bg-white text-[var(--foreground)] hover:border-[var(--foreground)] transition-colors shrink-0">
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            )}
+            {isProduct ? (
+              <Button size="sm" variant="subtle" onClick={() => ws.openSimilar(label, e.kind === "add" ? "add" : "swap", e.id)}>
+                <Replace className="h-3.5 w-3.5" /> Try something else
+              </Button>
+            ) : isInspo ? (
+              <Button size="sm" variant="accentSoft" onClick={() => ws.openSimilar(label, e.kind === "add" ? "add" : "swap", e.id)}>
+                <ShoppingBag className="h-3.5 w-3.5" /> Shop similar items
+              </Button>
+            ) : null}
           </div>
+          <SwitchRow active={e.active} toggling={toggling} onToggle={() => onToggle(e.id, !e.active)} />
         </div>
       )}
 
