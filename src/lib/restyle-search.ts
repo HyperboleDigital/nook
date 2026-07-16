@@ -102,3 +102,27 @@ export async function searchProductByImageUrl(params: {
   return { ok: true, results, finish };
 }
 
+/**
+ * Cheaper-alternatives search for a committed product, done the HONEST way: by IMAGE (Google Lens)
+ * off the product's own reference photo, NOT by keyword on its title. A keyword lookup returns
+ * random same-category items (and a photo-sourced item has no real title anyway), which fabricates
+ * savings; a Lens visual match finds the actual product across retailers, so a cheaper hit is a
+ * genuine cheaper listing. ONE SerpApi call, no scoring. Persisted to `restyle_searches` so the
+ * card's "Save $X" chip and "Try something else" both read it. Called post-generate for committed
+ * products only, once per label (the generate route skips labels that already have a row).
+ */
+export async function searchCheaperByImage(params: {
+  restyleId: string; label: string; imageUrl: string; tier: SearchTier;
+}): Promise<void> {
+  const { restyleId, label, imageUrl, tier } = params;
+  let results: ShoppingResult[];
+  try {
+    results = await searchByImage(imageUrl);
+  } catch {
+    return; // Lens unavailable / no matches — leave no row; the chip just won't appear
+  }
+  const supported = results.filter((r) => r.supported).slice(0, tier.limit);
+  if (supported.length === 0) return;
+  await upsertSearch(restyleId, label, { query: null, results: supported, scored: true });
+}
+

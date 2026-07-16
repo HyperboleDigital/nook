@@ -2,7 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import { NextResponse, after } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { recompose } from "@/lib/restyle-render";
-import { searchProductByImageUrl } from "@/lib/restyle-search";
+import { searchProductByImageUrl, searchCheaperByImage } from "@/lib/restyle-search";
 import { getUserPlan, searchTierForPlan } from "@/lib/plan";
 import { locateItemInRoom } from "@/lib/gemini";
 import { ensureWholeRoomEdit } from "@/lib/restyle-whole-room-edit";
@@ -113,13 +113,30 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       const inspo = ((activeEdits ?? []) as RestyleEdit[]).filter(
         (e) => e.reference_url && !e.buy_url && e.target_label,
       );
-      if (inspo.length) {
+      // In-room PRODUCTS get an honest "is this cheaper elsewhere?" check — by IMAGE (Lens off the
+      // product's own photo), never by keyword-on-title (that returns random items and fakes
+      // savings — see searchCheaperByImage). Committed-items-only, skipped for any label already
+      // searched, so a room costs at most one Lens call per product on its first render.
+      const products = ((activeEdits ?? []) as RestyleEdit[]).filter(
+        (e) => e.buy_url && e.reference_url && e.target_label,
+      );
+      if (inspo.length || products.length) {
         const tier = searchTierForPlan(await getUserPlan(userId));
         for (const e of inspo) {
           const search = await searchProductByImageUrl({
             restyleId: id, imageUrl: e.reference_url!, label: e.target_label!.toLowerCase(), tier,
           });
           if (search.ok) await search.finish();
+        }
+        if (products.length) {
+          const { data: existing } = await supabaseAdmin
+            .from("restyle_searches").select("label").eq("restyle_id", id);
+          const searched = new Set((existing ?? []).map((r) => (r.label as string).toLowerCase()));
+          for (const e of products) {
+            const label = e.target_label!.toLowerCase();
+            if (searched.has(label)) continue;
+            await searchCheaperByImage({ restyleId: id, label, imageUrl: e.reference_url!, tier });
+          }
         }
       }
     } catch (err) {
