@@ -278,14 +278,17 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
 
       <SegmentedTabs options={tabs} value={srcMode} onChange={setSrcMode} />
 
-      {/* Results — visible above whichever tab is active */}
-      {search.status === "loading" && (
+      {/* Search results belong ONLY to the "Describe it" tab (the one that runs a text search).
+          They used to render above EVERY tab, so switching to "Upload a photo" / "Paste a link"
+          for an item that already had results (e.g. one first sourced via search) buried that
+          tab's own input under a list of products — the "only the similar items show up" bug. */}
+      {srcMode === "describe" && search.status === "loading" && (
         <div className="space-y-2">
           <SkeletonProductCard /><SkeletonProductCard /><SkeletonProductCard />
         </div>
       )}
-      {search.status === "error" && <StatusBanner variant="error">{search.error}</StatusBanner>}
-      {search.status === "ready" && search.results.length > 0 && (
+      {srcMode === "describe" && search.status === "error" && <StatusBanner variant="error">{search.error}</StatusBanner>}
+      {srcMode === "describe" && search.status === "ready" && search.results.length > 0 && (
         <div className="space-y-2">
           <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
             {search.scored ? `Options for ${label || "this item"}` : "Found options — ranking best matches…"}

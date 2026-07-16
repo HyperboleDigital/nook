@@ -30,36 +30,38 @@ function StatusChip({ status }: { status: RailStatus }) {
 }
 
 type ChangeTone = "add" | "swap" | "remove" | "refine";
-const TONE_ICON_CLS: Record<ChangeTone, string> = {
-  add: "text-[var(--accent)]",
-  swap: "text-violet-500",
-  remove: "text-red-500",
-  refine: "text-amber-500",
+// Soft-tinted rounded pill per action — shown INLINE with the "In your room" status chip, so the
+// action (Added / Swapped / Removed / Adjusted) reads as its own colored pill + icon rather than a
+// plain text line. The source ("from a product / your photo / a description") moved to a separate
+// muted line underneath the pills (see changeSource / the ChangeCard header).
+const TONE_PILL_CLS: Record<ChangeTone, string> = {
+  add: "bg-emerald-50 text-emerald-700 border border-emerald-200",
+  swap: "bg-violet-50 text-violet-700 border border-violet-200",
+  remove: "bg-red-50 text-red-700 border border-red-200",
+  refine: "bg-amber-50 text-amber-700 border border-amber-200",
 };
 
-// Plain-language "what happened" for a change card. The user's complaint: a card just showed
-// the item name + "From your photo", so there was no way to tell they'd ADDED something new vs
-// REPLACED an existing item, or where it came from. This leads every card with an explicit
-// verb (Added / Swapped / Removed / Adjusted) and, for adds/swaps, the source (a product, your
-// photo, or a description) — the source is inferred: buy_url → a real product, reference_url only
-// → an inspo photo, neither → a text description. "a product" (not "a product link") stays true
-// whether the user pasted a link OR picked a suggested match, since we can't tell those apart.
-function changeDescriptor(e: RestyleEdit): { text: string; Icon: typeof Plus; tone: ChangeTone } {
-  const label = e.target_label ?? "item";
-  if (e.kind === "remove") return { text: `Removed the ${label}`, Icon: Eraser, tone: "remove" };
-  if (e.kind === "refine") return { text: `Adjusted the ${label}`, Icon: Wand2, tone: "refine" };
-  const source = e.buy_url ? "a product" : e.reference_url ? "your photo" : "a description";
-  if (e.kind === "add") return { text: `Added · from ${source}`, Icon: Plus, tone: "add" };
-  return { text: `Swapped · from ${source}`, Icon: Replace, tone: "swap" };
+function changeAction(e: RestyleEdit): { verb: string; Icon: typeof Plus; tone: ChangeTone } {
+  if (e.kind === "remove") return { verb: "Removed", Icon: Eraser, tone: "remove" };
+  if (e.kind === "refine") return { verb: "Adjusted", Icon: Wand2, tone: "refine" };
+  if (e.kind === "add") return { verb: "Added", Icon: Plus, tone: "add" };
+  return { verb: "Swapped", Icon: Replace, tone: "swap" };
 }
 
-function ChangeDescriptor({ e }: { e: RestyleEdit }) {
-  const { text, Icon, tone } = changeDescriptor(e);
+// Where the item came from — a small muted line under the pills. Products show price·retailer
+// instead (that already says "a product"), and removes/refines have no source.
+function changeSource(e: RestyleEdit): string | null {
+  if (e.kind === "remove" || e.kind === "refine" || e.buy_url) return null;
+  return e.reference_url ? "from your photo" : "from a description";
+}
+
+// The colored action pill (icon + verb), sized to sit next to the StatusChip.
+function ActionPill({ e }: { e: RestyleEdit }) {
+  const { verb, Icon, tone } = changeAction(e);
   return (
-    <p className="flex items-center gap-1.5 text-[13px] font-semibold text-[var(--foreground)]">
-      <Icon className={cn("h-3.5 w-3.5 shrink-0", TONE_ICON_CLS[tone])} />
-      <span className="truncate">{text}</span>
-    </p>
+    <span className={cn("inline-flex items-center gap-1 rounded-full text-[10px] px-2 py-0.5 font-semibold", TONE_PILL_CLS[tone])}>
+      <Icon className="h-3 w-3" /> {verb}
+    </span>
   );
 }
 
@@ -239,10 +241,13 @@ function ChangeCard({
           </span>
         )}
         <div className="min-w-0 flex-1 space-y-1">
-          <StatusChip status={status} />
-          <ChangeDescriptor e={e} />
-          {!isRemove && (
-            <p className="text-sm capitalize truncate">{e.product_title ?? label}</p>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <StatusChip status={status} />
+            <ActionPill e={e} />
+          </div>
+          <p className="text-sm font-medium capitalize truncate">{e.product_title ?? label}</p>
+          {changeSource(e) && (
+            <p className="text-xs text-[var(--muted-foreground)]">{changeSource(e)}</p>
           )}
           {isProduct && (
             <p className="text-xs text-[var(--muted-foreground)]">
@@ -330,8 +335,11 @@ function RefineCard({
           <Wand2 className="h-4 w-4" />
         </span>
         <div className="min-w-0 flex-1 space-y-1">
-          <StatusChip status={item.status} />
-          <ChangeDescriptor e={e} />
+          <div className="flex flex-wrap items-center gap-1.5">
+            <StatusChip status={item.status} />
+            <ActionPill e={e} />
+          </div>
+          <p className="text-sm font-medium capitalize truncate">{e.target_label}</p>
           <p className="text-[11px] text-[var(--muted-foreground)] truncate">&quot;{e.instruction}&quot;</p>
         </div>
         <IconButton aria-label="Delete this instruction" className="h-7 w-7 shrink-0"

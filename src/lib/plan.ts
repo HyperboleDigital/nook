@@ -32,3 +32,14 @@ export function searchTierForPlan(plan: PlanType): SearchTier {
   if (plan === "free") return { useLens: false, limit: 1, locked: true };
   return { useLens: true, limit: 8, locked: false };
 }
+
+/**
+ * Whether an email is an admin — currently used only to gate the dev-only "toggle my plan for
+ * testing" control (see /api/admin/plan). Configure with ADMIN_EMAILS (comma-separated). Empty/
+ * unset ⇒ nobody is admin, so the toggle simply never appears.
+ */
+export function isAdminEmail(email: string | null | undefined): boolean {
+  if (!email) return false;
+  const list = (process.env.ADMIN_EMAILS ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+  return list.includes(email.toLowerCase());
+}

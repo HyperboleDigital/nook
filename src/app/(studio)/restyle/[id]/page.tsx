@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { useRestyleWorkspace } from "./useRestyleWorkspace";
 import RestyleStudio from "./RestyleStudio";
+import AdminPlanToggle from "./AdminPlanToggle";
 import { IconButton, Spinner } from "./ui";
 
 // The immersive editor shell: a slim top bar (back / title) + the studio filling the rest of
@@ -42,6 +43,7 @@ export default function RestylePage({ params }: { params: Promise<{ id: string }
           placeholder="Untitled Room"
           className="min-w-0 flex-1 bg-transparent text-sm font-semibold tracking-[-0.02em] focus:outline-none focus:underline placeholder:text-[var(--muted-foreground)] placeholder:font-normal"
         />
+        <AdminPlanToggle />
       </header>
       <div className="flex-1 min-h-0">
         <RestyleStudio ws={ws} />

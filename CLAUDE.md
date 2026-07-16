@@ -167,6 +167,7 @@ STRIPE_WEBHOOK_SECRET
 STRIPE_STARTER_PRICE_ID
 STRIPE_PRO_PRICE_ID
 NEXT_PUBLIC_APP_URL                 https://nook-lime.vercel.app
+ADMIN_EMAILS                        OPTIONAL — comma-separated emails allowed to use the dev-only "toggle my plan" control (studio top bar → /api/admin/plan, flips your own free/pro to test plan-gated search). Unset = toggle never appears for anyone.
 ```
 
 ---
