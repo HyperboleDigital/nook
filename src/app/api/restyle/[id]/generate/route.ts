@@ -2,7 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import { NextResponse, after } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { recompose } from "@/lib/restyle-render";
-import { searchProductByImageUrl } from "@/lib/restyle-search";
+import { searchProductByImageUrl, searchCheaperByTitle } from "@/lib/restyle-search";
 import { getUserPlan, searchTierForPlan } from "@/lib/plan";
 import { locateItemInRoom } from "@/lib/gemini";
 import { ensureWholeRoomEdit } from "@/lib/restyle-whole-room-edit";
@@ -113,13 +113,32 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       const inspo = ((activeEdits ?? []) as RestyleEdit[]).filter(
         (e) => e.reference_url && !e.buy_url && e.target_label,
       );
-      if (inspo.length) {
+      // In-room PRODUCTS (a real buy_url + known title) get a cheap one-call "is there a cheaper
+      // version of this?" search — the savings-badge signal. Keyword-only (see searchCheaperByTitle),
+      // committed-items-only, and skipped for any label that already has a search row, so it costs at
+      // most one SerpApi call per product on the room's first render and nothing thereafter. This is
+      // the deliberate, cost-minimal replacement for the old auto "dupe finder" that fired on every
+      // pending stage/pick.
+      const products = ((activeEdits ?? []) as RestyleEdit[]).filter(
+        (e) => e.buy_url && e.product_title && e.target_label,
+      );
+      if (inspo.length || products.length) {
         const tier = searchTierForPlan(await getUserPlan(userId));
         for (const e of inspo) {
           const search = await searchProductByImageUrl({
             restyleId: id, imageUrl: e.reference_url!, label: e.target_label!.toLowerCase(), tier,
           });
           if (search.ok) await search.finish();
+        }
+        if (products.length) {
+          const { data: existing } = await supabaseAdmin
+            .from("restyle_searches").select("label").eq("restyle_id", id);
+          const searched = new Set((existing ?? []).map((r) => (r.label as string).toLowerCase()));
+          for (const e of products) {
+            const label = e.target_label!.toLowerCase();
+            if (searched.has(label)) continue;
+            await searchCheaperByTitle({ restyleId: id, label, title: e.product_title!, tier });
+          }
         }
       }
     } catch (err) {

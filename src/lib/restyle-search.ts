@@ -101,3 +101,27 @@ export async function searchProductByImageUrl(params: {
 
   return { ok: true, results, finish };
 }
+
+/**
+ * Cheaper-alternatives search for a product we ALREADY know the title of — the "dupe finder"
+ * signal behind the savings badge. Deliberately the CHEAPEST possible search: keyword-only (ONE
+ * SerpApi call via `searchShopping`, no Lens, no Gemini scoring), because we're finding cheaper
+ * listings by title, not visually matching an unknown item. Persisted like any other search so the
+ * card/cart read it from `restyle_searches`. Called post-generate for COMMITTED products only, once
+ * per product (the generate route skips labels that already have a row) — so a room with N products
+ * costs at most N calls on its first render, nothing on re-renders. No-ops silently on no matches.
+ */
+export async function searchCheaperByTitle(params: {
+  restyleId: string; label: string; title: string; tier: SearchTier;
+}): Promise<void> {
+  const { restyleId, label, title, tier } = params;
+  let results: ShoppingResult[];
+  try {
+    results = await searchShopping(title);
+  } catch {
+    return; // no matches / search unavailable — leave no row; the badge just won't appear
+  }
+  const supported = results.filter((r) => r.supported).slice(0, tier.limit);
+  if (supported.length === 0) return;
+  await upsertSearch(restyleId, label, { query: title, results: supported, scored: true });
+}

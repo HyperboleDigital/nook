@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Eraser, Loader2, MapPin, Plus, Replace, ShoppingBag, Wand2, X } from "lucide-react";
+import { Eraser, ExternalLink, Loader2, MapPin, Plus, Replace, ShoppingBag, TrendingDown, Wand2, X } from "lucide-react";
 import { boxFromPlacement, type RailItem, type RailStatus, type RestyleWorkspace } from "./useRestyleWorkspace";
 import type { RestyleEdit } from "@/types";
 import { Button, ConfirmDialog, IconButton, Switch, parsePrice, shopSummary, storeName } from "./ui";
@@ -210,36 +210,50 @@ function ChangeCard({
   const isInspo = !isRemove && !!e.reference_url && !e.buy_url;
   const isProduct = !isRemove && !!e.buy_url;
 
-  // "Dupe finder" — a pasted product link auto-triggers a search for cheaper alternatives (see
-  // product/route.ts); once it lands, surface it here too, not just inside "Shop similar items",
-  // so the savings aren't only discoverable by clicking in first.
+  // Cheaper-alternatives ("dupe") signal — from the post-generate keyword search (see
+  // generate/route.ts + searchCheaperByTitle). The single cheapest option that genuinely beats the
+  // current price drives the "SAVE $X" thumbnail badge and the accent "See cheaper" button.
   const search = isProduct ? ws.searches[label.toLowerCase()] : undefined;
   const refPrice = isProduct && e.product_price ? parsePrice(e.product_price) : 0;
-  const cheaperCount = search?.status === "ready" && refPrice > 0
-    ? search.results.filter((r) => { const p = parsePrice(r.price); return p > 0 && p < refPrice; }).length
-    : 0;
+  const bestDeal = (search?.status === "ready" && refPrice > 0)
+    ? search.results
+        .map((r) => ({ r, p: parsePrice(r.price) }))
+        .filter((x) => x.p > 0 && x.p < refPrice)
+        .sort((a, b) => a.p - b.p)[0]
+    : undefined;
+  const savings = bestDeal ? Math.round(refPrice - bestDeal.p) : 0;
+  const hasDeal = !!bestDeal && savings > 0;
 
   return (
     <div className="rounded-xl border border-[var(--border)] p-2.5 space-y-2">
       <div className="flex items-start gap-3">
-        {!isRemove && e.reference_url ? (
-          /* eslint-disable-next-line @next/next/no-img-element */
-          <img src={e.reference_url} alt="" className="h-12 w-12 object-cover rounded-xl border border-[var(--border)] bg-[var(--muted)] shrink-0" />
-        ) : e.kind === "add" && e.placement ? (
-          // Sourced by plain description (no reference photo) — once it's actually pictured,
-          // crop the real thing out of the current photo instead of showing a generic icon.
-          <CroppedThumb imageUrl={ws.displayUrl} box_2d={boxFromPlacement(e.placement)}
-            className="h-12 w-12 rounded-xl overflow-hidden border border-[var(--border)] bg-[var(--muted)] shrink-0" />
-        ) : (
-          <span className="h-12 w-12 rounded-xl bg-[var(--muted)] border border-[var(--border)] shrink-0 flex items-center justify-center text-[var(--muted-foreground)]">
-            {/* A real buyable product (buy_url) always gets the shopping-bag icon, matching the
-                canvas hotspot marker's meaning — same signal, same icon, everywhere. */}
-            {isRemove ? <Eraser className="h-4 w-4" />
-              : isProduct ? <ShoppingBag className="h-4 w-4" />
-              : e.kind === "add" ? <Plus className="h-4 w-4" />
-              : <Replace className="h-4 w-4" />}
-          </span>
-        )}
+        <div className="relative shrink-0 h-12 w-12">
+          {!isRemove && e.reference_url ? (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img src={e.reference_url} alt="" className="h-12 w-12 object-cover rounded-xl border border-[var(--border)] bg-[var(--muted)]" />
+          ) : e.kind === "add" && e.placement ? (
+            // Sourced by plain description (no reference photo) — once it's actually pictured,
+            // crop the real thing out of the current photo instead of showing a generic icon.
+            <CroppedThumb imageUrl={ws.displayUrl} box_2d={boxFromPlacement(e.placement)}
+              className="h-12 w-12 rounded-xl overflow-hidden border border-[var(--border)] bg-[var(--muted)]" />
+          ) : (
+            <span className="h-12 w-12 rounded-xl bg-[var(--muted)] border border-[var(--border)] flex items-center justify-center text-[var(--muted-foreground)]">
+              {/* A real buyable product (buy_url) always gets the shopping-bag icon, matching the
+                  canvas hotspot marker's meaning — same signal, same icon, everywhere. */}
+              {isRemove ? <Eraser className="h-4 w-4" />
+                : isProduct ? <ShoppingBag className="h-4 w-4" />
+                : e.kind === "add" ? <Plus className="h-4 w-4" />
+                : <Replace className="h-4 w-4" />}
+            </span>
+          )}
+          {/* Option C deal badge — a "SAVE $X" ribbon on the thumbnail when a genuinely cheaper
+              alternative exists, so the saving is the first thing the eye lands on. */}
+          {hasDeal && (
+            <span className="absolute inset-x-0 bottom-0 rounded-b-xl bg-emerald-700 text-white text-[8px] leading-none font-extrabold text-center py-[3px] tracking-wide">
+              SAVE ${savings}
+            </span>
+          )}
+        </div>
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex flex-wrap items-center gap-1.5">
             <StatusChip status={status} />
@@ -255,12 +269,6 @@ function ChangeCard({
               {e.product_price && e.buy_url && " · "}
               {e.buy_url && storeName(e.buy_url)}
             </p>
-          )}
-          {cheaperCount > 0 && (
-            <button type="button" onClick={() => ws.openSimilar(label, e.kind === "add" ? "add" : "swap", e.id)}
-              className="inline-flex items-center gap-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-medium px-2 py-0.5 hover:bg-emerald-100 transition-colors">
-              {cheaperCount} cheaper option{cheaperCount === 1 ? "" : "s"} found
-            </button>
           )}
           {e.kind === "add" && (
             <button type="button" onClick={() => ws.requestPin(e.id, label)}
@@ -286,19 +294,35 @@ function ChangeCard({
           <Loader2 className="h-3 w-3 animate-spin" /> Confirming — this can take a minute
         </p>
       ) : (
-        // Indented to line up with the text column (48px thumbnail + 12px gap = 60px), so the
-        // action button sits under the price/"Pinned" line rather than under the thumbnail.
-        <div className="flex items-center justify-between gap-2 pl-[60px]">
-          {isProduct ? (
-            <Button size="sm" variant="subtle" onClick={() => ws.openSimilar(label, e.kind === "add" ? "add" : "swap", e.id)}>
-              <Replace className="h-3.5 w-3.5" /> Try something else
+        // Indented to line up with the text column (48px thumbnail + 12px gap = 60px). Option C's
+        // deal CTA (accent, when a cheaper option exists) sits on top; the current-item "View"
+        // (opens the retailer), "Try something else", and the on/off switch share the row below.
+        <div className="space-y-2 pl-[60px]">
+          {hasDeal && (
+            <Button size="sm" variant="accent" onClick={() => ws.openSimilar(label, e.kind === "add" ? "add" : "swap", e.id)}>
+              <TrendingDown className="h-3.5 w-3.5" /> See cheaper · save ${savings}
             </Button>
-          ) : isInspo ? (
-            <Button size="sm" variant="accentSoft" onClick={() => ws.openSimilar(label, e.kind === "add" ? "add" : "swap", e.id)}>
-              <ShoppingBag className="h-3.5 w-3.5" /> Shop similar items
-            </Button>
-          ) : <span />}
-          <SwitchRow active={e.active} toggling={toggling} onToggle={() => onToggle(e.id, !e.active)} />
+          )}
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              {isProduct && e.buy_url && (
+                <a href={e.buy_url} target="_blank" rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border)] bg-white text-xs font-medium px-3 py-1.5 hover:border-[var(--foreground)] transition-colors shrink-0">
+                  <ExternalLink className="h-3.5 w-3.5" /> View
+                </a>
+              )}
+              {isProduct ? (
+                <Button size="sm" variant="subtle" onClick={() => ws.openSimilar(label, e.kind === "add" ? "add" : "swap", e.id)}>
+                  <Replace className="h-3.5 w-3.5" /> Try something else
+                </Button>
+              ) : isInspo ? (
+                <Button size="sm" variant="accentSoft" onClick={() => ws.openSimilar(label, e.kind === "add" ? "add" : "swap", e.id)}>
+                  <ShoppingBag className="h-3.5 w-3.5" /> Shop similar items
+                </Button>
+              ) : null}
+            </div>
+            <SwitchRow active={e.active} toggling={toggling} onToggle={() => onToggle(e.id, !e.active)} />
+          </div>
         </div>
       )}
 

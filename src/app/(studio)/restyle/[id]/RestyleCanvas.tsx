@@ -8,6 +8,7 @@ import { Button, IconButton, ProgressOverlay, Sheet, ShopSummaryPill, Spinner } 
 import ObjectHotspots from "./ObjectHotspots";
 import PinPlacementLayer from "./PinPlacementLayer";
 import ShareMenu, { ShareOptions } from "./ShareMenu";
+import ShopCart from "./ShopCart";
 
 // Fallback for the brief window before the frame/image have been measured (or if width/height
 // are ever unknown): natural aspect, full width, height follows. Rounded + shadowed like the
@@ -40,6 +41,7 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
   const { restyle, generating, displayUrl } = ws;
   const [showCompare, setShowCompare] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [cartOpen, setCartOpen] = useState(false);
 
   // Desktop image-box measurement (see doc comment above). `naturalSize` is measured directly
   // off the actual rendered <img> (onLoad) rather than trusted solely from `restyle.width`/
@@ -222,9 +224,10 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
             even though it fits fine (+Add sits bottom-right, no collision). */}
         {!viewingOriginal && !generating && !holdingOverlay && !showCompare && ws.productEdits.length > 0 && (
           <div className="absolute bottom-3 left-3">
-            <ShopSummaryPill edits={ws.productEdits} />
+            <ShopSummaryPill edits={ws.productEdits} onClick={() => setCartOpen(true)} />
           </div>
         )}
+        <ShopCart ws={ws} open={cartOpen} onClose={() => setCartOpen(false)} />
 
         {!generating && !holdingOverlay && !showCompare && !ws.pinRequest && (
           <div className="absolute bottom-3 right-3">

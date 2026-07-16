@@ -1,7 +1,7 @@
 "use client";
 
 import { cva, type VariantProps } from "class-variance-authority";
-import { ExternalLink, ShoppingBag, X } from "lucide-react";
+import { ChevronRight, ExternalLink, ShoppingBag, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from "react";
 import { cn } from "@/lib/utils";
@@ -587,11 +587,12 @@ export function shopSummary(edits: RestyleEdit[]) {
   return { count: edits.length, total, priced };
 }
 
-export function ShopSummaryPill({ edits }: { edits: RestyleEdit[] }) {
+export function ShopSummaryPill({ edits, onClick }: { edits: RestyleEdit[]; onClick?: () => void }) {
   const { count, total, priced } = shopSummary(edits);
   if (count === 0) return null;
   return (
-    <div className="inline-flex items-center gap-1.5 rounded-full bg-[var(--foreground)] text-white px-4 py-2 text-xs shadow-[var(--shadow-pop)]">
+    <button type="button" onClick={onClick}
+      className="inline-flex items-center gap-1.5 rounded-full bg-[var(--foreground)] text-white px-4 py-2 text-xs shadow-[var(--shadow-pop)] hover:opacity-90 transition-opacity">
       <ShoppingBag className="h-3.5 w-3.5" />
       <span>
         {count} item{count === 1 ? "" : "s"}
@@ -599,6 +600,7 @@ export function ShopSummaryPill({ edits }: { edits: RestyleEdit[] }) {
           <> · from ${total.toLocaleString(undefined, { maximumFractionDigits: 0 })}</>
         )}
       </span>
-    </div>
+      <ChevronRight className="h-3.5 w-3.5 opacity-70" />
+    </button>
   );
 }
