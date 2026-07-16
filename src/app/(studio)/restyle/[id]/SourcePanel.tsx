@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Check, ChevronLeft, ChevronRight, Eraser, Replace, ShoppingBag, Sparkles, Wand2 } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Eraser, History, Replace, ShoppingBag, Sparkles, Wand2 } from "lucide-react";
 import { boxFromPlacement, type RestyleWorkspace } from "./useRestyleWorkspace";
 import type { ShoppingResult } from "@/lib/shopping-search";
 import { downscaleImage } from "@/lib/image-client";
@@ -211,6 +211,7 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
 
   // ── Category menu — the entry point for any existing item (changed or not) ──
   if (sourcing.view === "menu") {
+    const triedCount = ws.historyFor(label).length;
     return (
       <div className="space-y-3">
         {header}
@@ -219,6 +220,13 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
             onClick={() => ws.setSourcingView("compose")} />
           <MenuRow icon={ShoppingBag} title="Shop similar items" subtitle="See buyable alternatives to what's there now" tone="shop"
             onClick={() => ws.setSourcingView("similar")} />
+          {/* Only when this slot actually has replaced attempts — opens the similar panel, where
+              the "Tried before" strip sits at the top. */}
+          {triedCount > 0 && (
+            <MenuRow icon={History} title={`Previously tried (${triedCount})`} tone="history"
+              subtitle="Bring back something you tried on this spot"
+              onClick={() => ws.setSourcingView("similar")} />
+          )}
           <MenuRow icon={Wand2} title="Adjust it" tone="adjust"
             subtitle={activeRefine ? `"${activeRefine.instruction}"` : "Keep it, just reposition or reorient it"}
             onClick={() => ws.setSourcingView("adjust")} />
@@ -421,6 +429,7 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
 const MENU_ROW_TONES = {
   swap: "from-violet-500 to-fuchsia-500",
   shop: "from-emerald-500 to-teal-500",
+  history: "from-sky-500 to-cyan-500",
   adjust: "from-amber-400 to-orange-500",
   remove: "from-red-500 to-rose-600",
 } as const;
