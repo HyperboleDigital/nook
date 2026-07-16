@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Eraser, ExternalLink, Loader2, MapPin, Plus, Replace, ShoppingBag, TrendingDown, Wand2, X } from "lucide-react";
+import { ChevronRight, Eraser, ExternalLink, Loader2, MapPin, Plus, Replace, ShoppingBag, TrendingDown, Wand2, X } from "lucide-react";
 import { boxFromPlacement, type RailItem, type RailStatus, type RestyleWorkspace } from "./useRestyleWorkspace";
 import type { RestyleEdit } from "@/types";
 import { Button, ConfirmDialog, IconButton, Switch, parsePrice, shopSummary, storeName } from "./ui";
@@ -251,38 +251,25 @@ function ChangeCard({
             <ActionPill e={e} />
           </div>
           <p className="text-sm font-medium capitalize truncate">{e.product_title ?? label}</p>
-          {changeSource(e) && (
-            <p className="text-xs text-[var(--muted-foreground)]">{changeSource(e)}</p>
-          )}
-          {isProduct && (
-            <p className="text-xs text-[var(--muted-foreground)]">
-              {e.product_price && <span className="font-semibold text-[var(--foreground)]">{e.product_price}</span>}
-              {e.product_price && e.buy_url && " · "}
-              {/* Shop-the-product affordance lives right ON the retailer name, next to the price —
-                  tap the store to open the actual listing. */}
-              {e.buy_url && (
-                <a href={e.buy_url} target="_blank" rel="noopener noreferrer"
-                  className="inline-flex items-center gap-0.5 font-medium text-[var(--foreground)] underline decoration-[var(--border)] underline-offset-2 hover:decoration-[var(--foreground)] transition-colors">
-                  {storeName(e.buy_url)}<ExternalLink className="h-3 w-3" />
-                </a>
-              )}
-            </p>
-          )}
-          {hasDeal && (
-            <button type="button" onClick={() => ws.openSimilar(label, e.kind === "add" ? "add" : "swap", e.id)}
-              className="inline-flex items-center gap-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-semibold px-2 py-0.5 hover:bg-emerald-100 transition-colors">
-              <TrendingDown className="h-3 w-3" /> Save ${savings}
-            </button>
-          )}
-          {e.kind === "add" && (
-            <button type="button" onClick={() => ws.requestPin(e.id, label)}
-              className="inline-flex items-center gap-1 text-[11px] text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors">
-              <MapPin className="h-3 w-3" />
-              {e.placement
-                ? <>Pinned{e.placement.note ? <span className="truncate max-w-[10rem]"> — &quot;{e.placement.note}&quot;</span> : null} · <span className="underline">Move</span></>
-                : "Choose a spot"}
-            </button>
-          )}
+          {/* ONE meta line — price · store (tappable, opens the listing) · pin — instead of a
+              stack of separate lines. Everything secondary lives here at the same size. */}
+          <p className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-[var(--muted-foreground)]">
+            {isProduct && e.product_price && <span className="font-semibold text-[var(--foreground)]">{e.product_price}</span>}
+            {isProduct && e.buy_url && (
+              <a href={e.buy_url} target="_blank" rel="noopener noreferrer"
+                className="inline-flex items-center gap-0.5 font-medium text-[var(--foreground)] underline decoration-[var(--border)] underline-offset-2 hover:decoration-[var(--foreground)] transition-colors">
+                {storeName(e.buy_url)}<ExternalLink className="h-3 w-3" />
+              </a>
+            )}
+            {!isProduct && changeSource(e) && <span>{changeSource(e)}</span>}
+            {e.kind === "add" && (
+              <button type="button" onClick={() => ws.requestPin(e.id, label)}
+                className="inline-flex items-center gap-0.5 hover:text-[var(--foreground)] transition-colors">
+                <MapPin className="h-3 w-3" />
+                {e.placement ? <span className="underline">Move</span> : <span className="underline">Choose a spot</span>}
+              </button>
+            )}
+          </p>
         </div>
         {!e.id.startsWith("optimistic-") && (
           <IconButton aria-label="Delete this change" className="h-7 w-7 shrink-0"
@@ -298,19 +285,26 @@ function ChangeCard({
           <Loader2 className="h-3 w-3 animate-spin" /> Confirming — this can take a minute
         </p>
       ) : (
-        // Just the alternatives action + the on/off switch now — the shop-the-product link moved up
-        // onto the retailer name (by the price), so this row stays simple. Indented to line up with
-        // the text column (48px thumbnail + 12px gap = 60px). "Try something else" is icon-less on
-        // purpose (the swap icon read as clutter).
+        // ONE action slot + the switch. The button transforms as we learn more: before any cheaper
+        // result it's "Shop similar" (also what a first-time user sees); once the Lens check finds a
+        // genuinely cheaper listing it becomes the green "Save $X · Shop similar ›". Same
+        // destination either way (the alternatives panel), the chevron says "this opens something".
+        // Indented to the text column (48px thumbnail + 12px gap = 60px).
         <div className="flex items-center justify-between gap-2 pl-[60px]">
-          {isProduct ? (
-            <Button size="sm" variant="subtle" onClick={() => ws.openSimilar(label, e.kind === "add" ? "add" : "swap", e.id)}>
-              Try something else
-            </Button>
-          ) : isInspo ? (
-            <Button size="sm" variant="accentSoft" onClick={() => ws.openSimilar(label, e.kind === "add" ? "add" : "swap", e.id)}>
-              <ShoppingBag className="h-3.5 w-3.5" /> Shop similar items
-            </Button>
+          {isProduct || isInspo ? (
+            hasDeal ? (
+              <button type="button" onClick={() => ws.openSimilar(label, e.kind === "add" ? "add" : "swap", e.id)}
+                className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-semibold px-3 py-1.5 hover:bg-emerald-100 transition-colors">
+                <TrendingDown className="h-3.5 w-3.5" /> Save ${savings} · Shop similar
+                <ChevronRight className="h-3.5 w-3.5 opacity-60" />
+              </button>
+            ) : (
+              <Button size="sm" variant={isInspo ? "accentSoft" : "subtle"}
+                onClick={() => ws.openSimilar(label, e.kind === "add" ? "add" : "swap", e.id)}>
+                <ShoppingBag className="h-3.5 w-3.5" /> Shop similar
+                <ChevronRight className="h-3.5 w-3.5 opacity-60" />
+              </Button>
+            )
           ) : <span />}
           <SwitchRow active={e.active} toggling={toggling} onToggle={() => onToggle(e.id, !e.active)} />
         </div>
