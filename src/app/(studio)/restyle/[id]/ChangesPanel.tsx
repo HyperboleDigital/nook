@@ -286,10 +286,12 @@ function ChangeCard({
           <Loader2 className="h-3 w-3 animate-spin" /> Confirming — this can take a minute
         </p>
       ) : (
-        <div className="flex items-center justify-between gap-2">
+        // Indented to line up with the text column (48px thumbnail + 12px gap = 60px), so the
+        // action button sits under the price/"Pinned" line rather than under the thumbnail.
+        <div className="flex items-center justify-between gap-2 pl-[60px]">
           {isProduct ? (
             <Button size="sm" variant="subtle" onClick={() => ws.openSimilar(label, e.kind === "add" ? "add" : "swap", e.id)}>
-              <Replace className="h-3.5 w-3.5" /> Replace
+              <Replace className="h-3.5 w-3.5" /> Try something else
             </Button>
           ) : isInspo ? (
             <Button size="sm" variant="accentSoft" onClick={() => ws.openSimilar(label, e.kind === "add" ? "add" : "swap", e.id)}>
