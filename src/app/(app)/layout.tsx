@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { UserButton } from "@clerk/nextjs";
-import { House, Images } from "lucide-react";
+import { House, ShoppingBag } from "lucide-react";
 import AppTabBar from "./AppTabBar";
 import Wordmark from "@/components/Wordmark";
 
@@ -12,8 +12,8 @@ import Wordmark from "@/components/Wordmark";
 // entirely, since it was also confirmed broken (reel status never actually polled Higgsfield).
 // See CLAUDE.md.
 const NAV = [
-  { href: "/dashboard", label: "Dashboard", Icon: House },
-  { href: "/restyle", label: "Room Restyle", Icon: Images },
+  { href: "/dashboard", label: "Rooms", Icon: House },
+  { href: "/shop", label: "Shop the look", Icon: ShoppingBag },
 ];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {

@@ -31,7 +31,7 @@ export default function RestylePage({ params }: { params: Promise<{ id: string }
 
   return (
     <div className="h-dvh flex flex-col">
-      <header className="h-12 shrink-0 flex items-center gap-2 px-3 border-b border-[var(--border)] bg-[var(--card)]">
+      <header className="h-14 shrink-0 flex items-center gap-2 px-3 border-b border-[var(--border)] bg-[var(--card)]">
         <IconButton onClick={() => router.push("/dashboard")} aria-label="Home">
           <ArrowLeft className="h-4 w-4" />
         </IconButton>
@@ -41,7 +41,7 @@ export default function RestylePage({ params }: { params: Promise<{ id: string }
           onBlur={() => ws.saveTitle(ws.titleDraft)}
           onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
           placeholder="Untitled Room"
-          className="min-w-0 flex-1 bg-transparent text-sm font-semibold tracking-[-0.02em] focus:outline-none focus:underline placeholder:text-[var(--muted-foreground)] placeholder:font-normal"
+          className="min-w-0 flex-1 bg-transparent text-lg font-bold tracking-[-0.03em] focus:outline-none focus:underline placeholder:text-[var(--muted-foreground)] placeholder:font-bold"
         />
         <AdminPlanToggle />
       </header>

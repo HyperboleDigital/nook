@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { MoreHorizontal, Eraser, RotateCcw, Loader2, Sparkles } from "lucide-react";
+import { MoreHorizontal, Eraser, RotateCcw, Loader2, Sparkles, Wand2 } from "lucide-react";
 import type { RestyleWorkspace } from "./useRestyleWorkspace";
 import { Button, ConfirmDialog, IconButton } from "./ui";
 import StagePicker from "./StagePicker";
@@ -80,7 +80,7 @@ export default function GenerateBar({ ws, variant = "sticky" }: { ws: RestyleWor
         </div>
         <Button variant="primary" size="lg" className="flex-1" disabled={!ws.canGenerate || ws.generating} onClick={() => ws.generate()}>
           {ws.generating
-            ? <>Generating…</>
+            ? <><Loader2 className="h-4 w-4 animate-spin" /> Generating…</>
             : confirming
             // Disabled-with-no-explanation used to look like a stuck app when a slow/degraded
             // product lookup (Unwrangle/SerpApi) left an item optimistically staged for a while —
@@ -91,7 +91,7 @@ export default function GenerateBar({ ws, variant = "sticky" }: { ws: RestyleWor
             // pendingCount (not activeEdits.length) — the diff between what's active and what's
             // actually in the current render, so this resets to 0 (and hides) after a successful
             // generate instead of staying at "3" forever just because 3 edits are still active.
-            : <>Generate{ws.pendingCount > 0 && <span className="ml-1 rounded-full bg-white/20 text-[10px] font-bold px-1.5 py-0.5">{ws.pendingCount}</span>}</>}
+            : <><Wand2 className="h-4 w-4" /> Magic Generate{ws.pendingCount > 0 && <span className="ml-1 rounded-full bg-white/20 text-[10px] font-bold px-1.5 py-0.5">{ws.pendingCount}</span>}</>}
         </Button>
       </div>
       {confirming && (

@@ -120,7 +120,7 @@ export default function ChangesPanel({ ws }: { ws: RestyleWorkspace }) {
 
   if (railEdits.length === 0) {
     return (
-      <div className="rounded-2xl border border-[var(--border)] bg-white p-4 space-y-3">
+      <div className="space-y-3">
         <Header />
         <p className="text-xs text-[var(--muted-foreground)]">
           Nothing queued yet — tap an item to swap it, or add something new.
@@ -130,7 +130,7 @@ export default function ChangesPanel({ ws }: { ws: RestyleWorkspace }) {
   }
 
   return (
-    <div className="rounded-2xl border border-[var(--border)] bg-white p-4 space-y-3">
+    <div className="space-y-3">
       <Header />
       {pricedCount > 0 && (
         <p className="text-[11px] text-[var(--muted-foreground)]">
@@ -223,7 +223,7 @@ function ChangeCard({
   const hasDeal = !!bestDeal && savings > 0;
 
   return (
-    <div className="rounded-xl border border-[var(--border)] p-2.5 space-y-2">
+    <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-3 space-y-2 shadow-[var(--shadow-soft)]">
       <div className="flex items-start gap-3">
         <div className="relative shrink-0 h-12 w-12">
           {!isRemove && e.reference_url ? (
@@ -339,7 +339,7 @@ function RefineCard({
   const e: RestyleEdit = item.edit;
   const deleteConfirm = useDeleteConfirm();
   return (
-    <div className="rounded-xl border border-[var(--border)] p-2.5 space-y-2">
+    <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-3 space-y-2 shadow-[var(--shadow-soft)]">
       <div className="flex items-start gap-3">
         <span className="h-10 w-10 rounded-xl bg-[var(--muted)] shrink-0 flex items-center justify-center text-[var(--muted-foreground)]">
           <Wand2 className="h-4 w-4" />

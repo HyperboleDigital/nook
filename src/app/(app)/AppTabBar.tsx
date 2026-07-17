@@ -3,12 +3,12 @@
 import { useRef } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
-import { House, Images, Plus } from "lucide-react";
+import { House, ShoppingBag, Plus } from "lucide-react";
 import { stashCapturedFile } from "./restyle/new/capture-handoff";
 
 const TABS = [
-  { href: "/dashboard", label: "Home", Icon: House },
-  { href: "/restyle", label: "Projects", Icon: Images },
+  { href: "/dashboard", label: "Rooms", Icon: House },
+  { href: "/shop", label: "Shop", Icon: ShoppingBag },
 ] as const;
 
 /**
