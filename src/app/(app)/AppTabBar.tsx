@@ -91,15 +91,18 @@ function TabLink({
   href, label, Icon, active,
 }: { href: string; label: string; Icon: typeof House; active: boolean }) {
   return (
+    // Icon + label are always near-black (no muted-gray inactive state, no circle behind the
+    // active icon) — the active tab is set apart only by a bolder label, which reads cleanly on
+    // the frosted glass. Requested: both tabs black, no chip behind the active one.
     <Link
       href={href}
       className="flex-1 flex flex-col items-center justify-center gap-0.5 min-w-0"
       aria-current={active ? "page" : undefined}
     >
-      <span className={`flex items-center justify-center h-8 w-8 rounded-full transition-colors ${active ? "bg-[var(--muted)]" : ""}`}>
-        <Icon className={`h-5 w-5 ${active ? "text-[var(--foreground)]" : "text-[var(--muted-foreground)]"}`} />
+      <span className="flex items-center justify-center h-8 w-8">
+        <Icon className="h-5 w-5 text-[var(--foreground)]" />
       </span>
-      <span className={`text-[11px] ${active ? "text-[var(--foreground)] font-medium" : "text-[var(--muted-foreground)]"}`}>
+      <span className={`text-[11px] text-[var(--foreground)] ${active ? "font-semibold" : ""}`}>
         {label}
       </span>
     </Link>
