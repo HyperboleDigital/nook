@@ -657,7 +657,7 @@ export function ShopSummaryPill({ edits, onClick }: { edits: RestyleEdit[]; onCl
   if (count === 0) return null;
   return (
     <button type="button" onClick={onClick}
-      className="inline-flex items-center gap-1.5 rounded-full bg-[var(--foreground)] text-white px-4 py-2 text-xs shadow-[var(--shadow-pop)] hover:opacity-90 transition-opacity">
+      className="glass-surface inline-flex items-center gap-1.5 rounded-full text-white px-4 py-2 text-xs shadow-[var(--shadow-pop)] hover:opacity-90 transition-opacity">
       <ShoppingBag className="h-3.5 w-3.5" />
       <span>
         {count} item{count === 1 ? "" : "s"}

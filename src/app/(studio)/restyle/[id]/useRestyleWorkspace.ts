@@ -294,6 +294,15 @@ export function useRestyleWorkspace(id: string) {
     setPinRequest(null);
     setSourcing({ label: "", mode: "add", view: "compose", stagedEditId: null, hasMenu: false });
   };
+  // Abort the whole "+ Add" flow — clears the pending location AND any open sourcing, returning to
+  // the plain editor. This is what "Cancel" in the pin step does: cancel means cancel, NOT "skip
+  // the pin and move on to naming the item" (skipAddLocation, which advances). Only for the upfront
+  // add flow (no edit created yet); the post-hoc pin path uses cancelPin (keeps the existing edit).
+  const cancelAddFlow = () => {
+    setPendingAddPlacement(null);
+    setPinRequest(null);
+    setSourcing(null);
+  };
   // The "what is it" step confirms into sourcing.label so the existing staging calls (which all
   // read the label from here) pick it up automatically.
   const setSourcingLabel = (label: string) => setSourcing((s) => (s ? { ...s, label } : s));
@@ -964,7 +973,7 @@ export function useRestyleWorkspace(id: string) {
     busy, generating, generatingStartedAt, expectedSeconds, error, setError,
     titleDraft, setTitleDraft, saveTitle,
     sourcing, openSourcing, openSimilar, closeSourcing, setSourcingLabel, setSourcingView,
-    pinRequest, requestPin, cancelPin, setPlacement, startAddFlow, placeAddLocation, skipAddLocation,
+    pinRequest, requestPin, cancelPin, setPlacement, startAddFlow, placeAddLocation, skipAddLocation, cancelAddFlow,
     searches, runVisualSearchByUrl, runTextSearch, pickCandidate, pickingKey,
     stagePhoto, stageProductLink, stagingLink, stageRemove, stageRefine,
     // handlers

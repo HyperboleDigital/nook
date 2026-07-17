@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, Columns2, Download, Pencil, Plus, Share2, ArrowLeftRight, GalleryVerticalEnd } from "lucide-react";
 import type { CSSProperties } from "react";
 import type { CanvasHotspot, RestyleWorkspace } from "./useRestyleWorkspace";
-import { Button, IconButton, ProgressOverlay, Sheet, ShopSummaryPill, Spinner } from "./ui";
+import { IconButton, ProgressOverlay, Sheet, ShopSummaryPill, Spinner } from "./ui";
 import AdminPlanToggle from "./AdminPlanToggle";
 import ObjectHotspots from "./ObjectHotspots";
 import PinPlacementLayer from "./PinPlacementLayer";
@@ -175,9 +175,11 @@ export default function RestyleCanvas({ ws, fluid = false }: { ws: RestyleWorksp
   const shareUrl = `${window.location.origin}/r/${ws.id}`;
   const shareTitle = restyle.title ?? "Room design";
 
-  // Skip the pin step: for the upfront add flow (no edit yet) proceed to sourcing without a
-  // location; for the post-hoc offer (edit exists) just close the pin layer.
-  const skipPin = () => (ws.pinRequest?.editId ? ws.cancelPin() : ws.skipAddLocation());
+  // Cancel the pin step. For the upfront add flow (no edit yet) this ABORTS the whole "+ Add" —
+  // cancel means cancel, not "skip the pin and move on to naming it" (the old skipAddLocation,
+  // which confusingly advanced to the next step). For the post-hoc offer (edit already exists),
+  // just close the pin layer and keep the edit.
+  const cancelPlacement = () => (ws.pinRequest?.editId ? ws.cancelPin() : ws.cancelAddFlow());
   const pinLabel = ws.pinRequest?.label?.trim() ? `your ${ws.pinRequest.label.trim()}` : "your new item";
 
   return (
@@ -204,7 +206,7 @@ export default function RestyleCanvas({ ws, fluid = false }: { ws: RestyleWorksp
                 onPlace={(x, y, note) => ws.pinRequest!.editId
                   ? ws.setPlacement(ws.pinRequest!.editId, { x, y, note })
                   : ws.placeAddLocation(x, y, note)}
-                onCancel={skipPin} />
+                onCancel={cancelPlacement} />
             )}
           </div>
         ) : (
@@ -238,7 +240,7 @@ export default function RestyleCanvas({ ws, fluid = false }: { ws: RestyleWorksp
           <div className="pointer-events-none absolute inset-x-0 bottom-4 z-20 flex justify-center px-4">
             <div className="glass-surface pointer-events-auto flex items-center gap-2.5 rounded-full pl-4 pr-2 py-1.5 text-white text-xs shadow-[var(--shadow-pop)]">
               <span className="font-medium">Tap the photo to place {pinLabel}</span>
-              <button type="button" onClick={skipPin}
+              <button type="button" onClick={cancelPlacement}
                 className="rounded-full px-3 py-1 bg-white/20 hover:bg-white/30 transition-colors shrink-0">
                 Cancel
               </button>
@@ -273,11 +275,11 @@ export default function RestyleCanvas({ ws, fluid = false }: { ws: RestyleWorksp
 
         {!generating && !holdingOverlay && !showCompare && !ws.pinRequest && (
           <div className="absolute right-3 bottom-3">
-            <Button variant="primary" size="sm"
-              className="relative shadow-[var(--shadow-pop)] before:absolute before:-inset-2 before:rounded-full before:content-['']"
-              onClick={() => ws.startAddFlow()}>
-              <Plus className="h-3.5 w-3.5" /> Add
-            </Button>
+            {/* Glass "+ Add" — matches the frosted on-photo chrome instead of an opaque black pill. */}
+            <button type="button" onClick={() => ws.startAddFlow()} aria-label="Add an item"
+              className="glass-surface relative inline-flex items-center gap-1.5 rounded-full h-9 px-4 text-white text-sm font-semibold shadow-[var(--shadow-pop)] before:absolute before:-inset-2 before:rounded-full before:content-[''] active:scale-95 transition-transform">
+              <Plus className="h-4 w-4" /> Add
+            </button>
           </div>
         )}
 
