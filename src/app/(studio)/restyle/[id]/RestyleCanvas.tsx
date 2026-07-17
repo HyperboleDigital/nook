@@ -240,7 +240,7 @@ export default function RestyleCanvas({ ws, fluid = false }: { ws: RestyleWorksp
         {/* Was desktop-only ("hidden md:block") — mobile lost the at-a-glance total entirely,
             even though it fits fine (+Add sits bottom-right, no collision). */}
         {!viewingOriginal && !generating && !holdingOverlay && !showCompare && ws.productEdits.length > 0 && (
-          <div className={`absolute left-3 ${fluid ? "bottom-6" : "bottom-3"}`}>
+          <div className="absolute left-3 bottom-3">
             <ShopSummaryPill edits={ws.productEdits} onClick={() => setCartOpen(true)} />
           </div>
         )}
@@ -259,7 +259,7 @@ export default function RestyleCanvas({ ws, fluid = false }: { ws: RestyleWorksp
         )}
 
         {!generating && !holdingOverlay && !showCompare && !ws.pinRequest && (
-          <div className={`absolute right-3 ${fluid ? "bottom-6" : "bottom-3"}`}>
+          <div className="absolute right-3 bottom-3">
             <Button variant="primary" size="sm"
               className="relative shadow-[var(--shadow-pop)] before:absolute before:-inset-2 before:rounded-full before:content-['']"
               onClick={() => ws.startAddFlow()}>

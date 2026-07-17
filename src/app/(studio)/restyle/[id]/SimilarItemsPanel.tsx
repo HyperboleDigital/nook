@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { Sparkles, ShoppingCart, ChevronLeft, Lock, RotateCcw } from "lucide-react";
+import { Sparkles, ShoppingCart, ChevronLeft, Lock } from "lucide-react";
 import type { RestyleWorkspace } from "./useRestyleWorkspace";
 import type { ShoppingResult } from "@/lib/shopping-search";
 import { Button, SkeletonProductCard, Spinner, StatusBanner, parsePrice } from "./ui";
@@ -69,8 +69,6 @@ export default function SimilarItemsPanel({ ws }: { ws: RestyleWorkspace }) {
         </p>
       </div>
 
-      <TriedBefore ws={ws} label={label} />
-
       {loading && (
         <div className="space-y-2">
           <p className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
@@ -94,36 +92,6 @@ export default function SimilarItemsPanel({ ws }: { ws: RestyleWorkspace }) {
       {/* Free plan: one match is shown; the rest is behind an upgrade. Only advertise "more" when
           we actually returned a match (a genuine no-results state shouldn't promise hidden ones). */}
       {search.status === "ready" && search.locked && search.results.length > 0 && <UpgradeCard />}
-    </div>
-  );
-}
-
-// "Tried before": products/photos previously staged for this item, kept as inactive history now
-// that a replace doesn't delete the old attempt (see product/route.ts + useRestyleWorkspace's
-// historyFor). A compact horizontal thumbnail strip — tap one to switch back to it. Only rendered
-// when there's actually history, so it stays out of the way for a first-time slot.
-function TriedBefore({ ws, label }: { ws: RestyleWorkspace; label: string }) {
-  const history = ws.historyFor(label);
-  if (history.length === 0) return null;
-  return (
-    <div className="space-y-1.5">
-      <p className="text-[11px] font-medium text-[var(--muted-foreground)]">Tried before</p>
-      <div className="flex gap-2 overflow-x-auto pb-1 -mx-0.5 px-0.5">
-        {history.map((e) => (
-          <button key={e.id} type="button" onClick={() => ws.restoreEdit(e)}
-            title={e.product_title ?? "Restore this one"}
-            className="shrink-0 h-14 w-14 rounded-xl overflow-hidden border border-[var(--border)] bg-[var(--muted)] hover:border-[var(--accent)] transition-colors">
-            {e.reference_url ? (
-              /* eslint-disable-next-line @next/next/no-img-element */
-              <img src={e.reference_url} alt="" className="h-full w-full object-cover" />
-            ) : (
-              <span className="flex h-full w-full items-center justify-center text-[var(--muted-foreground)]">
-                <RotateCcw className="h-4 w-4" />
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
     </div>
   );
 }
