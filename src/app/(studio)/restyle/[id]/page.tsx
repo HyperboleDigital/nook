@@ -1,19 +1,17 @@
 "use client";
 
 import { use } from "react";
-import { useRouter } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
 import { useRestyleWorkspace } from "./useRestyleWorkspace";
 import RestyleStudio from "./RestyleStudio";
-import AdminPlanToggle from "./AdminPlanToggle";
-import { IconButton, Spinner } from "./ui";
+import { Spinner } from "./ui";
 
-// The immersive editor shell: a slim top bar (back / title) + the studio filling the rest of
-// the viewport edge-to-edge — see (studio)/layout.tsx for why this route has no app sidebar.
+// The immersive editor shell: the studio fills the whole viewport edge-to-edge — see
+// (studio)/layout.tsx for why this route has no app sidebar. The back button + editable room
+// title used to live in a slim white top bar here; they now float on the photo as glass chrome
+// (see RestyleCanvas), so there's no chrome bar breaking the immersive full-bleed image.
 export default function RestylePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const ws = useRestyleWorkspace(id);
-  const router = useRouter();
 
   // Gate the full-page spinner on the project itself, not on detection finishing too — the room
   // photo + editor shell can render immediately once the project loads, with a small pill (see
@@ -30,24 +28,8 @@ export default function RestylePage({ params }: { params: Promise<{ id: string }
   }
 
   return (
-    <div className="h-dvh flex flex-col">
-      <header className="h-14 shrink-0 flex items-center gap-2 px-3 border-b border-[var(--border)] bg-[var(--card)]">
-        <IconButton onClick={() => router.push("/dashboard")} aria-label="Home">
-          <ArrowLeft className="h-4 w-4" />
-        </IconButton>
-        <input
-          value={ws.titleDraft}
-          onChange={(e) => ws.setTitleDraft(e.target.value)}
-          onBlur={() => ws.saveTitle(ws.titleDraft)}
-          onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-          placeholder="Untitled Room"
-          className="min-w-0 flex-1 bg-transparent text-lg font-bold tracking-[-0.03em] focus:outline-none focus:underline placeholder:text-[var(--muted-foreground)] placeholder:font-bold"
-        />
-        <AdminPlanToggle />
-      </header>
-      <div className="flex-1 min-h-0">
-        <RestyleStudio ws={ws} />
-      </div>
+    <div className="h-dvh">
+      <RestyleStudio ws={ws} />
     </div>
   );
 }

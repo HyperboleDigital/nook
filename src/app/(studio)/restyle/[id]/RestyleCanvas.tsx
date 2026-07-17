@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Columns2, Download, Plus, Share2, ArrowLeftRight, GalleryVerticalEnd } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { ArrowLeft, Columns2, Download, Pencil, Plus, Share2, ArrowLeftRight, GalleryVerticalEnd } from "lucide-react";
 import type { CSSProperties } from "react";
 import type { CanvasHotspot, RestyleWorkspace } from "./useRestyleWorkspace";
 import { Button, IconButton, ProgressOverlay, Sheet, ShopSummaryPill, Spinner } from "./ui";
+import AdminPlanToggle from "./AdminPlanToggle";
 import ObjectHotspots from "./ObjectHotspots";
 import PinPlacementLayer from "./PinPlacementLayer";
 import ShareMenu, { ShareOptions } from "./ShareMenu";
@@ -46,6 +48,7 @@ const FALLBACK_IMG = "block w-full h-auto max-h-[85dvh] object-contain";
 // beside the rail — see the doc comment above).
 export default function RestyleCanvas({ ws, fluid = false }: { ws: RestyleWorkspace; fluid?: boolean }) {
   const { restyle, generating, displayUrl } = ws;
+  const router = useRouter();
   const [showCompare, setShowCompare] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [cartOpen, setCartOpen] = useState(false);
@@ -268,9 +271,37 @@ export default function RestyleCanvas({ ws, fluid = false }: { ws: RestyleWorksp
           </div>
         )}
 
+        {/* Top scrim — a soft dark gradient so the white glass chrome (back, title, and the
+            right-hand controls) stays legible over a bright image area; a pale wall would
+            otherwise read the frost as near-invisible. Non-interactive so taps fall through. */}
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-black/45 via-black/10 to-transparent" />
+
+        {/* Back + editable room title, floated ON the photo as glass — replaces the old white top
+            bar so the image goes fully edge-to-edge. The pencil makes it obvious the name is
+            editable. `max-w` keeps it clear of the right-hand controls on a narrow phone. */}
+        <div className="absolute top-3 left-3 z-10 flex items-center gap-2 max-w-[62%]">
+          <IconButton glass onClick={() => router.push("/dashboard")} aria-label="Home" className="shrink-0">
+            <ArrowLeft className="h-4 w-4" />
+          </IconButton>
+          <label className="group flex items-center gap-1.5 rounded-full glass-surface h-9 min-w-0 pl-3.5 pr-2.5 cursor-text">
+            <input
+              value={ws.titleDraft}
+              onChange={(e) => ws.setTitleDraft(e.target.value)}
+              onBlur={() => ws.saveTitle(ws.titleDraft)}
+              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+              placeholder="Untitled Room"
+              aria-label="Room name"
+              size={16}
+              className="min-w-0 bg-transparent text-sm font-bold tracking-[-0.02em] text-white placeholder:text-white/60 focus:outline-none"
+            />
+            <Pencil className="h-3.5 w-3.5 shrink-0 text-white/70 group-focus-within:text-white transition-colors" />
+          </label>
+          <AdminPlanToggle />
+        </div>
+
         {/* Frosted-glass chrome — floats ON the photo, so the room refracts through it (glass
             variant) rather than opaque white discs sitting on top. */}
-        <div className="absolute top-3 right-3 flex items-center gap-3">
+        <div className="absolute top-3 right-3 z-10 flex items-center gap-3">
           {/* Versions history — every generated combination, browsable. Only worth showing once
               there's more than one render to move between. */}
           {ws.renders.length > 1 && (
