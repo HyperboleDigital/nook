@@ -38,7 +38,13 @@ const FALLBACK_IMG = "block w-full h-auto max-h-[85dvh] object-contain";
  * box, in pixels). A blurred, darkened copy of the same image fills the stage edge-to-edge behind
  * it (just backdrop) while the sharp photo floats on top as a rounded, shadowed card.
  */
-export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
+// `fluid` (mobile): the image is shown FULL-WIDTH at its natural aspect ratio — no fixed-height
+// stage, no blurred letterbox backdrop, no floating rounded card — so the changes panel below can
+// sit flush against the image's true bottom edge whether the photo is portrait or landscape. The
+// image element IS the hotspot-positioning box, so the %-coords land directly (no measured pixel
+// box needed). Desktop stays on the measured-box + blurred-backdrop stage (it fills a fixed column
+// beside the rail — see the doc comment above).
+export default function RestyleCanvas({ ws, fluid = false }: { ws: RestyleWorkspace; fluid?: boolean }) {
   const { restyle, generating, displayUrl } = ws;
   const [showCompare, setShowCompare] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
@@ -137,8 +143,14 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
     const w = natW * scale, h = natH * scale;
     imgBoxStyle = { position: "absolute", left: (frameSize.w - w) / 2, top: (frameSize.h - h) / 2, width: w, height: h };
   }
-  const imgWrapClass = imgBoxStyle ? "relative rounded-3xl overflow-hidden shadow-[var(--shadow-pop)]" : FALLBACK_WRAP;
-  const imgClass = imgBoxStyle ? "block w-full h-full object-cover" : FALLBACK_IMG;
+  // Fluid (mobile) shows the image full-width at natural aspect (the <img> is the box); the
+  // measured/fallback treatment is desktop-only.
+  const imgWrapClass = fluid ? "relative block w-full" : imgBoxStyle ? "relative rounded-3xl overflow-hidden shadow-[var(--shadow-pop)]" : FALLBACK_WRAP;
+  const imgClass = fluid ? "block w-full h-auto" : imgBoxStyle ? "block w-full h-full object-cover" : FALLBACK_IMG;
+  const wrapStyle = fluid ? undefined : imgBoxStyle;
+  const frameClass = fluid
+    ? "relative w-full bg-[var(--muted)] overflow-hidden"
+    : "relative bg-[var(--muted)] overflow-hidden flex items-center justify-center h-[65dvh] md:h-auto md:flex-1";
 
   // Tapping any actionable item opens the unified edit menu (rail on desktop, sheet on mobile),
   // passing the item's current staged edit id so Swap/Similar/Adjust supersede it. A detected
@@ -159,7 +171,7 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
   const pinLabel = ws.pinRequest?.label?.trim() ? `your ${ws.pinRequest.label.trim()}` : "your new item";
 
   return (
-    <div className="h-full w-full md:flex md:flex-col">
+    <div className={fluid ? "w-full" : "h-full w-full md:flex md:flex-col"}>
       {/* Pin-placement instruction lives HERE, above the photo — never over it — so it can't
           cover the very spot the user wants to tap. The layer itself (PinPlacementLayer) is now
           just the invisible tap-catcher + the confirm popover at the chosen point. */}
@@ -172,15 +184,18 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
           </button>
         </div>
       )}
-      <div ref={frameRef} className="relative bg-[var(--muted)] overflow-hidden flex items-center justify-center h-[65dvh] md:h-auto md:flex-1">
+      <div ref={frameRef} className={frameClass}>
         {/* A blurred, darkened cover fill behind a portrait (or otherwise mismatched-aspect)
             photo so the gutters beside the shrink-wrapped sharp image read as an intentional
-            frame, not a broken letterbox. */}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={displayUrl} alt="" aria-hidden className="absolute inset-0 h-full w-full object-cover blur-2xl brightness-50 scale-110" />
+            frame, not a broken letterbox. Not needed in fluid mode (no gutters — the image is
+            full-width at its own aspect). */}
+        {!fluid && (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img src={displayUrl} alt="" aria-hidden className="absolute inset-0 h-full w-full object-cover blur-2xl brightness-50 scale-110" />
+        )}
 
         {!showCompare ? (
-          <div className={imgWrapClass} style={imgBoxStyle}>
+          <div className={imgWrapClass} style={wrapStyle}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={displayUrl} alt={restyle.title ?? "Your room"} className={imgClass} onLoad={onImgLoad} />
             {ws.canvasHotspots.length > 0 && !ws.pinRequest && (
@@ -195,7 +210,7 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
             )}
           </div>
         ) : (
-          <div ref={imgWrapRef} className={`${imgWrapClass} select-none touch-none`} style={imgBoxStyle} {...sliderHandlers}>
+          <div ref={imgWrapRef} className={`${imgWrapClass} select-none touch-none`} style={wrapStyle} {...sliderHandlers}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={displayUrl} alt="After" className={imgClass} draggable={false} onLoad={onImgLoad} />
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -225,7 +240,7 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
         {/* Was desktop-only ("hidden md:block") — mobile lost the at-a-glance total entirely,
             even though it fits fine (+Add sits bottom-right, no collision). */}
         {!viewingOriginal && !generating && !holdingOverlay && !showCompare && ws.productEdits.length > 0 && (
-          <div className="absolute bottom-3 left-3">
+          <div className={`absolute left-3 ${fluid ? "bottom-6" : "bottom-3"}`}>
             <ShopSummaryPill edits={ws.productEdits} onClick={() => setCartOpen(true)} />
           </div>
         )}
@@ -244,7 +259,7 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
         )}
 
         {!generating && !holdingOverlay && !showCompare && !ws.pinRequest && (
-          <div className="absolute bottom-3 right-3">
+          <div className={`absolute right-3 ${fluid ? "bottom-6" : "bottom-3"}`}>
             <Button variant="primary" size="sm"
               className="relative shadow-[var(--shadow-pop)] before:absolute before:-inset-2 before:rounded-full before:content-['']"
               onClick={() => ws.startAddFlow()}>

@@ -67,12 +67,14 @@ export default function RestyleStudio({ ws }: { ws: RestyleWorkspace }) {
         </div>
       </div>
 
-      {/* Mobile — same edge-to-edge, blurred-backdrop stage as desktop (RestyleCanvas handles
-          both now), full-bleed at the top with no page padding; queued changes / shop-the-look
-          go directly below it in the scrolling column, in their own padded area. */}
-      <div className="md:hidden h-full overflow-y-auto flex flex-col">
-        <RestyleCanvas ws={ws} />
-        <div className="p-3 space-y-3 flex-1">
+      {/* Mobile — the room image is FULL-WIDTH at its natural aspect ratio (RestyleCanvas `fluid`),
+          and the changes panel is a rounded sheet pulled flush up against the image's bottom edge
+          (works for portrait or landscape, since the image sizes itself). A drag-handle + rounded
+          top sell the "sheet over the photo" look from the design. */}
+      <div className="md:hidden h-full overflow-y-auto flex flex-col bg-[var(--muted)]">
+        <RestyleCanvas ws={ws} fluid />
+        <div className="relative -mt-4 rounded-t-3xl bg-[var(--background)] flex-1 px-3 pb-3 pt-2 space-y-3 shadow-[0_-6px_24px_rgba(28,28,26,0.08)]">
+          <div className="mx-auto h-1 w-10 rounded-full bg-[var(--border)]" aria-hidden />
           {/* Directly under the canvas, visible without scrolling — used to sit below the whole
               changes list, easy to miss on a long list. */}
           {ws.error && !ws.sourcing && <StatusBanner variant="error">{ws.error}</StatusBanner>}
