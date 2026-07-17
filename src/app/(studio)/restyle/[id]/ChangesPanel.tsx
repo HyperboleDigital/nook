@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ChevronRight, Eraser, ExternalLink, Loader2, MapPin, Plus, Replace, ShoppingBag, TrendingDown, Wand2, X } from "lucide-react";
+import { ArrowLeftRight, ChevronRight, Eraser, ExternalLink, Loader2, MapPin, Plus, ShoppingBag, TrendingDown, Wand2, X } from "lucide-react";
 import { boxFromPlacement, type RailItem, type RailStatus, type RestyleWorkspace } from "./useRestyleWorkspace";
 import type { RestyleEdit } from "@/types";
 import { Button, ConfirmDialog, IconButton, Switch, parsePrice, shopSummary, storeName } from "./ui";
@@ -45,7 +45,7 @@ function changeAction(e: RestyleEdit): { verb: string; Icon: typeof Plus; tone: 
   if (e.kind === "remove") return { verb: "Removed", Icon: Eraser, tone: "remove" };
   if (e.kind === "refine") return { verb: "Adjusted", Icon: Wand2, tone: "refine" };
   if (e.kind === "add") return { verb: "Added", Icon: Plus, tone: "add" };
-  return { verb: "Swapped", Icon: Replace, tone: "swap" };
+  return { verb: "Swapped", Icon: ArrowLeftRight, tone: "swap" };
 }
 
 // Where the item came from — a small muted line under the pills. Products show price·retailer
@@ -241,7 +241,7 @@ function ChangeCard({
               {isRemove ? <Eraser className="h-4 w-4" />
                 : isProduct ? <ShoppingBag className="h-4 w-4" />
                 : e.kind === "add" ? <Plus className="h-4 w-4" />
-                : <Replace className="h-4 w-4" />}
+                : <ArrowLeftRight className="h-4 w-4" />}
             </span>
           )}
         </div>

@@ -3,12 +3,11 @@
 import { useState, useRef, useEffect } from "react";
 import { Check, ChevronLeft, ChevronRight, Eraser, History, Replace, ShoppingBag, Sparkles, Wand2 } from "lucide-react";
 import { boxFromPlacement, type RestyleWorkspace } from "./useRestyleWorkspace";
-import type { ShoppingResult } from "@/lib/shopping-search";
 import { downscaleImage } from "@/lib/image-client";
-import { Button, ConfirmDialog, Input, ProductCard, SegmentedTabs, SkeletonProductCard, Spinner, StatusBanner, matchWord } from "./ui";
+import { Button, ConfirmDialog, Input, SegmentedTabs, Spinner, StatusBanner } from "./ui";
 import CroppedThumb from "./CroppedThumb";
 
-type SrcMode = "link" | "photo" | "describe";
+type SrcMode = "link" | "photo";
 
 // Suggestions for the "what are you adding?" step — mirrors the vocabulary in gemini.ts's
 // DETECT_PROMPT so the guided list and what detection actually recognizes stay in sync. Native
@@ -36,7 +35,6 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
   const sourcing = ws.sourcing;
   const [srcMode, setSrcMode] = useState<SrcMode>("link");
   const [productUrl, setProductUrl] = useState("");
-  const [descText, setDescText] = useState("");
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [pendingPreview, setPendingPreview] = useState<string | null>(null);
   // stagePhoto (unlike the link path) sets no shared busy flag, and confirmPending clears the
@@ -48,11 +46,6 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
   const [normalizing, setNormalizing] = useState(false);
   const [normalizeError, setNormalizeError] = useState<string | null>(null);
   const [refineText, setRefineText] = useState("");
-  // Results under "Describe it" only appear for a search the user ran HERE, in this panel session.
-  // ws.searches[label] can be pre-populated by other flows (the post-generate cheaper search, a
-  // prior "Shop similar") — without this flag those stale results popped up the moment the
-  // Describe tab opened, before the user typed anything.
-  const [didSearch, setDidSearch] = useState(false);
   // Accidental-tap guard for the menu's "Remove it" — staging a remove is easy to hit by mistake
   // and (while reversible via the changes rail) reads as destructive, so confirm first.
   const [confirmRemove, setConfirmRemove] = useState(false);
@@ -63,8 +56,8 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
     let active = true;
     Promise.resolve().then(() => {
       if (!active) return;
-      setSrcMode("link"); setProductUrl(""); setDescText(""); setItemDraft(""); setRefineText("");
-      setDidSearch(false); setConfirmRemove(false); setUploadingPhoto(false);
+      setSrcMode("link"); setProductUrl(""); setItemDraft(""); setRefineText("");
+      setConfirmRemove(false); setUploadingPhoto(false);
       setNormalizing(false); setNormalizeError(null);
       setPendingFile(null);
       setPendingPreview((prev) => { if (prev) URL.revokeObjectURL(prev); return null; });
@@ -141,7 +134,6 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
       </div>
     );
   }
-  const search = ws.searches[label.toLowerCase()] ?? { status: "idle" as const, scored: false, results: [] };
   // The actual item being replaced, cropped from the original photo — so "Editing the
   // ceiling fan" isn't just a label, you can see exactly which fixture it means.
   const matchedObject = sourcing.mode === "swap"
@@ -181,7 +173,6 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
   const tabs = [
     { value: "link" as const, label: "Paste a link" },
     { value: "photo" as const, label: "Upload a photo" },
-    { value: "describe" as const, label: "Describe it" },
   ];
 
   // "← Back" returns to the "Edit item" menu — shown whenever this session started there
@@ -292,8 +283,8 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
     );
   }
 
-  // ── Compose — the link/photo/describe sourcing form (an empty "add" slot, or "Swap it" from
-  //     the menu above) ──
+  // ── Compose — the link/photo sourcing form (an empty "add" slot, or "Swap it" from the menu
+  //     above) ──
   return (
     <div className="space-y-3">
       {header}
@@ -314,53 +305,6 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
       {ws.error && <StatusBanner variant="error">{ws.error}</StatusBanner>}
 
       <SegmentedTabs options={tabs} value={srcMode} onChange={setSrcMode} />
-
-      {/* Search results belong ONLY to the "Describe it" tab (the one that runs a text search),
-          and only for a search the user ran HERE (`didSearch`) — ws.searches[label] can be
-          pre-populated by other flows (post-generate cheaper search, a prior "Shop similar"),
-          and those used to pop up the moment the Describe tab opened. */}
-      {srcMode === "describe" && didSearch && search.status === "loading" && (
-        <div className="space-y-2">
-          <SkeletonProductCard /><SkeletonProductCard /><SkeletonProductCard />
-        </div>
-      )}
-      {srcMode === "describe" && didSearch && search.status === "error" && <StatusBanner variant="error">{search.error}</StatusBanner>}
-      {srcMode === "describe" && didSearch && search.status === "ready" && search.results.length > 0 && (
-        <div className="space-y-2">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
-            {search.scored ? `Options for ${label || "this item"}` : "Found options — ranking best matches…"}
-          </p>
-          {search.results.map((c, i) => {
-            const key = `${label}:${i}`;
-            const picking = ws.pickingKey === key;
-            return (
-              <ProductCard key={i}
-                image={c.thumbnail} title={c.title} retailer={c.retailer} price={c.price}
-                viewUrl={c.productUrl ?? c.alternates?.[0]?.url ?? null}
-                badge={matchWord(c.score, c.exact)}>
-                {c.alternates && c.alternates.length > 0 && (
-                  <p className="text-[11px] text-[var(--muted-foreground)] leading-tight">
-                    also at{c.alternates.map((a, j) => (
-                      <span key={j}>{j > 0 ? " · " : " "}
-                        <a href={a.url} target="_blank" rel="noopener noreferrer" className="underline hover:text-[var(--foreground)]">
-                          {a.retailer}{a.price ? ` ${a.price}` : ""}
-                        </a>
-                      </span>
-                    ))}
-                  </p>
-                )}
-                <Button size="sm" variant="primary" disabled={ws.pickingKey != null}
-                  onClick={() => ws.pickCandidate(c as ShoppingResult, label, key, sourcing.stagedEditId ?? undefined)} className="mt-1">
-                  {picking ? <><Spinner size="xs" className="text-current" /> Adding…</> : "Use this in the room"}
-                </Button>
-                {picking && (
-                  <p className="text-[11px] text-[var(--muted-foreground)]">Fetching live price and details — can take up to a minute for some retailers.</p>
-                )}
-              </ProductCard>
-            );
-          })}
-        </div>
-      )}
 
       {srcMode === "link" && (
         <div className="rounded-2xl border border-[var(--border)] bg-white p-4 space-y-2">
@@ -412,27 +356,6 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
         </div>
       )}
 
-      {srcMode === "describe" && (
-        <div className="rounded-2xl border border-[var(--border)] bg-white p-4 space-y-2.5">
-          <p className="text-[11px] text-[var(--muted-foreground)]">No link or photo? Describe it — color, material, style.</p>
-          <div className="flex gap-2">
-            <Input type="text" value={descText} onChange={(e) => setDescText(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter" && descText.trim()) { setDidSearch(true); ws.runTextSearch(descText, label.toLowerCase()); } }}
-              placeholder={`e.g. a low walnut ${label} with brass legs`} />
-            <Button disabled={(didSearch && search.status === "loading") || !descText.trim()}
-              onClick={() => { setDidSearch(true); ws.runTextSearch(descText, label.toLowerCase()); }} className="shrink-0">
-              {didSearch && search.status === "loading" ? <Spinner size="sm" className="text-current" /> : "Find"}
-            </Button>
-          </div>
-          {didSearch && search.status === "loading" && (
-            <p className="text-[11px] text-[var(--muted-foreground)]">Searching retailers — this can take a few seconds.</p>
-          )}
-          <Button variant="outline" className="w-full" disabled={ws.busy || !descText.trim()}
-            onClick={() => ws.addEdit({ kind: sourcing.mode === "swap" ? "item" : "add", targetLabel: label, instruction: descText.trim() })}>
-            Just go with my description
-          </Button>
-        </div>
-      )}
     </div>
   );
 }
