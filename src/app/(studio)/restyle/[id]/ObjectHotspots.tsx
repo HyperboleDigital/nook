@@ -31,7 +31,9 @@ function StateMarker({
       <span className="absolute h-5 w-5 rounded-full bg-white/70 animate-[hotspot-pulse_2.4s_ease-out_infinite]" style={{ animationDelay: `${delay}ms` }} />
       {/* Frosted-glass disc (was a solid white dot) — the room shows faintly through it. */}
       <span className="absolute h-5 w-5 rounded-full bg-white/25 backdrop-blur-md border border-white/70 ring-1 ring-inset ring-white/40 shadow-[var(--shadow-soft)]" />
-      <span className={cn("relative h-2.5 w-2.5 rounded-full", isActive ? "bg-[var(--accent)]" : "bg-[var(--foreground)]")} />
+      {/* Inner pip — a clean white pearl (was near-black, which read heavy on the glass); still
+          accent-green when the item is the active one. Subtle shadow keeps it visible on the frost. */}
+      <span className={cn("relative h-2.5 w-2.5 rounded-full shadow-[0_1px_2px_rgba(0,0,0,0.3)]", isActive ? "bg-[var(--accent)]" : "bg-white")} />
     </span>
   );
 }
