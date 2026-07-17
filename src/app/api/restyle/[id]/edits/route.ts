@@ -139,5 +139,14 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
   if (!editId) return NextResponse.json({ error: "editId required" }, { status: 400 });
   await supabaseAdmin.from("restyle_edits").delete().eq("id", editId).eq("restyle_id", id);
 
+  // Drop any cached render that was composed WITH this edit — its signature now references a
+  // deleted id, so it can never be faithfully restored (the product is gone) and would otherwise
+  // show up in the versions gallery as a version whose product isn't in the changes list. Only the
+  // render rows go, not the blobs (current_url may still point at one and should keep displaying).
+  const { data: cachedRows } = await supabaseAdmin
+    .from("restyle_renders").select("id, signature").eq("restyle_id", id);
+  const stale = (cachedRows ?? []).filter((r) => (r.signature as string).split(",").includes(editId));
+  if (stale.length) await supabaseAdmin.from("restyle_renders").delete().in("id", stale.map((r) => r.id));
+
   return NextResponse.json({ edits: await editsFor(id), current_url: await adoptCachedRenderIfKnown(id) });
 }

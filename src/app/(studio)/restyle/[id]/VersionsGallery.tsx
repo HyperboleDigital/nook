@@ -12,9 +12,13 @@ import { Modal } from "./ui";
 // it lives on its own (opened from the canvas), not buried in a sourcing panel.
 export default function VersionsGallery({ ws, open, onClose }: { ws: RestyleWorkspace; open: boolean; onClose: () => void }) {
   const editsById = new Map(ws.edits.map((e) => [e.id, e] as const));
-  // Most recent first. Each render's signature is the comma-joined active-edit ids it was built
-  // from; turn that into a short human caption of what's in it.
-  const renders = [...ws.renders].sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+  // Only versions we can faithfully restore: a render whose signature references an edit that's
+  // since been DELETED can't be reproduced by toggling edits (the product is gone), and restoring
+  // it would show the image with a product that isn't in the changes list — a mismatch. Hide those.
+  // (Deleting an edit also drops such renders server-side; this covers ones stranded before that.)
+  const renders = [...ws.renders]
+    .filter((r) => r.signature.split(",").filter(Boolean).every((sid) => editsById.has(sid)))
+    .sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
 
   const caption = (r: RestyleRender): string => {
     const ids = r.signature.split(",").filter(Boolean);

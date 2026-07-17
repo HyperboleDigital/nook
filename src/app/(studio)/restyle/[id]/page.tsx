@@ -32,7 +32,7 @@ export default function RestylePage({ params }: { params: Promise<{ id: string }
   return (
     <div className="h-dvh flex flex-col">
       <header className="h-12 shrink-0 flex items-center gap-2 px-3 border-b border-[var(--border)] bg-[var(--card)]">
-        <IconButton onClick={() => router.push("/restyle")} aria-label="All restyles">
+        <IconButton onClick={() => router.push("/dashboard")} aria-label="Home">
           <ArrowLeft className="h-4 w-4" />
         </IconButton>
         <input
