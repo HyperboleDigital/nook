@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { ArrowLeftRight, ChevronRight, Eraser, ExternalLink, Loader2, MapPin, Plus, ShoppingBag, TrendingDown, Wand2, X } from "lucide-react";
 import { boxFromPlacement, type RailItem, type RailStatus, type RestyleWorkspace } from "./useRestyleWorkspace";
 import type { RestyleEdit } from "@/types";
-import { Button, ConfirmDialog, IconButton, Switch, parsePrice, shopSummary, storeName } from "./ui";
+import { Button, ConfirmDialog, IconButton, SegmentedTabs, Switch, parsePrice, shopSummary, storeName } from "./ui";
 import { cn } from "@/lib/utils";
 import CroppedThumb from "./CroppedThumb";
 
@@ -97,7 +97,13 @@ function useDeleteConfirm() {
  * it's really in the room when it isn't") is satisfied by the chip text, not by hiding the card.
  */
 export default function ChangesPanel({ ws }: { ws: RestyleWorkspace }) {
-  const { railEdits } = ws;
+  const { railEdits, productEdits } = ws;
+  // Two jobs, two tabs: "changes" is the editing surface (everything staged/in-room/off, with
+  // toggles + Generate); "shop" is only the buyable products your changes actually put in the
+  // room (`productEdits` = in-room + buy_url — the honest "shop your changes" set, not a
+  // whole-room match). Split decided with the user; the light SegmentedTabs keeps it legible in
+  // the current light rail (the dark-glass rail skin is a separate, larger rework).
+  const [tab, setTab] = useState<"changes" | "shop">("changes");
   const [togglingId, setTogglingId] = useState<string | null>(null);
 
   const refineItems = railEdits.filter((r) => r.edit.kind === "refine");
@@ -106,8 +112,6 @@ export default function ChangesPanel({ ws }: { ws: RestyleWorkspace }) {
   const standaloneRefines = refineItems.filter((r) => !coveredLabels.has(r.edit.target_label?.toLowerCase()));
   const refineFor = (label?: string | null) =>
     refineItems.find((r) => r.edit.target_label?.toLowerCase() === label?.toLowerCase());
-
-  const { total, priced: pricedCount } = shopSummary(ws.productEdits);
 
   const toggleEdit = async (editId: string, active: boolean) => {
     setTogglingId(editId);
@@ -118,7 +122,8 @@ export default function ChangesPanel({ ws }: { ws: RestyleWorkspace }) {
     }
   };
 
-  if (railEdits.length === 0) {
+  // Nothing at all yet — no tabs, just the invitation to start.
+  if (railEdits.length === 0 && productEdits.length === 0) {
     return (
       <div className="space-y-3">
         <Header />
@@ -131,24 +136,33 @@ export default function ChangesPanel({ ws }: { ws: RestyleWorkspace }) {
 
   return (
     <div className="space-y-3">
-      <Header />
-      {pricedCount > 0 && (
-        <p className="text-[11px] text-[var(--muted-foreground)]">
-          {pricedCount} item{pricedCount === 1 ? "" : "s"} shoppable · from{" "}
-          <span className="font-semibold text-[var(--foreground)]">
-            ${total.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-          </span>
-        </p>
+      <SegmentedTabs
+        value={tab}
+        onChange={setTab}
+        options={[
+          { value: "changes", label: railEdits.length ? `Changes · ${railEdits.length}` : "Changes" },
+          { value: "shop", label: productEdits.length ? `Shop · ${productEdits.length}` : "Shop" },
+        ]}
+      />
+      {tab === "changes" ? (
+        railEdits.length === 0 ? (
+          <p className="text-xs text-[var(--muted-foreground)] py-1">
+            No changes yet — tap an item to swap it, or add something new.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {mainItems.map((r) => (
+              <ChangeCard key={r.edit.id} ws={ws} item={r} refine={refineFor(r.edit.target_label)}
+                toggling={togglingId === r.edit.id} onToggle={toggleEdit} />
+            ))}
+            {standaloneRefines.map((r) => (
+              <RefineCard key={r.edit.id} ws={ws} item={r} toggling={togglingId === r.edit.id} onToggle={toggleEdit} />
+            ))}
+          </div>
+        )
+      ) : (
+        <ShopPane ws={ws} />
       )}
-      <div className="space-y-2">
-        {mainItems.map((r) => (
-          <ChangeCard key={r.edit.id} ws={ws} item={r} refine={refineFor(r.edit.target_label)}
-            toggling={togglingId === r.edit.id} onToggle={toggleEdit} />
-        ))}
-        {standaloneRefines.map((r) => (
-          <RefineCard key={r.edit.id} ws={ws} item={r} toggling={togglingId === r.edit.id} onToggle={toggleEdit} />
-        ))}
-      </div>
     </div>
   );
 }
@@ -158,6 +172,64 @@ function Header() {
     <div className="flex items-center gap-2">
       <ShoppingBag className="h-4 w-4 text-[var(--foreground)]" />
       <p className="text-sm font-semibold">Your changes</p>
+    </div>
+  );
+}
+
+// The "Shop" tab — only products your changes actually put in the room (`ws.productEdits`), each a
+// compact buy row with price · retailer · Buy, plus a running room total. Read-only aggregation; it
+// runs no searches (matches ShopCart's honesty — prices + total, no fabricated savings).
+function ShopPane({ ws }: { ws: RestyleWorkspace }) {
+  const products = ws.productEdits;
+  const { total, priced } = shopSummary(products);
+
+  if (products.length === 0) {
+    return (
+      <p className="text-xs text-[var(--muted-foreground)] py-1">
+        Nothing to shop yet. Swap or add an item, then Generate — the buyable pieces in your room show up here.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      {priced > 0 && (
+        <div className="flex items-center justify-between px-1 pb-0.5">
+          <span className="text-[11px] text-[var(--muted-foreground)]">
+            {priced} product{priced === 1 ? "" : "s"} in your room
+          </span>
+          <span className="text-sm font-semibold">
+            ${total.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+          </span>
+        </div>
+      )}
+      {products.map((e) => (
+        <div key={e.id} className="flex items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-3 shadow-[var(--shadow-soft)]">
+          <div className="relative shrink-0 h-12 w-12">
+            {e.reference_url ? (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img src={e.reference_url} alt="" className="h-12 w-12 object-cover rounded-xl border border-[var(--border)] bg-[var(--muted)]" />
+            ) : (
+              <span className="h-12 w-12 rounded-xl bg-[var(--muted)] border border-[var(--border)] flex items-center justify-center text-[var(--muted-foreground)]">
+                <ShoppingBag className="h-4 w-4" />
+              </span>
+            )}
+          </div>
+          <div className="min-w-0 flex-1 space-y-0.5">
+            <p className="text-sm font-medium capitalize truncate">{e.product_title ?? e.target_label ?? "item"}</p>
+            <p className="flex flex-wrap items-center gap-x-1.5 text-xs text-[var(--muted-foreground)]">
+              {e.product_price && <span className="font-semibold text-[var(--foreground)]">{e.product_price}</span>}
+              {e.buy_url && <span>· {storeName(e.buy_url)}</span>}
+            </p>
+          </div>
+          {e.buy_url && (
+            <a href={e.buy_url} target="_blank" rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-full bg-[var(--accent)] text-[var(--accent-foreground)] text-xs font-semibold px-3.5 py-2 hover:opacity-90 transition-opacity shrink-0">
+              <ExternalLink className="h-3.5 w-3.5" /> Buy
+            </a>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
