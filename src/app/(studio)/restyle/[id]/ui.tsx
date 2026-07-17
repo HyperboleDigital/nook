@@ -405,6 +405,63 @@ export function SegmentedTabs<T extends string>({
   );
 }
 
+// ── GlassSegmented ────────────────────────────────────────────────────────────
+// A segmented pill whose active indicator GLIDES between options — a frosted-glass "thumb" that
+// slides on `transform` rather than hard-swapping a background between buttons (the difference
+// SegmentedTabs above has). This is the fluid active/inactive transition the glass system calls
+// for; it's also the control for the studio's "Changes / Shop" split. Dark glass, meant to float
+// on a photo — pair the container's `.glass-surface` with `.glass-seg-thumb` (both in globals.css).
+//
+// The thumb is one segment wide and translated by `activeIndex × 100%` of its own width, which
+// lands it exactly over each equal-width button. Reduced-motion users get an instant swap for
+// free — globals.css's prefers-reduced-motion block strips the thumb's transition.
+export function GlassSegmented<T extends string>({
+  options, value, onChange, className,
+}: {
+  options: { value: T; label: string; icon?: ReactNode; count?: number }[];
+  value: T;
+  onChange: (v: T) => void;
+  className?: string;
+}) {
+  const n = options.length;
+  const activeIndex = Math.max(0, options.findIndex((o) => o.value === value));
+  return (
+    <div className={cn("glass-surface relative flex rounded-full p-1", className)}>
+      <span
+        aria-hidden
+        className="glass-seg-thumb pointer-events-none absolute inset-y-1 left-1 rounded-full"
+        style={{ width: `calc((100% - 0.5rem) / ${n})`, transform: `translateX(${activeIndex * 100}%)` }}
+      />
+      {options.map((o) => {
+        const active = o.value === value;
+        return (
+          <button
+            key={o.value}
+            type="button"
+            onClick={() => onChange(o.value)}
+            aria-pressed={active}
+            className={cn(
+              "relative z-10 flex-1 inline-flex items-center justify-center gap-1.5 rounded-full py-2 text-xs font-semibold transition-colors",
+              active ? "text-white" : "text-white/55 hover:text-white/85",
+            )}
+          >
+            {o.icon}
+            {o.label}
+            {typeof o.count === "number" && (
+              <span className={cn(
+                "ml-0.5 rounded-full px-1.5 text-[10px] font-bold leading-tight",
+                active ? "bg-white/25 text-white" : "bg-white/10 text-white/70",
+              )}>
+                {o.count}
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 // Locks/restores document scroll while `active` is true — shared by Sheet and Modal so the
 // page underneath can't scroll behind an open overlay on touch.
 function useBodyScrollLock(active: boolean) {
