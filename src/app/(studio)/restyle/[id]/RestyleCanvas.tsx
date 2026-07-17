@@ -182,18 +182,6 @@ export default function RestyleCanvas({ ws, fluid = false }: { ws: RestyleWorksp
 
   return (
     <div className={fluid ? "w-full" : "h-full w-full md:flex md:flex-col"}>
-      {/* Pin-placement instruction lives HERE, above the photo — never over it — so it can't
-          cover the very spot the user wants to tap. The layer itself (PinPlacementLayer) is now
-          just the invisible tap-catcher + the confirm popover at the chosen point. */}
-      {ws.pinRequest && (
-        <div className="flex items-center justify-between gap-2 px-4 py-2.5 bg-[var(--foreground)] text-[var(--background)] text-xs">
-          <span className="font-medium">Tap the photo to place {pinLabel}</span>
-          <button type="button" onClick={skipPin}
-            className="rounded-full px-3 py-1 bg-white/15 hover:bg-white/25 transition-colors shrink-0">
-            Cancel
-          </button>
-        </div>
-      )}
       <div ref={frameRef} className={frameClass}>
         {/* A blurred, darkened cover fill behind a portrait (or otherwise mismatched-aspect)
             photo so the gutters beside the shrink-wrapped sharp image read as an intentional
@@ -240,6 +228,21 @@ export default function RestyleCanvas({ ws, fluid = false }: { ws: RestyleWorksp
         {ws.detecting && (
           <div className="absolute top-3 left-3 flex items-center gap-1.5 rounded-full bg-white/95 border border-[var(--border)] text-[var(--muted-foreground)] text-xs px-3 py-1.5 shadow-[var(--shadow-pop)]">
             <Spinner size="xs" /> Finding your furniture…
+          </div>
+        )}
+
+        {/* Pin-placement instruction — a glass pill floating ON the image (not a black bar above
+            it that shoves the whole layout down). Bottom-center so it stays clear of most tap
+            targets; the wrapper is click-through so a placement tap outside the pill still lands. */}
+        {ws.pinRequest && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-4 z-20 flex justify-center px-4">
+            <div className="glass-surface pointer-events-auto flex items-center gap-2.5 rounded-full pl-4 pr-2 py-1.5 text-white text-xs shadow-[var(--shadow-pop)]">
+              <span className="font-medium">Tap the photo to place {pinLabel}</span>
+              <button type="button" onClick={skipPin}
+                className="rounded-full px-3 py-1 bg-white/20 hover:bg-white/30 transition-colors shrink-0">
+                Cancel
+              </button>
+            </div>
           </div>
         )}
 
