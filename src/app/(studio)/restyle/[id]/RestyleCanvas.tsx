@@ -107,14 +107,21 @@ export default function RestyleCanvas({ ws, fluid = false }: { ws: RestyleWorksp
     return () => ro.disconnect();
   }, []);
 
-  // Before/after slider. Local to this component (nothing else reads it) and throttled to at
-  // most one state update per animation frame — calling setCompare on every raw pointermove
-  // re-renders on every pixel of movement, which is what made dragging feel laggy.
-  const [compare, setCompare] = useState(50);
+  // Before/after slider. The position is written STRAIGHT to the DOM (clip-path on the "before"
+  // image + the divider's `left`) via refs — it is NOT React state, so dragging never re-renders
+  // this (large) component. A previous version kept the position in state and called setCompare
+  // per animation frame; even throttled, re-rendering the whole canvas each frame is what made the
+  // drag feel laggy. rAF still coalesces multiple pointer moves within a frame into one DOM write.
   const dragging = useRef(false);
   const imgWrapRef = useRef<HTMLDivElement>(null);
+  const beforeImgRef = useRef<HTMLImageElement>(null);
+  const dividerRef = useRef<HTMLDivElement>(null);
   const rafId = useRef<number | null>(null);
   const pendingClientX = useRef<number | null>(null);
+  const applyCompare = (pct: number) => {
+    if (beforeImgRef.current) beforeImgRef.current.style.clipPath = `inset(0 ${100 - pct}% 0 0)`;
+    if (dividerRef.current) dividerRef.current.style.left = `${pct}%`;
+  };
   const moveCompare = (clientX: number) => {
     pendingClientX.current = clientX;
     if (rafId.current != null) return; // a frame is already scheduled — coalesce
@@ -124,7 +131,7 @@ export default function RestyleCanvas({ ws, fluid = false }: { ws: RestyleWorksp
       const cx = pendingClientX.current;
       if (!el || cx == null) return;
       const rect = el.getBoundingClientRect();
-      setCompare(Math.max(0, Math.min(100, ((cx - rect.left) / rect.width) * 100)));
+      applyCompare(Math.max(0, Math.min(100, ((cx - rect.left) / rect.width) * 100)));
     });
   };
   const sliderHandlers = {
@@ -217,10 +224,10 @@ export default function RestyleCanvas({ ws, fluid = false }: { ws: RestyleWorksp
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={displayUrl} alt="After" className={imgClass} draggable={false} onLoad={onImgLoad} />
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={restyle.original_url} alt="Before" draggable={false}
+            <img ref={beforeImgRef} src={restyle.original_url} alt="Before" draggable={false}
               className="absolute inset-0 h-full w-full object-cover"
-              style={{ clipPath: `inset(0 ${100 - compare}% 0 0)` }} />
-            <div className="absolute top-0 bottom-0 w-0.5 bg-white pointer-events-none" style={{ left: `${compare}%` }}>
+              style={{ clipPath: "inset(0 50% 0 0)" }} />
+            <div ref={dividerRef} className="absolute top-0 bottom-0 w-0.5 bg-white pointer-events-none" style={{ left: "50%" }}>
               <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-8 w-8 rounded-full bg-white border border-[var(--border)] shadow-[var(--shadow-soft)] flex items-center justify-center text-[var(--foreground)]">
                 <ArrowLeftRight className="h-3.5 w-3.5" />
               </div>
