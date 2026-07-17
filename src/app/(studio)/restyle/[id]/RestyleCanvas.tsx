@@ -268,27 +268,29 @@ export default function RestyleCanvas({ ws, fluid = false }: { ws: RestyleWorksp
           </div>
         )}
 
+        {/* Frosted-glass chrome — floats ON the photo, so the room refracts through it (glass
+            variant) rather than opaque white discs sitting on top. */}
         <div className="absolute top-3 right-3 flex items-center gap-3">
           {/* Versions history — every generated combination, browsable. Only worth showing once
               there's more than one render to move between. */}
           {ws.renders.length > 1 && (
-            <IconButton onClick={() => setVersionsOpen(true)} aria-label="Versions history">
+            <IconButton glass onClick={() => setVersionsOpen(true)} aria-label="Versions history">
               <GalleryVerticalEnd className="h-4 w-4" />
             </IconButton>
           )}
           {!viewingOriginal && (
-            <IconButton onClick={() => setShowCompare((v) => !v)} aria-label="Compare before / after"
-              className={showCompare ? "bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)] hover:text-[var(--background)]" : ""}>
+            <IconButton glass onClick={() => setShowCompare((v) => !v)} aria-label="Compare before / after"
+              className={showCompare ? "!bg-white/30 text-white" : ""}>
               <Columns2 className="h-4 w-4" />
             </IconButton>
           )}
           <div className="relative">
-            <IconButton onClick={() => setShareOpen((v) => !v)} aria-label="Share link">
+            <IconButton glass onClick={() => setShareOpen((v) => !v)} aria-label="Share link">
               <Share2 className="h-4 w-4" />
             </IconButton>
             {shareOpen && <ShareMenu url={shareUrl} title={shareTitle} onClose={() => setShareOpen(false)} />}
           </div>
-          <IconButton onClick={ws.downloadImage} aria-label="Download image">
+          <IconButton glass onClick={ws.downloadImage} aria-label="Download image">
             <Download className="h-4 w-4" />
           </IconButton>
         </div>

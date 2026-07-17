@@ -49,15 +49,23 @@ export function Button({
 // Round floating button for canvas overlays — soft shadow lifts it off the photo
 // `before:-inset-1.5` extends the actual hit area to ~48px without growing the 36px visual —
 // keeps desktop density unchanged while meeting the 44px touch-target guideline on mobile.
-export function IconButton({ className, ...props }: ButtonHTMLAttributes<HTMLButtonElement>) {
+//
+// `glass`: frosted variant for chrome that floats directly ON the room photo (studio canvas) —
+// the photo refracts through it (see `.glass-surface` in globals.css) instead of an opaque white
+// disc sitting on top. White icon so it reads over the (dimmed) glass; the default light variant
+// is unchanged for every off-photo use (Sheet/Modal close buttons, ChangesPanel delete, etc.).
+export function IconButton({
+  className, glass, ...props
+}: ButtonHTMLAttributes<HTMLButtonElement> & { glass?: boolean }) {
   return (
     <button
       className={cn(
         "relative h-9 w-9 inline-flex items-center justify-center rounded-full",
         "before:absolute before:-inset-1.5 before:rounded-full before:content-['']",
-        "bg-white border border-[var(--border)] text-[var(--muted-foreground)] shadow-[var(--shadow-soft)]",
-        "hover:border-[var(--foreground)] hover:text-[var(--foreground)]",
         "cursor-pointer disabled:opacity-40 transition-colors",
+        glass
+          ? "glass-surface text-white/90 hover:text-white"
+          : "bg-white border border-[var(--border)] text-[var(--muted-foreground)] shadow-[var(--shadow-soft)] hover:border-[var(--foreground)] hover:text-[var(--foreground)]",
         className,
       )}
       {...props}
