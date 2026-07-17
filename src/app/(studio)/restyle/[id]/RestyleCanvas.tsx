@@ -301,8 +301,11 @@ export default function RestyleCanvas({ ws, fluid = false }: { ws: RestyleWorksp
           <ShareOptions url={shareUrl} title={shareTitle} onDone={() => setShareOpen(false)} />
         </Sheet>
       </div>
-      {/* pinRequest is handled by the instruction bar above the photo, so it's omitted here. */}
-      {!ws.pinRequest && (
+      {/* Mobile "tap an item" hint — omitted in fluid mode (it would sit between the image and the
+          flush changes sheet and get clipped by the sheet's overlap); the ChangesPanel's own empty
+          state ("Nothing queued yet — tap an item…") already carries the same guidance there.
+          pinRequest is handled by the instruction bar above the photo, so it's omitted then too. */}
+      {!ws.pinRequest && !fluid && (
         <p className="md:hidden text-[11px] text-[var(--muted-foreground)] text-center py-2 px-3">
           {viewingOriginal ? "Tap an item to edit it, or add something new"
             : "Tap an item to edit it, shop it, or add something new"}
