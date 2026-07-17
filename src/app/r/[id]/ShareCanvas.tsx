@@ -152,7 +152,7 @@ export default function ShareCanvas({
             onClick={() => setOpenHotspot({ label: h.label, cx: (b.x0 + b.x1) / 2, cy: (b.y0 + b.y1) / 2, edit: h.edit })} />
           <span className="absolute pointer-events-none -translate-x-1/2 -translate-y-1/2 flex items-center justify-center"
             style={{ left: `${m.x}%`, top: `${m.y}%` }}>
-            <HotspotMarker bg="bg-[var(--accent)]" icon={actionIcon(h.edit, "h-3.5 w-3.5 text-white")} />
+            <HotspotMarker bg="bg-[var(--accent)]/75" icon={actionIcon(h.edit, "h-3.5 w-3.5 text-white")} />
           </span>
         </Fragment>
       );

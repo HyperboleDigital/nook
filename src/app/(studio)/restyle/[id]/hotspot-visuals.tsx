@@ -123,11 +123,18 @@ export function HotspotRegion({
   );
 }
 
-/** The small circular at-rest marker — a colored background (meaning varies by caller: state in
- *  the studio, always "placed" green on the read-only share page) plus an `actionIcon`. */
+/** The small circular at-rest marker — a frosted, color-TINTED glass disc (the room shows faintly
+ *  through it, with a bright rim catching light) plus an `actionIcon`. `bg` is a TRANSLUCENT tint
+ *  (meaning varies by caller: state color in the studio, always "placed" green on the read-only
+ *  share page) — pass it at partial opacity (e.g. `bg-amber-500/80`) so the glass reads. The icon
+ *  itself is unchanged — this is a cosmetic glass treatment of the disc only. */
 export function HotspotMarker({ bg, icon }: { bg: string; icon: React.ReactNode }) {
   return (
-    <span className={cn("relative h-6 w-6 rounded-full border-2 border-white shadow-[var(--shadow-soft)] flex items-center justify-center", bg)}>
+    <span className={cn(
+      "relative h-6 w-6 rounded-full flex items-center justify-center backdrop-blur-md",
+      "border border-white/70 ring-1 ring-inset ring-white/40 shadow-[var(--shadow-pop)]",
+      bg,
+    )}>
       {icon}
     </span>
   );

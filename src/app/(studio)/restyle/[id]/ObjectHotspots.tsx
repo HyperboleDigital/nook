@@ -11,23 +11,26 @@ import { cn } from "@/lib/utils";
 function StateMarker({
   state, delay, isActive, edit,
 }: { state: CanvasHotspot["state"]; delay: number; isActive: boolean; edit: CanvasHotspot["edit"] }) {
+  // Tints are TRANSLUCENT so the disc reads as frosted glass (see HotspotMarker) — the color still
+  // carries the same meaning, just as a tinted glass instead of a solid fill.
   if (state === "confirming") {
-    return <HotspotMarker bg="bg-[var(--muted-foreground)]" icon={<Loader2 className="h-3.5 w-3.5 text-white animate-spin" strokeWidth={3} />} />;
+    return <HotspotMarker bg="bg-black/35" icon={<Loader2 className="h-3.5 w-3.5 text-white animate-spin" strokeWidth={3} />} />;
   }
   if (state === "queued") {
     // Amber, not accent-green — matches ChangesPanel's "Pending — generate to apply" chip color,
     // so "queued" reads as the same not-yet-real status everywhere, while the icon itself still
     // matches the action (see actionIcon) the same way the "placed" marker does below.
-    return <HotspotMarker bg="bg-amber-500" icon={actionIcon(edit, "h-3.5 w-3.5 text-white")} />;
+    return <HotspotMarker bg="bg-amber-500/80" icon={actionIcon(edit, "h-3.5 w-3.5 text-white")} />;
   }
   if (state === "placed") {
-    return <HotspotMarker bg="bg-[var(--accent)]" icon={actionIcon(edit, "h-3.5 w-3.5 text-white")} />;
+    return <HotspotMarker bg="bg-[var(--accent)]/75" icon={actionIcon(edit, "h-3.5 w-3.5 text-white")} />;
   }
   return (
     <span className="relative flex items-center justify-center h-5 w-5">
       {/* Pulsing halo — draws the eye without a permanent label */}
       <span className="absolute h-5 w-5 rounded-full bg-white/70 animate-[hotspot-pulse_2.4s_ease-out_infinite]" style={{ animationDelay: `${delay}ms` }} />
-      <span className="absolute h-5 w-5 rounded-full bg-white border border-[var(--border)] shadow-[var(--shadow-soft)]" />
+      {/* Frosted-glass disc (was a solid white dot) — the room shows faintly through it. */}
+      <span className="absolute h-5 w-5 rounded-full bg-white/25 backdrop-blur-md border border-white/70 ring-1 ring-inset ring-white/40 shadow-[var(--shadow-soft)]" />
       <span className={cn("relative h-2.5 w-2.5 rounded-full", isActive ? "bg-[var(--accent)]" : "bg-[var(--foreground)]")} />
     </span>
   );
