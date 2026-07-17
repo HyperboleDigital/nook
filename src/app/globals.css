@@ -146,6 +146,18 @@ h1, h2, h3, h4, h5, h6 {
   box-shadow: var(--glass-highlight);
 }
 
+/* Light frosted glass — for chrome that floats over LIGHT app content (the bottom nav over the
+   dashboard's image feed), not over a dark photo. Frosted white so dark icons/labels stay legible
+   while the content scrolling behind still refracts through. Distinct from `.glass-surface` above,
+   which is dark glass for over-photo chrome. App is light-only, so no dark-theme remap needed. */
+.glass-light {
+  background: rgba(255, 255, 255, 0.66);
+  -webkit-backdrop-filter: blur(22px) saturate(180%);
+  backdrop-filter: blur(22px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  box-shadow: 0 2px 8px rgb(28 28 26 / 0.08), 0 14px 34px rgb(28 28 26 / 0.16);
+}
+
 /* Sliding active indicator for GlassSegmented (ui.tsx) — a frosted thumb that GLIDES between
    options on transform instead of hard-swapping a background. The gentle overshoot is what makes
    the active/inactive change read as fluid rather than a hard cut. The prefers-reduced-motion

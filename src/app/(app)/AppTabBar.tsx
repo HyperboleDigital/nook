@@ -53,11 +53,14 @@ export default function AppTabBar() {
   };
 
   return (
+    // Floating frosted pill (not an edge-to-edge opaque bar) — the dashboard's image feed scrolls
+    // and refracts through the glass behind it. The outer nav is a non-interactive gutter; only the
+    // pill itself catches taps, so the content on either side of the pill stays scrollable.
     <nav
-      className="lg:hidden fixed bottom-0 inset-x-0 z-30 bg-[var(--card)] border-t border-[var(--border)] pb-[env(safe-area-inset-bottom)]"
+      className="lg:hidden fixed inset-x-0 bottom-0 z-30 px-4 pt-2 pb-[calc(env(safe-area-inset-bottom)+0.625rem)] pointer-events-none"
       aria-label="Primary"
     >
-      <div className="h-16 flex items-stretch">
+      <div className="glass-light pointer-events-auto mx-auto flex max-w-sm items-stretch rounded-[26px] px-1.5 h-16">
         <TabLink href={TABS[0].href} label={TABS[0].label} Icon={TABS[0].Icon} active={isActive(TABS[0].href)} />
 
         <div className="flex-1 flex items-center justify-center">
@@ -65,7 +68,7 @@ export default function AppTabBar() {
             type="button"
             onClick={() => inputRef.current?.click()}
             aria-label="Start a new room restyle"
-            className="relative -translate-y-3 h-14 w-14 rounded-full bg-[var(--primary)] text-[var(--primary-foreground)] shadow-[var(--shadow-pop)] flex items-center justify-center active:scale-95 transition-transform"
+            className="relative -translate-y-4 h-14 w-14 rounded-full bg-[var(--primary)] text-[var(--primary-foreground)] shadow-[var(--shadow-pop)] ring-4 ring-white/50 flex items-center justify-center active:scale-95 transition-transform"
           >
             <Plus className="h-6 w-6" />
           </button>

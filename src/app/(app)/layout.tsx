@@ -65,8 +65,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       {/* Mobile bottom tab bar — the only mobile nav surface. */}
       <AppTabBar />
 
-      {/* Main content — bottom padding clears the fixed tab bar on mobile. */}
-      <main className="lg:ml-56 p-4 sm:p-6 lg:p-8 pb-[calc(5rem+env(safe-area-inset-bottom))] lg:pb-8">
+      {/* Main content — bottom padding clears the floating tab bar (and its raised center button) on mobile. */}
+      <main className="lg:ml-56 p-4 sm:p-6 lg:p-8 pb-[calc(6.5rem+env(safe-area-inset-bottom))] lg:pb-8">
         {children}
       </main>
     </div>
