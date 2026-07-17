@@ -727,6 +727,34 @@ export function useRestyleWorkspace(id: string) {
     } catch { /* optimistic already applied */ }
   };
 
+  // Jump back to a previously-generated version (see VersionsGallery): set the active-edit set to
+  // exactly that render's signature — activate its edits, deactivate the rest — so the room shows
+  // that whole combination again. The image is already cached, so the batch PATCH's
+  // adoptCachedRenderIfKnown swaps current_url to it with no re-render. (A render whose signature
+  // references a since-deleted edit can't be reproduced exactly; everything still present is
+  // matched, and the server's current_url reflects the honest result.)
+  const restoreRender = async (render: RestyleRender) => {
+    const sigIds = new Set(render.signature.split(",").filter(Boolean));
+    const prev = restyle?.edits ?? [];
+    const states: Record<string, boolean> = {};
+    for (const e of prev) {
+      const shouldBeActive = sigIds.has(e.id);
+      if (e.active !== shouldBeActive) states[e.id] = shouldBeActive;
+    }
+    setRestyle((r) => (r ? {
+      ...r, current_url: render.image_url,
+      edits: prev.map((e) => (e.id in states ? { ...e, active: states[e.id] } : e)),
+    } : r));
+    if (Object.keys(states).length === 0) return; // already this exact combination
+    try {
+      const res = await fetch(`/api/restyle/${id}/edits`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ states }),
+      });
+      const data = await res.json();
+      if (res.ok) updateEdits(data.edits, data.current_url || render.image_url);
+    } catch { /* optimistic already applied */ }
+  };
+
   const addCustomItem = async (label: string) => {
     setError(null);
     try {
@@ -919,7 +947,7 @@ export function useRestyleWorkspace(id: string) {
     searches, runVisualSearchByUrl, runTextSearch, pickCandidate, pickingKey,
     stagePhoto, stageProductLink, stagingLink, stageRemove, stageRefine,
     // handlers
-    addEdit, toggle, deactivateAll, remove, historyFor, restoreEdit, addCustomItem, removeCustomItem, generate, emptyRoom, stageRoom, downloadImage,
+    addEdit, toggle, deactivateAll, remove, historyFor, restoreEdit, restoreRender, addCustomItem, removeCustomItem, generate, emptyRoom, stageRoom, downloadImage,
     // derived
     edits, activeEdits, stagedItems, displayUrl, viewingOriginal, canGenerate, pendingCount, confirmingCount, atMaxCustom, productEdits, railEdits,
     canvasHotspots,

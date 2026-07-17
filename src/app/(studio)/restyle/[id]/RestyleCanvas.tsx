@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Columns2, Download, Plus, Share2, ArrowLeftRight } from "lucide-react";
+import { Columns2, Download, Plus, Share2, ArrowLeftRight, GalleryVerticalEnd } from "lucide-react";
 import type { CSSProperties } from "react";
 import type { CanvasHotspot, RestyleWorkspace } from "./useRestyleWorkspace";
 import { Button, IconButton, ProgressOverlay, Sheet, ShopSummaryPill, Spinner } from "./ui";
@@ -9,6 +9,7 @@ import ObjectHotspots from "./ObjectHotspots";
 import PinPlacementLayer from "./PinPlacementLayer";
 import ShareMenu, { ShareOptions } from "./ShareMenu";
 import ShopCart from "./ShopCart";
+import VersionsGallery from "./VersionsGallery";
 
 // Fallback for the brief window before the frame/image have been measured (or if width/height
 // are ever unknown): natural aspect, full width, height follows. Rounded + shadowed like the
@@ -42,6 +43,7 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
   const [showCompare, setShowCompare] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [cartOpen, setCartOpen] = useState(false);
+  const [versionsOpen, setVersionsOpen] = useState(false);
 
   // Desktop image-box measurement (see doc comment above). `naturalSize` is measured directly
   // off the actual rendered <img> (onLoad) rather than trusted solely from `restyle.width`/
@@ -228,6 +230,7 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
           </div>
         )}
         <ShopCart ws={ws} open={cartOpen} onClose={() => setCartOpen(false)} />
+        <VersionsGallery ws={ws} open={versionsOpen} onClose={() => setVersionsOpen(false)} />
 
         {!generating && !holdingOverlay && !showCompare && !ws.pinRequest && (
           <div className="absolute bottom-3 right-3">
@@ -240,6 +243,13 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
         )}
 
         <div className="absolute top-3 right-3 flex items-center gap-3">
+          {/* Versions history — every generated combination, browsable. Only worth showing once
+              there's more than one render to move between. */}
+          {ws.renders.length > 1 && (
+            <IconButton onClick={() => setVersionsOpen(true)} aria-label="Versions history">
+              <GalleryVerticalEnd className="h-4 w-4" />
+            </IconButton>
+          )}
           {!viewingOriginal && (
             <IconButton onClick={() => setShowCompare((v) => !v)} aria-label="Compare before / after"
               className={showCompare ? "bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)] hover:text-[var(--background)]" : ""}>
