@@ -51,14 +51,17 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!file && !imageUrl && query) {
     try {
       const all = await searchShopping(query);
-      const supported = all.filter((r) => r.supported).slice(0, tier.limit);
-      if (supported.length === 0) {
+      // Prefer fetchable retailers, but fall back to showing all real matches (with buy links)
+      // rather than "none found" for categories our detail APIs don't cover — see restyle-search.
+      const supportedOnly = all.filter((r) => r.supported);
+      const results = (supportedOnly.length ? supportedOnly : all).slice(0, tier.limit);
+      if (results.length === 0) {
         return NextResponse.json({ error: "No shoppable products found. Try a different search." }, { status: 404 });
       }
       // Text search has no Lens scoring to defer and we no longer eagerly resolve tokens (lazy
       // on pick — see restyle-search.ts), so these results are already final. Persist as scored.
-      await upsertSearch(id, label, { query, results: supported, scored: true });
-      return NextResponse.json({ results: supported, scored: true, locked: tier.locked });
+      await upsertSearch(id, label, { query, results, scored: true });
+      return NextResponse.json({ results, scored: true, locked: tier.locked });
     } catch (err) {
       if (err instanceof ShoppingSearchError) return NextResponse.json({ error: err.message }, { status: err.status });
       return NextResponse.json({ error: "Product search failed." }, { status: 502 });
@@ -133,10 +136,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (shotUrl) { try { await del(shotUrl); } catch { /* leave it; non-fatal */ } }
 
   const seen = new Set(exact.map((r) => titleKey(r.title)));
-  let results = [...exact, ...keyword.filter((r) => !seen.has(titleKey(r.title)))];
+  const all = [...exact, ...keyword.filter((r) => !seen.has(titleKey(r.title)))];
 
-  // Never surface "not shoppable" results — a link/price is the whole point. Cap by plan tier.
-  results = results.filter((r) => r.supported).slice(0, tier.limit);
+  // Prefer fetchable ("supported") retailers — stageable / "try on photo". But rather than a hard
+  // "no products found" when a category returns nothing fetchable (TVs/electronics at Best Buy/
+  // Target, outside our fetch set), fall back to the real matches with their buy links. Cap by plan.
+  const supportedOnly = all.filter((r) => r.supported);
+  const results = (supportedOnly.length ? supportedOnly : all).slice(0, tier.limit);
   if (results.length === 0) {
     return NextResponse.json({ error: "No matching products found. Try a clearer screenshot." }, { status: 404 });
   }

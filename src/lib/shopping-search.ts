@@ -159,7 +159,11 @@ const ENGINES: {
         title: str(r.title), thumbnail: str(r.thumbnail), price: fmtPrice(r.price),
         retailer: source || "Google Shopping",
         supported,
-        productUrl: url && isSupportedRetailerUrl(url) ? url : null,
+        // Keep the product link even when the retailer isn't one we can fetch rich detail from —
+        // it's still a real, clickable "buy here" URL for the shopper (only `supported` gates
+        // whether we can stage/"Try on photo" it). Dropping it here is what left whole categories
+        // (TVs, electronics — sold at Best Buy/Target, not our fetchable set) with no link at all.
+        productUrl: url,
         immersiveToken: token,
         exact: false, score: null,
       };
@@ -269,7 +273,9 @@ export async function searchByImage(imageUrl: string): Promise<ShoppingResult[]>
       price: primary.price,
       retailer: primary.retailer,
       supported: primary.supported,
-      productUrl: primary.supported ? primary.url : null,
+      // Keep the link even for a not-fetchable retailer — still a real buy URL for the shopper
+      // (`supported` alone gates "Try on photo"/staging). See the google_shopping note above.
+      productUrl: primary.url,
       immersiveToken: null,
       exact: true, score: null,
       alternates: alternates.length ? alternates : undefined,

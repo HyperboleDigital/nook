@@ -63,8 +63,13 @@ export async function searchProductByImageUrl(params: {
   ]);
 
   const seen = new Set(exact.map((r) => titleKey(r.title)));
-  let results = [...exact, ...keyword.filter((r) => !seen.has(titleKey(r.title)))];
-  results = results.filter((r) => r.supported).slice(0, tier.limit);
+  const all = [...exact, ...keyword.filter((r) => !seen.has(titleKey(r.title)))];
+  // Prefer fetchable ("supported") retailers — those can be staged / "tried on photo". But if a
+  // whole category returns nothing fetchable (TVs & electronics live at Best Buy/Target, not our
+  // Amazon/Wayfair/Walmart/Home Depot set), still show the real matches (with their buy links)
+  // instead of lying "no products found" — they just can't be tried on the photo.
+  const supported = all.filter((r) => r.supported);
+  const results = (supported.length ? supported : all).slice(0, tier.limit);
   if (results.length === 0) return { ok: false, error: "No matching products found.", status: 404 };
 
   await upsertSearch(restyleId, label, { query: searchQuery, results, scored: false });
