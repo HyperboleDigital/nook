@@ -777,17 +777,38 @@ export function useRestyleWorkspace(id: string) {
     finally { setBusy(false); }
   };
 
+  // Simple, phone-friendly save. On iOS the classic `<a download>` just opens the image in a new
+  // tab (it can't write to Photos), so we prefer the native share/save sheet when the platform can
+  // share a file — that's the only real "save to your phone" from mobile Safari. Desktop/Android
+  // keep the download link. A `downloadToast` drives the little "Downloading full size…" pill.
+  const [downloadToast, setDownloadToast] = useState<string | null>(null);
   const downloadImage = async () => {
-    // Always the active generation — there's one image, no version navigation to reconcile.
-    const url = restyle?.current_url;
+    const url = restyle?.current_url; // always the active generation — one image, no version nav
     if (!url) return;
+    setDownloadToast("Downloading full size…");
     try {
       const blob = await (await fetch(url)).blob();
+      const file = new File([blob], `nook-restyle-${id}.png`, { type: blob.type || "image/png" });
+      const nav = navigator as Navigator & { canShare?: (d: { files: File[] }) => boolean };
+      if (typeof navigator.share === "function" && nav.canShare?.({ files: [file] })) {
+        try {
+          await navigator.share({ files: [file] });
+        } catch (err) {
+          // Cancelling the share sheet is not an error — just stop quietly.
+          if (!(err instanceof DOMException) || err.name !== "AbortError") throw err;
+        }
+        setDownloadToast(null);
+        return;
+      }
       const blobUrl = URL.createObjectURL(blob);
-      const a = Object.assign(document.createElement("a"), { href: blobUrl, download: `restyle-${id}.png` });
+      const a = Object.assign(document.createElement("a"), { href: blobUrl, download: file.name });
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(blobUrl);
-    } catch { window.open(url, "_blank"); }
+      setDownloadToast(null); // the browser's own download UI is the confirmation on desktop
+    } catch {
+      window.open(url, "_blank");
+      setDownloadToast(null);
+    }
   };
 
   // ── Derived ──
@@ -947,7 +968,7 @@ export function useRestyleWorkspace(id: string) {
     searches, runVisualSearchByUrl, runTextSearch, pickCandidate, pickingKey,
     stagePhoto, stageProductLink, stagingLink, stageRemove, stageRefine,
     // handlers
-    addEdit, toggle, deactivateAll, remove, historyFor, restoreEdit, restoreRender, addCustomItem, removeCustomItem, generate, emptyRoom, stageRoom, downloadImage,
+    addEdit, toggle, deactivateAll, remove, historyFor, restoreEdit, restoreRender, addCustomItem, removeCustomItem, generate, emptyRoom, stageRoom, downloadImage, downloadToast,
     // derived
     edits, activeEdits, stagedItems, displayUrl, viewingOriginal, canGenerate, pendingCount, confirmingCount, atMaxCustom, productEdits, railEdits,
     canvasHotspots,

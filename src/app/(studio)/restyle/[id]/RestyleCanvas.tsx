@@ -232,6 +232,17 @@ export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
         <ShopCart ws={ws} open={cartOpen} onClose={() => setCartOpen(false)} />
         <VersionsGallery ws={ws} open={versionsOpen} onClose={() => setVersionsOpen(false)} />
 
+        {/* Clean, Gemini-style save toast — appears while the full-size image is being fetched /
+            handed to the OS save sheet, then clears itself. */}
+        {ws.downloadToast && (
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 animate-[fade-in_0.2s_ease-out]">
+            <div className="inline-flex items-center gap-2 rounded-full bg-[var(--foreground)] text-white px-4 py-2 text-xs shadow-[var(--shadow-pop)]">
+              <Spinner size="xs" className="text-white" />
+              {ws.downloadToast}
+            </div>
+          </div>
+        )}
+
         {!generating && !holdingOverlay && !showCompare && !ws.pinRequest && (
           <div className="absolute bottom-3 right-3">
             <Button variant="primary" size="sm"
