@@ -528,7 +528,10 @@ export function useRestyleWorkspace(id: string) {
   // replaceEditId is explicit (not derived from `sourcing`) because this is also called from
   // "Shop this look" after generate, where there's no open sourcing panel to read it from.
   const pickCandidate = async (c: ShoppingResult, label: string, key: string, replaceEditId?: string) => {
-    if (!c.supported || (!c.immersiveToken && !c.productUrl)) return;
+    // Only need the product image — "Try in room" QUEUES the swap from the search result's own
+    // data (see the product route's fromCandidate); it no longer requires a fetchable retailer or
+    // a resolvable buy link, so any real match (a Best Buy TV included) can be tried.
+    if (!c.thumbnail) return;
     const optimisticId = `${OPTIMISTIC_PREFIX}${Date.now()}`;
     const prevEdits = restyle?.edits ?? [];
     const optimisticEdit: RestyleEdit = {
@@ -541,8 +544,10 @@ export function useRestyleWorkspace(id: string) {
     updateEdits([...prevEdits.filter((e) => e.id !== replaceEditId), optimisticEdit]);
     setPickingKey(key); setError(null);
     try {
-      const body: Record<string, unknown> = c.productUrl ? { url: c.productUrl } : { token: c.immersiveToken };
-      body.targetLabel = label;
+      const body: Record<string, unknown> = {
+        candidate: { thumbnail: c.thumbnail, title: c.title, price: c.price, productUrl: c.productUrl, retailer: c.retailer },
+        targetLabel: label,
+      };
       if (replaceEditId) body.replaceEditId = replaceEditId;
       const r = await fetch(`/api/restyle/${id}/product`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),

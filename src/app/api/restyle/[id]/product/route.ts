@@ -68,6 +68,42 @@ async function fromListing(userId: string, info: ProductInfo): Promise<StagedPro
 }
 
 /**
+ * Stage a picked search candidate straight from what the search already gave us — its thumbnail
+ * (the product image, used as the compositing reference), title, price, and buy link. This is the
+ * "Try in room" path: it must only QUEUE the visual swap, never block on resolving a buy link or
+ * fetching richer product detail. That's why it does NOT call fetchProduct / resolveImmersiveToken
+ * (which is what used to fail with "Couldn't resolve that product link." and reject the whole swap,
+ * and what left non-fetchable retailers — TVs at Best Buy/Target — unswappable). The thumbnail is
+ * copied into our own Blob so recompose can fetch it reliably (hotlink-safe, stable); if that copy
+ * fails we fall back to the raw thumbnail URL rather than failing the queue.
+ */
+async function fromCandidate(userId: string, c: {
+  thumbnail: string; title?: string | null; price?: string | null;
+  productUrl?: string | null; retailer?: string | null; itemType?: string | null;
+}): Promise<StagedProduct> {
+  let referenceUrl = c.thumbnail;
+  try {
+    const res = await fetch(c.thumbnail);
+    if (res.ok) {
+      const buf = Buffer.from(await res.arrayBuffer());
+      const mime = res.headers.get("content-type") || "image/jpeg";
+      referenceUrl = await uploadImage(userId, buf, mime);
+    }
+  } catch { /* fall back to the raw thumbnail URL — still renderable, just not re-hosted */ }
+
+  const title = (c.title ?? "").trim();
+  return {
+    referenceUrl,
+    referenceDesc: title.slice(0, 900),
+    itemType: c.itemType?.trim() || title || "item",
+    buyUrl: c.productUrl ?? null,
+    productTitle: title || null,
+    productPrice: c.price ?? null,
+    retailer: c.retailer ?? "Store",
+  };
+}
+
+/**
  * Build a reference edit from a photo the user uploaded — just inspiration, nothing to buy
  * yet. Uploading a photo no longer triggers a shopping search immediately: that used to run
  * (and cost tokens/API calls) the moment someone picked a photo, even if they were still
@@ -156,14 +192,20 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   let replaceEditId: string | undefined;
   try {
     const body = await req.json().catch(() => ({}));
-    const { url: rawUrl, token, imageUrl, targetLabel: ft, replaceEditId: re } = body as {
-      url?: string; token?: string; imageUrl?: string; targetLabel?: string; replaceEditId?: string;
+    const { url: rawUrl, token, imageUrl, candidate, targetLabel: ft, replaceEditId: re } = body as {
+      url?: string; token?: string; imageUrl?: string;
+      candidate?: { thumbnail?: string; title?: string; price?: string | null; productUrl?: string | null; retailer?: string | null; itemType?: string | null };
+      targetLabel?: string; replaceEditId?: string;
     };
     forcedTarget = ft;
     replaceEditId = re;
 
     if (imageUrl && typeof imageUrl === "string") {
       staged = await fromUpload(userId, imageUrl);
+    } else if (candidate?.thumbnail) {
+      // "Try in room" — queue the swap from the search result's own data (no product fetch / no
+      // token resolution, so it can't be rejected by an unresolvable link — see fromCandidate).
+      staged = await fromCandidate(userId, { ...candidate, thumbnail: candidate.thumbnail });
     } else {
       // A visual-search candidate gives us a SerpApi immersive token, not a URL — resolve it.
       // Most candidates arrive with a real productUrl already (visual-search resolves Wayfair

@@ -153,7 +153,7 @@ function SimilarCard({
         </p>
         {c.price && <p className="text-sm font-bold">{c.price}</p>}
         <div className="flex gap-2 pt-1.5">
-          <Button size="sm" variant={inUse ? "subtle" : "accentSoft"} disabled={!c.supported || picking || inUse} onClick={onTry} className="flex-1">
+          <Button size="sm" variant={inUse ? "subtle" : "accentSoft"} disabled={!c.thumbnail || picking || inUse} onClick={onTry} className="flex-1">
             {picking ? <Spinner size="xs" className="text-current" /> : <Sparkles className="h-3.5 w-3.5" />}
             {inUse ? "In use" : picking ? "Trying…" : "Try on photo"}
           </Button>
