@@ -4,13 +4,12 @@ import { Fragment } from "react";
 import { Loader2 } from "lucide-react";
 import type { CanvasHotspot } from "./useRestyleWorkspace";
 import { actionIcon, anchorFor, declutter, HotspotLabel, HotspotMarker, HotspotRegion, toBox } from "./hotspot-visuals";
-import { cn } from "@/lib/utils";
 
 /** The small at-rest marker per state, so the canvas shows WHERE items are without 14 always-on
  *  boxes cluttering it. The full-item highlight (below) is the forgiving tap target + hover cue. */
 function StateMarker({
-  state, delay, isActive, edit,
-}: { state: CanvasHotspot["state"]; delay: number; isActive: boolean; edit: CanvasHotspot["edit"] }) {
+  state, delay, edit,
+}: { state: CanvasHotspot["state"]; delay: number; edit: CanvasHotspot["edit"] }) {
   // Tints are TRANSLUCENT so the disc reads as frosted glass (see HotspotMarker) — the color still
   // carries the same meaning, just as a tinted glass instead of a solid fill.
   if (state === "confirming") {
@@ -31,9 +30,10 @@ function StateMarker({
       <span className="absolute h-5 w-5 rounded-full bg-white/70 animate-[hotspot-pulse_2.4s_ease-out_infinite]" style={{ animationDelay: `${delay}ms` }} />
       {/* Frosted-glass disc (was a solid white dot) — the room shows faintly through it. */}
       <span className="absolute h-5 w-5 rounded-full bg-white/25 backdrop-blur-md border border-white/70 ring-1 ring-inset ring-white/40 shadow-[var(--shadow-soft)]" />
-      {/* Inner pip — a clean white pearl (was near-black, which read heavy on the glass); still
-          accent-green when the item is the active one. Subtle shadow keeps it visible on the frost. */}
-      <span className={cn("relative h-2.5 w-2.5 rounded-full shadow-[0_1px_2px_rgba(0,0,0,0.3)]", isActive ? "bg-[var(--accent)]" : "bg-white")} />
+      {/* Inner pip — always a clean white pearl. It used to go dark accent-green when the item was
+          active, which read as a "black dot" on tap; the active state is shown by the glass name
+          label now, so the pip stays white. Subtle shadow keeps it visible on the frost. */}
+      <span className="relative h-2.5 w-2.5 rounded-full bg-white shadow-[0_1px_2px_rgba(0,0,0,0.3)]" />
     </span>
   );
 }
@@ -85,7 +85,7 @@ export default function ObjectHotspots({
               className="absolute pointer-events-none -translate-x-1/2 -translate-y-1/2 flex items-center justify-center"
               style={{ left: `${m.x}%`, top: `${m.y}%` }}
             >
-              <StateMarker state={h.state} delay={i * 150} isActive={isActive} edit={h.edit} />
+              <StateMarker state={h.state} delay={i * 150} edit={h.edit} />
               {/* Name label appears only for the tapped/active item — not always-on for every
                   marker (that crowded a busy room). */}
               {isActive && <HotspotLabel text={h.label} side={m.x > 55 ? "left" : "right"} />}
