@@ -3,7 +3,7 @@
 import { Fragment } from "react";
 import { Loader2 } from "lucide-react";
 import type { CanvasHotspot } from "./useRestyleWorkspace";
-import { actionIcon, anchorFor, declutter, HotspotMarker, HotspotRegion, toBox } from "./hotspot-visuals";
+import { actionIcon, anchorFor, declutter, HotspotLabel, HotspotMarker, HotspotRegion, toBox } from "./hotspot-visuals";
 import { cn } from "@/lib/utils";
 
 /** The small at-rest marker per state, so the canvas shows WHERE items are without 14 always-on
@@ -76,14 +76,17 @@ export default function ObjectHotspots({
           : h.label;
         return (
           <Fragment key={`${h.label}-${i}`}>
-            <HotspotRegion box={b} label={h.label} isActive={isActive} ariaLabel={ariaLabel}
+            <HotspotRegion box={b} label={h.label} ariaLabel={ariaLabel}
               onClick={() => onSelect(h, (b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2)} />
-            {/* At-rest state marker (decorative — pointer-events-none so it never blocks a tap) */}
+            {/* At-rest state marker + a glass name label beside it (replaces the box outline).
+                The span is centered on the anchor and pointer-events-none so it never blocks a tap;
+                the label flips to the left for markers near the right edge so it doesn't clip. */}
             <span
               className="absolute pointer-events-none -translate-x-1/2 -translate-y-1/2 flex items-center justify-center"
               style={{ left: `${m.x}%`, top: `${m.y}%` }}
             >
               <StateMarker state={h.state} delay={i * 150} isActive={isActive} edit={h.edit} />
+              <HotspotLabel text={h.label} side={m.x > 55 ? "left" : "right"} />
             </span>
           </Fragment>
         );

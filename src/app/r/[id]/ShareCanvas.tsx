@@ -5,7 +5,7 @@ import type { CSSProperties } from "react";
 import Link from "next/link";
 import { ExternalLink, Sparkles, ShoppingBag, X } from "lucide-react";
 import { Button, ProductCard, storeName } from "@/app/(studio)/restyle/[id]/ui";
-import { actionIcon, anchorFor, declutter, HotspotMarker, HotspotRegion, toBox } from "@/app/(studio)/restyle/[id]/hotspot-visuals";
+import { actionIcon, anchorFor, declutter, HotspotLabel, HotspotMarker, HotspotRegion, toBox } from "@/app/(studio)/restyle/[id]/hotspot-visuals";
 import type { DetectedObject, RestyleEdit } from "@/types";
 
 export type ShareHotspot = { label: string; box_2d: DetectedObject["box_2d"]; edit: RestyleEdit };
@@ -144,15 +144,15 @@ export default function ShareCanvas({
       const h = hotspots[i];
       const b = boxes[i];
       const m = markers[i];
-      const isActive = openHotspot?.label.toLowerCase() === h.label.toLowerCase();
       return (
         <Fragment key={`${h.label}-${i}`}>
-          <HotspotRegion box={b} label={h.label} isActive={isActive}
+          <HotspotRegion box={b} label={h.label}
             ariaLabel={`${h.label} (${h.edit.buy_url ? "shop this" : "added"})`}
             onClick={() => setOpenHotspot({ label: h.label, cx: (b.x0 + b.x1) / 2, cy: (b.y0 + b.y1) / 2, edit: h.edit })} />
           <span className="absolute pointer-events-none -translate-x-1/2 -translate-y-1/2 flex items-center justify-center"
             style={{ left: `${m.x}%`, top: `${m.y}%` }}>
             <HotspotMarker bg="bg-[var(--accent)]/75" icon={actionIcon(h.edit, "h-3.5 w-3.5 text-white")} />
+            <HotspotLabel text={h.label} side={m.x > 55 ? "left" : "right"} />
           </span>
         </Fragment>
       );

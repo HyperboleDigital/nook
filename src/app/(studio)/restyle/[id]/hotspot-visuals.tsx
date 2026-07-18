@@ -91,35 +91,40 @@ export function actionIcon(edit: ActionEditLike, className: string) {
   return edit?.buy_url ? <ShoppingBag className={className} strokeWidth={2.5} /> : <Sparkles className={className} strokeWidth={2.5} />;
 }
 
-/** The whole-item highlighted region: an invisible tap target the size of the full box
- *  (forgiving of a slightly-off box) that outlines + fills accent-color with its label on
- *  hover/active. Shared visual between the editable and read-only hotspot overlays. */
+/** The whole-item tap target — an INVISIBLE button the size of the full detected box (forgiving
+ *  of a slightly-off box). No visible outline/fill anymore: the box highlight varied with detection
+ *  accuracy and read as inconsistent, so the item is identified by a glass name label next to its
+ *  marker (see HotspotLabel) instead of a box drawn around it. Shared by the editable + read-only
+ *  overlays. */
 export function HotspotRegion({
-  box, label, isActive, onClick, ariaLabel,
-}: { box: Box; label: string; isActive: boolean; onClick: () => void; ariaLabel: string }) {
+  box, label, onClick, ariaLabel,
+}: { box: Box; label: string; onClick: () => void; ariaLabel: string }) {
   return (
     <button
       type="button"
       onClick={onClick}
       aria-label={ariaLabel}
       title={label}
-      className={cn(
-        "group absolute pointer-events-auto rounded-xl border-2 transition-colors",
-        isActive
-          ? "border-[var(--accent)] bg-[var(--accent)]/10"
-          : "border-transparent hover:border-[var(--accent)] hover:bg-[var(--accent)]/10",
-      )}
+      className="absolute pointer-events-auto rounded-xl"
       style={{ left: `${box.x0}%`, top: `${box.y0}%`, width: `${box.x1 - box.x0}%`, height: `${box.y1 - box.y0}%` }}
+    />
+  );
+}
+
+/** A small frosted-glass name pill that floats beside a hotspot marker — replaces the box-corner
+ *  label. `side` flips it to the left for markers near the right edge so it doesn't clip. Rendered
+ *  inside the marker's positioning span (which is centered on the anchor), so it sits right next to
+ *  the dot. Decorative / non-interactive — taps go to the HotspotRegion box beneath. */
+export function HotspotLabel({ text, side }: { text: string; side: "left" | "right" }) {
+  return (
+    <span
+      className={cn(
+        "glass-surface pointer-events-none absolute top-1/2 -translate-y-1/2 z-10 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold capitalize text-white shadow-[var(--shadow-pop)]",
+        side === "right" ? "left-full ml-2" : "right-full mr-2",
+      )}
     >
-      <span
-        className={cn(
-          "absolute top-1 left-1 rounded-full bg-[var(--foreground)] text-white text-[10px] font-medium px-1.5 py-0.5 capitalize whitespace-nowrap shadow-[var(--shadow-soft)] transition-opacity",
-          isActive ? "opacity-100" : "opacity-0 group-hover:opacity-100",
-        )}
-      >
-        {label}
-      </span>
-    </button>
+      {text}
+    </span>
   );
 }
 
