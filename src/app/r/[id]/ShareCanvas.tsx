@@ -144,6 +144,7 @@ export default function ShareCanvas({
       const h = hotspots[i];
       const b = boxes[i];
       const m = markers[i];
+      const isActive = openHotspot?.label.toLowerCase() === h.label.toLowerCase();
       return (
         <Fragment key={`${h.label}-${i}`}>
           <HotspotRegion box={b} label={h.label}
@@ -152,7 +153,7 @@ export default function ShareCanvas({
           <span className="absolute pointer-events-none -translate-x-1/2 -translate-y-1/2 flex items-center justify-center"
             style={{ left: `${m.x}%`, top: `${m.y}%` }}>
             <HotspotMarker bg="bg-[var(--accent)]/75" icon={actionIcon(h.edit, "h-3.5 w-3.5 text-white")} />
-            <HotspotLabel text={h.label} side={m.x > 55 ? "left" : "right"} />
+            {isActive && <HotspotLabel text={h.label} side={m.x > 55 ? "left" : "right"} />}
           </span>
         </Fragment>
       );

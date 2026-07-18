@@ -86,7 +86,9 @@ export default function ObjectHotspots({
               style={{ left: `${m.x}%`, top: `${m.y}%` }}
             >
               <StateMarker state={h.state} delay={i * 150} isActive={isActive} edit={h.edit} />
-              <HotspotLabel text={h.label} side={m.x > 55 ? "left" : "right"} />
+              {/* Name label appears only for the tapped/active item — not always-on for every
+                  marker (that crowded a busy room). */}
+              {isActive && <HotspotLabel text={h.label} side={m.x > 55 ? "left" : "right"} />}
             </span>
           </Fragment>
         );
