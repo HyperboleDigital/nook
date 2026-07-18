@@ -20,6 +20,15 @@ const STATUS_CLS: Record<RailStatus, string> = {
   "turning-off": "bg-amber-50 text-amber-700 border border-amber-200",
   off: "bg-[var(--muted)] text-[var(--muted-foreground)]",
 };
+// Sort order for the Changes list: not-yet-applied changes (pending / turning-off — the ones that
+// still need a Generate) float to the top so the action you owe the room is front and center;
+// already-in-room, then off, follow. Stable within a rank (keeps edit order otherwise).
+const STATUS_ORDER: Record<RailStatus, number> = {
+  pending: 0,
+  "turning-off": 1,
+  "in-room": 2,
+  off: 3,
+};
 
 function StatusChip({ status }: { status: RailStatus }) {
   return (
@@ -107,7 +116,12 @@ export default function ChangesPanel({ ws }: { ws: RestyleWorkspace }) {
   const [togglingId, setTogglingId] = useState<string | null>(null);
 
   const refineItems = railEdits.filter((r) => r.edit.kind === "refine");
-  const mainItems = railEdits.filter((r) => r.edit.kind !== "refine");
+  // Pending changes first (see STATUS_ORDER). Array#sort is stable, so same-status cards keep
+  // their existing (edit) order — and cards are keyed by edit id, so a card that changes status
+  // (e.g. pending → in-room after a generate) reorders smoothly without remounting.
+  const mainItems = railEdits
+    .filter((r) => r.edit.kind !== "refine")
+    .sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status]);
   const coveredLabels = new Set(mainItems.map((r) => r.edit.target_label?.toLowerCase()).filter(Boolean));
   const standaloneRefines = refineItems.filter((r) => !coveredLabels.has(r.edit.target_label?.toLowerCase()));
   const refineFor = (label?: string | null) =>
