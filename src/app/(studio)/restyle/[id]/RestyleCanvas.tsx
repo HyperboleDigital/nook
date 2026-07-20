@@ -2,15 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Check, Columns2, Download, Pencil, Plus, Share2, ArrowLeftRight, GalleryVerticalEnd } from "lucide-react";
+import { ArrowLeft, Check, Columns2, Download, MoreHorizontal, Pencil, Plus, Share2, ArrowLeftRight, GalleryVerticalEnd } from "lucide-react";
 import type { CSSProperties } from "react";
 import type { CanvasHotspot, RestyleWorkspace } from "./useRestyleWorkspace";
-import { IconButton, ProgressOverlay, Sheet, ShopSummaryPill, Spinner } from "./ui";
+import { IconButton, ProgressOverlay, Sheet, Spinner } from "./ui";
 import AdminPlanToggle from "./AdminPlanToggle";
 import ObjectHotspots from "./ObjectHotspots";
 import PinPlacementLayer from "./PinPlacementLayer";
 import ShareMenu, { ShareOptions } from "./ShareMenu";
-import ShopCart from "./ShopCart";
 import VersionsGallery from "./VersionsGallery";
 
 // Fallback for the brief window before the frame/image have been measured (or if width/height
@@ -30,29 +29,38 @@ const FALLBACK_IMG = "block w-full h-auto max-h-[85dvh] object-contain";
  * the one consistent menu). "+ Add" drops a pin over THIS image (the current render, not the
  * bare original) via `ws.pinRequest`. Download/share always reflect the current generation.
  *
- * The stage has a FIXED height on every breakpoint (a viewport-relative height on mobile since
- * the page scrolls, `flex-1` filling the immersive column on desktop), so a portrait photo
- * can't fill both axes the way a simple `w-full h-auto` box could. CSS percentage-height
- * shrink-wrapping is genuinely ambiguous per spec when the wrapper's own height comes from its
- * content — so instead this measures the stage (ResizeObserver) + the rendered image's natural
- * size and pins the wrapper to the exact contained pixel box, so object-cover fills it perfectly
- * and every %-positioned hotspot/pin lands correctly (the wrapper IS the image's true rendered
- * box, in pixels). A blurred, darkened copy of the same image fills the stage edge-to-edge behind
- * it (just backdrop) while the sharp photo floats on top as a rounded, shadowed card.
+ * The stage is a FIXED, full-bleed h-full/w-full box on every breakpoint (the whole viewport —
+ * RestyleStudio no longer reserves any layout space for "Room Changes", which now lives entirely
+ * behind a floating glass panel), so a portrait photo can't fill both axes the way a simple
+ * `w-full h-auto` box could. CSS percentage-height shrink-wrapping is genuinely ambiguous per
+ * spec when the wrapper's own height comes from its content — so instead this measures the stage
+ * (ResizeObserver) + the rendered image's natural size and pins the wrapper to the exact
+ * contained pixel box, so object-cover fills it perfectly and every %-positioned hotspot/pin
+ * lands correctly (the wrapper IS the image's true rendered box, in pixels). A blurred, darkened
+ * copy of the same image fills the stage edge-to-edge behind it (just backdrop) while the sharp
+ * photo floats on top as a rounded, shadowed card — this now applies uniformly on mobile too
+ * (previously mobile showed the bare `<img>` at its natural aspect with the changes list flush
+ * below it; now nothing sits below the image, so it needs the same full-viewport treatment as
+ * desktop to stay edge-to-edge instead of leaving a dead gap under a landscape photo).
  */
-// `fluid` (mobile): the image is shown FULL-WIDTH at its natural aspect ratio — no fixed-height
-// stage, no blurred letterbox backdrop, no floating rounded card — so the changes panel below can
-// sit flush against the image's true bottom edge whether the photo is portrait or landscape. The
-// image element IS the hotspot-positioning box, so the %-coords land directly (no measured pixel
-// box needed). Desktop stays on the measured-box + blurred-backdrop stage (it fills a fixed column
-// beside the rail — see the doc comment above).
-export default function RestyleCanvas({ ws, fluid = false }: { ws: RestyleWorkspace; fluid?: boolean }) {
+export default function RestyleCanvas({ ws }: { ws: RestyleWorkspace }) {
   const { restyle, generating, displayUrl } = ws;
   const router = useRouter();
   const [showCompare, setShowCompare] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
-  const [cartOpen, setCartOpen] = useState(false);
   const [versionsOpen, setVersionsOpen] = useState(false);
+  // Versions / compare / share / download used to each get their own glass icon button, which
+  // read as a crowded row of four circles floating on the photo. Consolidated into one "..."
+  // overflow menu (same pattern as GenerateBar's ⋯ menu) — one glass button, a plain-language
+  // list of actions underneath it.
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onClick = (e: MouseEvent) => { if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false); };
+    window.addEventListener("mousedown", onClick);
+    return () => window.removeEventListener("mousedown", onClick);
+  }, [menuOpen]);
 
   // Desktop image-box measurement (see doc comment above). `naturalSize` is measured directly
   // off the actual rendered <img> (onLoad) rather than trusted solely from `restyle.width`/
@@ -153,14 +161,10 @@ export default function RestyleCanvas({ ws, fluid = false }: { ws: RestyleWorksp
     const w = natW * scale, h = natH * scale;
     imgBoxStyle = { position: "absolute", left: (frameSize.w - w) / 2, top: (frameSize.h - h) / 2, width: w, height: h };
   }
-  // Fluid (mobile) shows the image full-width at natural aspect (the <img> is the box); the
-  // measured/fallback treatment is desktop-only.
-  const imgWrapClass = fluid ? "relative block w-full" : imgBoxStyle ? "relative rounded-3xl overflow-hidden shadow-[var(--shadow-pop)]" : FALLBACK_WRAP;
-  const imgClass = fluid ? "block w-full h-auto" : imgBoxStyle ? "block w-full h-full object-cover" : FALLBACK_IMG;
-  const wrapStyle = fluid ? undefined : imgBoxStyle;
-  const frameClass = fluid
-    ? "relative w-full bg-[var(--muted)] overflow-hidden"
-    : "relative bg-[var(--muted)] overflow-hidden flex items-center justify-center h-[65dvh] md:h-auto md:flex-1";
+  const imgWrapClass = imgBoxStyle ? "relative rounded-3xl overflow-hidden shadow-[var(--shadow-pop)]" : FALLBACK_WRAP;
+  const imgClass = imgBoxStyle ? "block w-full h-full object-cover" : FALLBACK_IMG;
+  const wrapStyle = imgBoxStyle;
+  const frameClass = "relative h-full w-full bg-[var(--muted)] overflow-hidden flex items-center justify-center";
 
   // Tapping any actionable item opens the unified edit menu (rail on desktop, sheet on mobile),
   // passing the item's current staged edit id so Swap/Similar/Adjust supersede it. A detected
@@ -183,16 +187,13 @@ export default function RestyleCanvas({ ws, fluid = false }: { ws: RestyleWorksp
   const pinLabel = ws.pinRequest?.label?.trim() ? `your ${ws.pinRequest.label.trim()}` : "your new item";
 
   return (
-    <div className={fluid ? "w-full" : "h-full w-full md:flex md:flex-col"}>
+    <div className="h-full w-full">
       <div ref={frameRef} className={frameClass}>
         {/* A blurred, darkened cover fill behind a portrait (or otherwise mismatched-aspect)
             photo so the gutters beside the shrink-wrapped sharp image read as an intentional
-            frame, not a broken letterbox. Not needed in fluid mode (no gutters — the image is
-            full-width at its own aspect). */}
-        {!fluid && (
-          /* eslint-disable-next-line @next/next/no-img-element */
-          <img src={displayUrl} alt="" aria-hidden className="absolute inset-0 h-full w-full object-cover blur-2xl brightness-50 scale-110" />
-        )}
+            frame, not a broken letterbox. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={displayUrl} alt="" aria-hidden className="absolute inset-0 h-full w-full object-cover blur-2xl brightness-50 scale-110" />
 
         {!showCompare ? (
           <div className={imgWrapClass} style={wrapStyle}>
@@ -217,18 +218,18 @@ export default function RestyleCanvas({ ws, fluid = false }: { ws: RestyleWorksp
             <img ref={beforeImgRef} src={restyle.original_url} alt="Before" draggable={false}
               className="absolute inset-0 h-full w-full object-cover"
               style={{ clipPath: "inset(0 50% 0 0)" }} />
-            <div ref={dividerRef} className="absolute top-0 bottom-0 w-0.5 bg-white pointer-events-none" style={{ left: "50%" }}>
-              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-8 w-8 rounded-full bg-white border border-[var(--border)] shadow-[var(--shadow-soft)] flex items-center justify-center text-[var(--foreground)]">
+            <div ref={dividerRef} className="absolute top-0 bottom-0 w-0.5 bg-white/70 pointer-events-none" style={{ left: "50%" }}>
+              <div className="glass-surface absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-8 w-8 rounded-full flex items-center justify-center text-white">
                 <ArrowLeftRight className="h-3.5 w-3.5" />
               </div>
             </div>
-            <span className="absolute bottom-3 left-3 text-[10px] px-2 py-1 rounded-full bg-black/60 text-white">Before</span>
-            <span className="absolute bottom-3 right-3 text-[10px] px-2 py-1 rounded-full bg-black/60 text-white">After</span>
+            <span className="glass-surface absolute bottom-3 left-3 text-[10px] px-2 py-1 rounded-full text-white">Before</span>
+            <span className="glass-surface absolute bottom-3 right-3 text-[10px] px-2 py-1 rounded-full text-white">After</span>
           </div>
         )}
 
         {ws.detecting && (
-          <div className="absolute top-3 left-3 flex items-center gap-1.5 rounded-full bg-white/95 border border-[var(--border)] text-[var(--muted-foreground)] text-xs px-3 py-1.5 shadow-[var(--shadow-pop)]">
+          <div className="glass-surface absolute top-3 left-3 flex items-center gap-1.5 rounded-full text-white text-xs px-3 py-1.5">
             <Spinner size="xs" /> Finding your furniture…
           </div>
         )}
@@ -252,14 +253,6 @@ export default function RestyleCanvas({ ws, fluid = false }: { ws: RestyleWorksp
           <ProgressOverlay startedAt={lastStartedAt} expectedSeconds={ws.expectedSeconds} />
         )}
 
-        {/* Was desktop-only ("hidden md:block") — mobile lost the at-a-glance total entirely,
-            even though it fits fine (+Add sits bottom-right, no collision). */}
-        {!viewingOriginal && !generating && !holdingOverlay && !showCompare && ws.productEdits.length > 0 && (
-          <div className="absolute left-3 bottom-3">
-            <ShopSummaryPill edits={ws.productEdits} onClick={() => setCartOpen(true)} />
-          </div>
-        )}
-        <ShopCart ws={ws} open={cartOpen} onClose={() => setCartOpen(false)} />
         <VersionsGallery ws={ws} open={versionsOpen} onClose={() => setVersionsOpen(false)} />
 
         {/* Clean, Gemini-style save toast — appears while the full-size image is being fetched /
@@ -324,30 +317,46 @@ export default function RestyleCanvas({ ws, fluid = false }: { ws: RestyleWorksp
         </div>
 
         {/* Frosted-glass chrome — floats ON the photo, so the room refracts through it (glass
-            variant) rather than opaque white discs sitting on top. */}
+            variant) rather than opaque white discs sitting on top. Compare stays its own glass
+            toggle button (it's a persistent on/off view state, not a one-shot action, so it
+            reads better as a standalone control you can see is "on" rather than buried in a
+            menu). Versions/Share/Download are one-shot actions, consolidated into a single
+            "..." overflow menu instead of three more separate glass circles crowding the corner.
+            The dropdown itself is glass too (`.glass-surface`, same dark-glass token as every
+            other on-photo control) rather than an opaque white card. */}
         <div className="absolute top-3 right-3 z-10 flex items-center gap-3">
-          {/* Versions history — every generated combination, browsable. Only worth showing once
-              there's more than one render to move between. */}
-          {ws.renders.length > 1 && (
-            <IconButton glass onClick={() => setVersionsOpen(true)} aria-label="Versions history">
-              <GalleryVerticalEnd className="h-4 w-4" />
-            </IconButton>
-          )}
           {!viewingOriginal && (
             <IconButton glass onClick={() => setShowCompare((v) => !v)} aria-label="Compare before / after"
               className={showCompare ? "!bg-white/30 text-white" : ""}>
               <Columns2 className="h-4 w-4" />
             </IconButton>
           )}
-          <div className="relative">
-            <IconButton glass onClick={() => setShareOpen((v) => !v)} aria-label="Share link">
-              <Share2 className="h-4 w-4" />
+          <div ref={menuRef} className="relative">
+            <IconButton glass onClick={() => setMenuOpen((v) => !v)} aria-label="More options">
+              <MoreHorizontal className="h-4 w-4" />
             </IconButton>
+            {menuOpen && (
+              <div className="glass-surface absolute top-full right-0 mt-2 w-56 rounded-2xl overflow-hidden divide-y divide-white/15">
+                {/* Versions history — every generated combination, browsable. Only worth showing
+                    once there's more than one render to move between. */}
+                {ws.renders.length > 1 && (
+                  <button type="button" onClick={() => { setMenuOpen(false); setVersionsOpen(true); }}
+                    className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left text-white/85 hover:bg-white/10 hover:text-white transition-colors">
+                    <GalleryVerticalEnd className="h-4 w-4" /> Version history
+                  </button>
+                )}
+                <button type="button" onClick={() => { setMenuOpen(false); setShareOpen(true); }}
+                  className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left text-white/85 hover:bg-white/10 hover:text-white transition-colors">
+                  <Share2 className="h-4 w-4" /> Share link
+                </button>
+                <button type="button" onClick={() => { setMenuOpen(false); ws.downloadImage(); }}
+                  className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left text-white/85 hover:bg-white/10 hover:text-white transition-colors">
+                  <Download className="h-4 w-4" /> Download image
+                </button>
+              </div>
+            )}
             {shareOpen && <ShareMenu url={shareUrl} title={shareTitle} onClose={() => setShareOpen(false)} />}
           </div>
-          <IconButton glass onClick={ws.downloadImage} aria-label="Download image">
-            <Download className="h-4 w-4" />
-          </IconButton>
         </div>
       </div>
 
@@ -358,16 +367,6 @@ export default function RestyleCanvas({ ws, fluid = false }: { ws: RestyleWorksp
           <ShareOptions url={shareUrl} title={shareTitle} onDone={() => setShareOpen(false)} />
         </Sheet>
       </div>
-      {/* Mobile "tap an item" hint — omitted in fluid mode (it would sit between the image and the
-          flush changes sheet and get clipped by the sheet's overlap); the ChangesPanel's own empty
-          state ("Nothing queued yet — tap an item…") already carries the same guidance there.
-          pinRequest is handled by the instruction bar above the photo, so it's omitted then too. */}
-      {!ws.pinRequest && !fluid && (
-        <p className="md:hidden text-[11px] text-[var(--muted-foreground)] text-center py-2 px-3">
-          {viewingOriginal ? "Tap an item to edit it, or add something new"
-            : "Tap an item to edit it, shop it, or add something new"}
-        </p>
-      )}
     </div>
   );
 }

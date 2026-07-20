@@ -146,6 +146,17 @@ h1, h2, h3, h4, h5, h6 {
   box-shadow: var(--glass-highlight);
 }
 
+/* Same vibrancy as .glass-panel (a standalone primary surface needs its opacity, not
+   .glass-card's lighter glass-on-glass fill) but bordered and shadowed on all sides instead of
+   just the top edge — for a CENTERED floating modal (ShopCart) rather than a bottom sheet. */
+.glass-modal {
+  background: var(--glass-panel-fill);
+  -webkit-backdrop-filter: var(--glass-panel-blur);
+  backdrop-filter: var(--glass-panel-blur);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  box-shadow: var(--glass-highlight), 0 20px 60px rgb(0 0 0 / 0.35);
+}
+
 /* Light frosted glass — for chrome that floats over LIGHT app content (the bottom nav over the
    dashboard's image feed), not over a dark photo. Frosted white so dark icons/labels stay legible
    while the content scrolling behind still refracts through. Distinct from `.glass-surface` above,

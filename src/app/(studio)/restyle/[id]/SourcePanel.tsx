@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { Check, ChevronLeft, ChevronRight, Eraser, Replace, ShoppingBag, Sparkles, Wand2 } from "lucide-react";
 import { boxFromPlacement, type RestyleWorkspace } from "./useRestyleWorkspace";
 import { downscaleImage } from "@/lib/image-client";
-import { Button, ConfirmDialog, Input, SegmentedTabs, Spinner, StatusBanner } from "./ui";
+import { Button, ConfirmDialog, GlassSegmented, Input, Spinner, StatusBanner } from "./ui";
 import CroppedThumb from "./CroppedThumb";
 
 type SrcMode = "link" | "photo";
@@ -116,8 +116,8 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
   if (sourcing.mode === "add" && !label) {
     return (
       <div className="space-y-3">
-        <p className="text-sm font-medium">What are you adding?</p>
-        <div className="rounded-2xl border border-[var(--border)] bg-white p-4 space-y-2.5">
+        <p className="text-sm font-medium text-white">What are you adding?</p>
+        <div className="glass-card rounded-2xl p-4 space-y-2.5">
           <Input type="text" value={itemDraft} onChange={(e) => setItemDraft(e.target.value)} autoFocus
             list="restyle-common-items" disabled={normalizing}
             onKeyDown={(e) => { if (e.key === "Enter" && itemDraft.trim()) confirmItemDraft(); }}
@@ -192,21 +192,24 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
     <div className="flex items-center gap-3">
       {stagedEdit?.reference_url ? (
         /* eslint-disable-next-line @next/next/no-img-element */
-        <img src={stagedEdit.reference_url} alt="" className="h-14 w-14 object-cover rounded-xl border border-[var(--border)] bg-[var(--muted)] shrink-0" />
+        <img src={stagedEdit.reference_url} alt="" className="h-14 w-14 object-cover rounded-xl border border-white/20 bg-white/10 shadow-[var(--shadow-soft)] shrink-0" />
       ) : matchedObject && ws.restyle ? (
         <CroppedThumb imageUrl={ws.restyle.original_url} box_2d={matchedObject.box_2d}
-          className="h-14 w-14 rounded-xl overflow-hidden border border-[var(--border)] bg-[var(--muted)] shrink-0" />
+          className="h-14 w-14 rounded-xl overflow-hidden border border-white/20 bg-white/10 shadow-[var(--shadow-soft)] shrink-0" />
       ) : stagedEdit?.placement ? (
         // An "add" sourced by plain description (no reference photo) — once it's actually
         // pictured, crop the real thing out of the current photo instead of showing nothing.
         <CroppedThumb imageUrl={ws.displayUrl} box_2d={boxFromPlacement(stagedEdit.placement)}
-          className="h-14 w-14 rounded-xl overflow-hidden border border-[var(--border)] bg-[var(--muted)] shrink-0" />
+          className="h-14 w-14 rounded-xl overflow-hidden border border-white/20 bg-white/10 shadow-[var(--shadow-soft)] shrink-0" />
       ) : null}
-      <p className="text-sm font-medium capitalize">
-        {sourcing.view === "menu" ? `Editing the ${label}`
-          : sourcing.view === "adjust" ? `Adjusting the ${label}`
-          : sourcing.mode === "swap" ? `Replacing the ${label}`
-          : label ? `Adding ${label}` : "Adding a new piece"}
+      {/* `capitalize` belongs on the item label alone (a single label like "floor plant" reading
+          as "Floor Plant" is fine) — it used to wrap the whole sentence, which title-cased EVERY
+          word ("Editing The Framed Art") instead of just the label. */}
+      <p className="text-base font-semibold tracking-[-0.01em] text-white">
+        {sourcing.view === "menu" ? <>Editing the <span className="capitalize">{label}</span></>
+          : sourcing.view === "adjust" ? <>Adjusting the <span className="capitalize">{label}</span></>
+          : sourcing.mode === "swap" ? <>Replacing the <span className="capitalize">{label}</span></>
+          : label ? <>Adding <span className="capitalize">{label}</span></> : "Adding a new piece"}
       </p>
     </div>
   );
@@ -216,7 +219,7 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
     return (
       <div className="space-y-3">
         {header}
-        <div className="space-y-2">
+        <div className="space-y-2.5">
           <MenuRow icon={Sparkles} title="Swap it" subtitle="Replace with a different product" tone="swap"
             onClick={() => ws.setSourcingView("compose")} />
           <MenuRow icon={ShoppingBag} title="Shop similar items" subtitle="See buyable alternatives to what's there now" tone="shop"
@@ -247,13 +250,13 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
         {header}
         {canBackToMenu && (
           <button type="button" onClick={backToMenu}
-            className="flex items-center gap-1 text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors">
+            className="flex items-center gap-1 text-xs text-white/60 hover:text-white transition-colors">
             <ChevronLeft className="h-3.5 w-3.5" /> Back
           </button>
         )}
         {ws.error && <StatusBanner variant="error">{ws.error}</StatusBanner>}
-        <div className="rounded-2xl border border-[var(--border)] bg-white p-4 space-y-2.5">
-          <p className="text-[11px] text-[var(--muted-foreground)]">
+        <div className="glass-card rounded-2xl p-4 space-y-2.5">
+          <p className="text-[11px] text-white/60">
             Keep the {label} as-is, just change how it&apos;s placed or oriented — e.g. &quot;mount it on the wall&quot;, &quot;move it a bit to the left&quot;, &quot;turn it to face the window&quot;.
           </p>
           <Input type="text" value={refineText} onChange={(e) => setRefineText(e.target.value)} autoFocus
@@ -282,7 +285,7 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
       {header}
       {canBackToMenu && (
         <button type="button" onClick={backToMenu}
-          className="flex items-center gap-1 text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors">
+          className="flex items-center gap-1 text-xs text-white/60 hover:text-white transition-colors">
           <ChevronLeft className="h-3.5 w-3.5" /> Back
         </button>
       )}
@@ -296,11 +299,11 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
       )}
       {ws.error && <StatusBanner variant="error">{ws.error}</StatusBanner>}
 
-      <SegmentedTabs options={tabs} value={srcMode} onChange={setSrcMode} />
+      <GlassSegmented options={tabs} value={srcMode} onChange={setSrcMode} />
 
       {srcMode === "link" && (
-        <div className="rounded-2xl border border-[var(--border)] bg-white p-4 space-y-2">
-          <p className="text-[11px] text-[var(--muted-foreground)]">Preferred — paste a Wayfair, Amazon, Walmart or Home Depot product link.</p>
+        <div className="glass-card rounded-2xl p-4 space-y-2">
+          <p className="text-[11px] text-white/60">Preferred — paste a Wayfair, Amazon, Walmart or Home Depot product link.</p>
           <div className="flex gap-2">
             <Input type="url" value={productUrl} onChange={(e) => setProductUrl(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter" && productUrl.trim()) ws.stageProductLink(productUrl, label); }}
@@ -310,30 +313,30 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
             </Button>
           </div>
           {ws.stagingLink && (
-            <p className="text-[11px] text-[var(--muted-foreground)]">Fetching product details — this can take up to a minute.</p>
+            <p className="text-[11px] text-white/60">Fetching product details — this can take up to a minute.</p>
           )}
           <button type="button" onClick={() => setSrcMode("photo")}
-            className="text-[11px] text-[var(--muted-foreground)] underline hover:text-[var(--foreground)] transition-colors">
+            className="text-[11px] text-white/60 underline hover:text-white transition-colors">
             Can&apos;t find a link? Upload a photo instead →
           </button>
         </div>
       )}
 
       {srcMode === "photo" && (
-        <div className="rounded-2xl border border-[var(--border)] bg-white p-4 space-y-2.5"
+        <div className="glass-card rounded-2xl p-4 space-y-2.5"
           onPaste={(e) => { const f = Array.from(e.clipboardData.files).find((f) => f.type.startsWith("image/")); if (f) pickPending(f); }}>
-          <p className="text-[11px] text-[var(--muted-foreground)]">Upload a photo or screenshot for inspiration — we&apos;ll place it in your room. Buyable options are found for you after you generate.</p>
+          <p className="text-[11px] text-white/60">Upload a photo or screenshot for inspiration — we&apos;ll place it in your room. Buyable options are found for you after you generate.</p>
           <input ref={fileRef} type="file" accept="image/*" className="hidden"
             onChange={(e) => { const f = e.target.files?.[0]; if (f) pickPending(f); e.target.value = ""; }} />
 
           {uploadingPhoto ? (
-            <div className="w-full rounded-2xl border border-[var(--border)] bg-[var(--muted)] py-4 flex items-center justify-center gap-2 text-xs text-[var(--foreground)]">
+            <div className="w-full rounded-2xl border border-white/20 bg-white/10 py-4 flex items-center justify-center gap-2 text-xs text-white">
               <Spinner size="sm" /> Adding your photo to the room…
             </div>
           ) : pendingFile ? (
             <div className="space-y-2">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={pendingPreview ?? ""} alt="Selected" className="w-full max-h-44 object-contain rounded-xl border border-[var(--border)] bg-[var(--muted)]" />
+              <img src={pendingPreview ?? ""} alt="Selected" className="w-full max-h-44 object-contain rounded-xl border border-white/20 bg-white/10" />
               <div className="flex gap-2">
                 <Button variant="primary" className="flex-1" onClick={confirmPending}>Use this photo</Button>
                 <Button variant="outline" onClick={() => { setPendingFile(null); fileRef.current?.click(); }}>Choose different</Button>
@@ -341,7 +344,7 @@ export default function SourcePanel({ ws }: { ws: RestyleWorkspace }) {
             </div>
           ) : (
             <button type="button" onClick={() => fileRef.current?.click()}
-              className="w-full rounded-2xl border border-dashed border-[var(--border)] py-3 text-xs text-[var(--muted-foreground)] hover:border-[var(--foreground)] hover:text-[var(--foreground)] transition-colors flex items-center justify-center gap-2">
+              className="w-full rounded-2xl border border-dashed border-white/25 py-3 text-xs text-white/60 hover:border-white hover:text-white transition-colors flex items-center justify-center gap-2">
               Choose or paste a photo
             </button>
           )}
@@ -374,17 +377,20 @@ function MenuRow({
 }) {
   return (
     <button type="button" onClick={onClick}
-      className="w-full flex items-center gap-3 rounded-2xl border border-[var(--border)] bg-white p-3 text-left hover:border-[var(--foreground)] transition-colors">
+      className="glass-card w-full flex items-center gap-3 rounded-2xl p-3.5 text-left hover:border-white/35 transition-colors">
       <span
-        className={`h-9 w-9 rounded-xl shrink-0 flex items-center justify-center text-white bg-gradient-to-br ${MENU_ROW_TONES[tone]} bg-[length:200%_200%] animate-[icon-gradient-shift_4s_ease-in-out_infinite]`}
+        className={`h-10 w-10 rounded-xl shrink-0 flex items-center justify-center text-white bg-gradient-to-br ${MENU_ROW_TONES[tone]} bg-[length:200%_200%] animate-[icon-gradient-shift_4s_ease-in-out_infinite]`}
       >
-        <Icon className="h-4 w-4" />
+        <Icon className="h-[18px] w-[18px]" />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block text-sm font-medium">{title}</span>
-        <span className="block text-[11px] text-[var(--muted-foreground)] truncate capitalize">{subtitle}</span>
+        <span className="block text-[15px] font-semibold tracking-[-0.01em] text-white">{title}</span>
+        {/* No `capitalize` here — these are full sentences ("Replace with a different
+            product"), and title-casing every word ("Replace With A Different Product") read
+            as broken, not stylized. */}
+        <span className="block text-xs text-white/60 truncate mt-0.5">{subtitle}</span>
       </span>
-      <ChevronRight className="h-4 w-4 text-[var(--muted-foreground)] shrink-0" />
+      <ChevronRight className="h-4 w-4 text-white/50 shrink-0" />
     </button>
   );
 }

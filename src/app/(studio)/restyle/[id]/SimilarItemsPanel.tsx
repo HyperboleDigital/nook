@@ -52,34 +52,34 @@ export default function SimilarItemsPanel({ ws }: { ws: RestyleWorkspace }) {
           opened straight from a rail card has no menu to return to and just uses the X to close. */}
       {sourcing.hasMenu && (
         <button type="button" onClick={() => ws.setSourcingView("menu")}
-          className="flex items-center gap-1 text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors">
+          className="flex items-center gap-1 text-xs text-white/60 hover:text-white transition-colors">
           <ChevronLeft className="h-3.5 w-3.5" /> Back
         </button>
       )}
       <div className="flex items-center gap-3">
         {stagedEdit?.reference_url ? (
           /* eslint-disable-next-line @next/next/no-img-element */
-          <img src={stagedEdit.reference_url} alt="" className="h-14 w-14 object-cover rounded-xl border border-[var(--border)] bg-[var(--muted)] shrink-0" />
+          <img src={stagedEdit.reference_url} alt="" className="h-14 w-14 object-cover rounded-xl border border-white/20 bg-white/10 shrink-0" />
         ) : detected && ws.restyle ? (
           <CroppedThumb imageUrl={ws.restyle.original_url} box_2d={detected.box_2d}
-            className="h-14 w-14 rounded-xl overflow-hidden border border-[var(--border)] bg-[var(--muted)] shrink-0" />
+            className="h-14 w-14 rounded-xl overflow-hidden border border-white/20 bg-white/10 shrink-0" />
         ) : null}
-        <p className="text-xs text-[var(--muted-foreground)]">
-          Recommended based on <span className="font-medium text-[var(--foreground)] capitalize">{stagedEdit?.product_title ?? label}</span>
+        <p className="text-xs text-white/60">
+          Recommended based on <span className="font-medium text-white capitalize">{stagedEdit?.product_title ?? label}</span>
         </p>
       </div>
 
       {loading && (
         <div className="space-y-2">
-          <p className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
-            <Spinner size="xs" className="text-[var(--accent)]" /> Finding similar items — this can take a few seconds…
+          <p className="flex items-center gap-2 text-xs text-white/60">
+            <Spinner size="xs" className="text-white" /> Finding similar items — this can take a few seconds…
           </p>
           <SkeletonProductCard /><SkeletonProductCard /><SkeletonProductCard />
         </div>
       )}
       {search.status === "error" && <StatusBanner variant="error">{search.error}</StatusBanner>}
       {search.status === "ready" && search.results.length === 0 && (
-        <p className="text-xs text-[var(--muted-foreground)]">No similar products found.</p>
+        <p className="text-xs text-white/60">No similar products found.</p>
       )}
       {search.status === "ready" && search.results.map((c, i) => {
         const pickKey = `similar:${key}:${i}`;
@@ -103,12 +103,12 @@ function UpgradeCard() {
   // The whole card is the link (a styled <span> pill inside, not a real <button> — nesting
   // interactive elements in an <a> is invalid HTML).
   return (
-    <a href="/pricing" className="block rounded-2xl border border-dashed border-[var(--border)] bg-[var(--muted)] p-4 text-center hover:border-[var(--accent)] transition-colors">
-      <div className="flex items-center justify-center gap-1.5 text-[var(--foreground)]">
+    <a href="/pricing" className="block rounded-2xl border border-dashed border-white/25 bg-white/5 p-4 text-center hover:border-white/50 transition-colors">
+      <div className="flex items-center justify-center gap-1.5 text-white">
         <Lock className="h-3.5 w-3.5" />
         <span className="text-sm font-semibold">More matches on Starter</span>
       </div>
-      <p className="mt-1 text-xs text-[var(--muted-foreground)]">
+      <p className="mt-1 text-xs text-white/60">
         Free shows one match. Upgrade to compare buyable options across retailers.
       </p>
       <span className="mt-3 inline-flex items-center justify-center rounded-full bg-[var(--accent)] text-[var(--accent-foreground)] text-xs font-semibold px-4 py-2">
@@ -130,28 +130,28 @@ function SimilarCard({
     : 0;
 
   return (
-    <div className="flex gap-3 p-3 rounded-2xl border border-[var(--border)] bg-white shadow-[var(--shadow-soft)]">
+    <div className="glass-card flex gap-3 p-3 rounded-2xl">
       {c.thumbnail ? (
         /* eslint-disable-next-line @next/next/no-img-element */
-        <img src={c.thumbnail} alt="" className="h-16 w-16 object-cover rounded-xl border border-[var(--border)] shrink-0" />
+        <img src={c.thumbnail} alt="" className="h-16 w-16 object-cover rounded-xl border border-white/20 shrink-0" />
       ) : (
-        <div className="h-16 w-16 rounded-xl bg-[var(--muted)] border border-[var(--border)] shrink-0" />
+        <div className="h-16 w-16 rounded-xl bg-white/10 border border-white/20 shrink-0" />
       )}
       <div className="min-w-0 flex-1 space-y-0.5">
         {savingsPct > 0 && (
-          <span className="inline-block rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-semibold px-1.5 py-0.5 mb-0.5">
+          <span className="inline-block rounded-full bg-emerald-400/20 text-emerald-300 border border-emerald-300/30 text-[10px] font-semibold px-1.5 py-0.5 mb-0.5">
             {savingsPct}% cheaper
           </span>
         )}
-        <p className="text-sm font-medium line-clamp-2 leading-snug">{c.title}</p>
-        <p className="text-xs text-[var(--muted-foreground)]">
+        <p className="text-sm font-medium line-clamp-2 leading-snug text-white">{c.title}</p>
+        <p className="text-xs text-white/60">
           {c.retailer}
           {(c.productUrl ?? c.alternates?.[0]?.url) && (
             <> · <a href={c.productUrl ?? c.alternates?.[0]?.url ?? undefined} target="_blank" rel="noopener noreferrer"
-              className="underline hover:text-[var(--foreground)]">Link to product</a></>
+              className="underline hover:text-white">Link to product</a></>
           )}
         </p>
-        {c.price && <p className="text-sm font-bold">{c.price}</p>}
+        {c.price && <p className="text-sm font-bold text-white">{c.price}</p>}
         <div className="flex gap-2 pt-1.5">
           <Button size="sm" variant="accentSoft" disabled={!c.thumbnail || picking || inUse} onClick={onTry} className="flex-1">
             {picking ? <Spinner size="xs" className="text-current" /> : inUse ? <Check className="h-3.5 w-3.5" /> : <Sparkles className="h-3.5 w-3.5" />}

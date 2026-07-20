@@ -6,14 +6,14 @@ import type { RestyleWorkspace } from "./useRestyleWorkspace";
 import { Button, ConfirmDialog, IconButton } from "./ui";
 import StagePicker from "./StagePicker";
 import type { RestyleThemeKey } from "@/lib/restyle-themes";
-import { cn } from "@/lib/utils";
 
 /**
- * Primary Generate action + an overflow menu for secondary actions. `variant="floating"`
- * (desktop, immersive layout) renders as a self-contained rounded pill; `"sticky"` (mobile)
- * spans the bottom of the stacked column as before.
+ * Primary Generate action + an overflow menu for secondary actions — a compact, self-contained
+ * glass pill that floats over the full-bleed room photo, the SAME shape on every breakpoint
+ * (RestyleStudio positions it bottom-center with margin above the edge, never flush against it —
+ * a full-width edge-to-edge bar used to read as glued to the bottom of the screen).
  */
-export default function GenerateBar({ ws, variant = "sticky" }: { ws: RestyleWorkspace; variant?: "sticky" | "floating" }) {
+export default function GenerateBar({ ws }: { ws: RestyleWorkspace }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [emptyRoomConfirmOpen, setEmptyRoomConfirmOpen] = useState(false);
@@ -50,30 +50,25 @@ export default function GenerateBar({ ws, variant = "sticky" }: { ws: RestyleWor
   const upToDate = !ws.generating && !confirming && ws.pendingCount === 0 && ws.renders.length > 0;
 
   return (
-    <div className={cn(
-      "flex flex-col gap-1.5",
-      variant === "floating"
-        ? "rounded-3xl bg-white shadow-[var(--shadow-pop)] border border-[var(--border)] px-2 py-2"
-        : "sticky bottom-0 bg-white border-t border-[var(--border)] px-4 py-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)]",
-    )}>
+    <div className="glass-surface flex flex-col gap-1.5 rounded-3xl px-2 py-2">
       <div className="flex items-center gap-2">
         <div className="relative" ref={menuRef}>
-          <IconButton onClick={() => setMenuOpen((v) => !v)} aria-label="More actions">
+          <IconButton glass onClick={() => setMenuOpen((v) => !v)} aria-label="More actions">
             <MoreHorizontal className="h-4 w-4" />
           </IconButton>
           {menuOpen && (
-            <div className="absolute bottom-full left-0 mb-2 w-56 rounded-2xl border border-[var(--border)] bg-white shadow-[var(--shadow-pop)] overflow-hidden">
+            <div className="glass-surface absolute bottom-full left-0 mb-2 w-56 rounded-2xl overflow-hidden divide-y divide-white/15">
               <button type="button" onClick={emptyRoom}
-                className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left hover:bg-[var(--muted)] transition-colors">
-                <Eraser className="h-4 w-4 text-[var(--muted-foreground)]" /> Empty the room
+                className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left text-white/85 hover:bg-white/10 hover:text-white transition-colors">
+                <Eraser className="h-4 w-4" /> Empty the room
               </button>
               <button type="button" onClick={() => { setMenuOpen(false); setPickerOpen(true); }}
-                className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left hover:bg-[var(--muted)] transition-colors border-t border-[var(--border)]">
-                <Sparkles className="h-4 w-4 text-[var(--muted-foreground)]" /> Stage this room
+                className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left text-white/85 hover:bg-white/10 hover:text-white transition-colors">
+                <Sparkles className="h-4 w-4" /> Stage this room
               </button>
               <button type="button" onClick={startFromOriginal}
-                className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left hover:bg-[var(--muted)] transition-colors border-t border-[var(--border)]">
-                <RotateCcw className="h-4 w-4 text-[var(--muted-foreground)]" /> Start from original
+                className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left text-white/85 hover:bg-white/10 hover:text-white transition-colors">
+                <RotateCcw className="h-4 w-4" /> Start from original
               </button>
             </div>
           )}
@@ -95,7 +90,7 @@ export default function GenerateBar({ ws, variant = "sticky" }: { ws: RestyleWor
         </Button>
       </div>
       {confirming && (
-        <p className="text-[11px] text-[var(--muted-foreground)] text-center px-1">
+        <p className="text-[11px] text-white/70 text-center px-1">
           Fetching product details — this can take up to a minute.
         </p>
       )}

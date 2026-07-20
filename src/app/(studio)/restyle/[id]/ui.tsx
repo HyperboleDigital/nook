@@ -482,13 +482,17 @@ function useBodyScrollLock(active: boolean) {
 }
 
 // ── Sheet ─────────────────────────────────────────────────────────────────────
-// Mobile-only fixed bottom sheet + backdrop. On desktop the caller docks a persistent right
-// column instead (see RestyleStudio) — the studio's right rail is always present there
-// (defaults to "Shop this look"), so a modal overlay doesn't fit; SheetChrome is exported so
-// that docked column can reuse the same title-bar + close-button styling.
+// Fixed bottom sheet + backdrop. Mobile-only by default (desktop callers render something else
+// alongside it). `glass` turns it into the studio's frosted overlay-over-the-photo treatment
+// (`.glass-panel`, white text) AND enables it on desktop too — as an inset floating card
+// (bottom-left) rather than a full-width bottom sheet, since the immersive studio has no docked
+// column anymore (see RestyleStudio: "Room Changes" lives entirely behind this glass overlay,
+// opened by a trigger pill, on BOTH breakpoints). Non-glass callers (e.g. the mobile-only Share
+// sheet) are unaffected — same opaque `bg-[var(--card)]` sheet as before, `md:hidden` still
+// applies. SheetChrome is exported so other surfaces can reuse the same title-bar/close styling.
 export function Sheet({
-  open, onClose, title, children,
-}: { open: boolean; onClose: () => void; title?: string; children: ReactNode }) {
+  open, onClose, title, children, glass = false,
+}: { open: boolean; onClose: () => void; title?: string; children: ReactNode; glass?: boolean }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ startY: number; startTime: number } | null>(null);
 
@@ -530,20 +534,25 @@ export function Sheet({
 
   if (!open) return null;
   return (
-    <div className="md:hidden">
-      <div className="fixed inset-0 z-40 bg-black/40" onClick={onClose} />
+    <div className={glass ? undefined : "md:hidden"}>
+      <div className={cn("fixed inset-0 z-40", glass ? "bg-black/25" : "bg-black/40")} onClick={onClose} />
       <div
         ref={panelRef}
-        className="fixed inset-x-0 bottom-0 z-50 max-h-[85dvh] flex flex-col rounded-t-3xl border-t border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow-pop)] pb-[env(safe-area-inset-bottom)] animate-[sheet-up_200ms_ease-out]"
+        className={cn(
+          "fixed inset-x-0 bottom-0 z-50 max-h-[85dvh] flex flex-col rounded-t-3xl pb-[env(safe-area-inset-bottom)] animate-[sheet-up_200ms_ease-out]",
+          glass
+            ? "glass-panel text-white md:inset-x-auto md:left-4 md:bottom-4 md:w-[400px] md:max-h-[min(70dvh,640px)] md:rounded-3xl md:pb-4"
+            : "border-t border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow-pop)]",
+        )}
       >
         <div
-          className="flex justify-center pt-1.5 shrink-0 touch-none cursor-grab active:cursor-grabbing"
+          className={cn("flex justify-center pt-1.5 shrink-0 touch-none cursor-grab active:cursor-grabbing", glass && "md:hidden")}
           onPointerDown={onDragStart}
           onPointerMove={onDragMove}
           onPointerUp={onDragEnd}
           onPointerCancel={onDragEnd}
         >
-          <span className="h-1 w-10 rounded-full bg-[var(--border)]" />
+          <span className={cn("h-1 w-10 rounded-full", glass ? "bg-white/40" : "bg-[var(--border)]")} />
         </div>
         <div
           onPointerDown={onDragStart}
@@ -551,19 +560,25 @@ export function Sheet({
           onPointerUp={onDragEnd}
           onPointerCancel={onDragEnd}
         >
-          <SheetChrome title={title} onClose={onClose} />
+          <SheetChrome title={title} onClose={onClose} glass={glass} />
         </div>
-        <div className="overflow-y-auto px-4 pb-4">{children}</div>
+        <div className="overflow-y-auto px-4 pt-3 pb-4">{children}</div>
       </div>
     </div>
   );
 }
 
-export function SheetChrome({ title, onClose }: { title?: string; onClose: () => void }) {
+export function SheetChrome({ title, onClose, glass }: { title?: string; onClose: () => void; glass?: boolean }) {
   return (
-    <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)] shrink-0">
-      {title ? <h3 className="text-sm font-semibold tracking-tight">{title}</h3> : <span />}
-      <IconButton onClick={onClose} aria-label="Close" className="h-7 w-7">
+    <div className={cn("flex items-center justify-between px-4 py-3 shrink-0", glass ? "border-b border-white/15" : "border-b border-[var(--border)]")}>
+      {title ? <h3 className={cn("text-sm font-semibold tracking-tight", glass && "text-white")}>{title}</h3> : <span />}
+      {/* Sheet wraps this whole chrome row in drag-to-dismiss pointer handlers (for the
+          drag-handle above it). Without stopping propagation here, a tap starting on this button
+          bubbles to that wrapper's onPointerDown, which calls setPointerCapture — that redirects
+          the pointer's subsequent click to the capturing wrapper instead of this button, so
+          onClick silently never fires. Confirmed empirically: a native element.click() worked,
+          a real pointer-driven click did not, until this stopPropagation was added. */}
+      <IconButton glass={glass} onClick={onClose} onPointerDown={(e) => e.stopPropagation()} aria-label="Close" className="h-7 w-7">
         <X className="h-4 w-4" />
       </IconButton>
     </div>
@@ -577,8 +592,8 @@ export function SheetChrome({ title, onClose }: { title?: string; onClose: () =>
 // permanent rail, a centered dialog is the right shape on desktop too. Reuses `SheetChrome` for
 // the header/close button so there's no second chrome style to maintain.
 export function Modal({
-  open, onClose, title, children, widthClassName,
-}: { open: boolean; onClose: () => void; title?: string; children: ReactNode; widthClassName?: string }) {
+  open, onClose, title, children, widthClassName, glass,
+}: { open: boolean; onClose: () => void; title?: string; children: ReactNode; widthClassName?: string; glass?: boolean }) {
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -592,11 +607,12 @@ export function Modal({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="fixed inset-0 bg-black/40" onClick={onClose} />
       <div className={cn(
-        "relative z-10 w-full max-h-[85vh] flex flex-col rounded-3xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow-pop)]",
+        "relative z-10 w-full max-h-[85vh] flex flex-col rounded-3xl",
+        glass ? "glass-modal text-white" : "border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow-pop)]",
         widthClassName ?? "max-w-md",
       )}>
-        <SheetChrome title={title} onClose={onClose} />
-        <div className="overflow-y-auto px-4 pb-4">{children}</div>
+        <SheetChrome title={title} onClose={onClose} glass={glass} />
+        <div className="overflow-y-auto px-4 pt-3 pb-4">{children}</div>
       </div>
     </div>
   );

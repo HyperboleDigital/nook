@@ -3,13 +3,17 @@
 import { useRef } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
-import { House, ShoppingBag, Plus } from "lucide-react";
+import { useClerk } from "@clerk/nextjs";
+import { House, ShoppingBag, CircleUserRound, Plus } from "lucide-react";
 import { stashCapturedFile } from "./restyle/new/capture-handoff";
 
 const TABS = [
   { href: "/dashboard", label: "Rooms", Icon: House },
   { href: "/shop", label: "Shop", Icon: ShoppingBag },
 ] as const;
+// Not "Favorites" yet — there's no favoriting feature anywhere in the app (no DB column, no way
+// to favorite a room/product). Adding the tab without something real behind it would just be a
+// dead end; build that as its own feature before it earns a nav slot.
 
 /**
  * Mobile-only bottom nav, the sole nav surface on phones (the hamburger drawer was removed —
@@ -39,6 +43,7 @@ const TABS = [
 export default function AppTabBar() {
   const pathname = usePathname();
   const router = useRouter();
+  const { openUserProfile } = useClerk();
   const inputRef = useRef<HTMLInputElement>(null);
 
   const isActive = (href: string) =>
@@ -62,6 +67,20 @@ export default function AppTabBar() {
     >
       <div className="glass-light pointer-events-auto mx-auto flex max-w-sm items-stretch rounded-[26px] px-1.5 h-16">
         <TabLink href={TABS[0].href} label={TABS[0].label} Icon={TABS[0].Icon} active={isActive(TABS[0].href)} />
+
+        {/* Profile — opens Clerk's hosted account UI directly (openUserProfile) rather than a
+            route, since there's no dedicated /account page; same tab shape/sizing as the real
+            Link tabs either side of it so all three read as one consistent set. */}
+        <button
+          type="button"
+          onClick={() => openUserProfile()}
+          className="flex-1 flex flex-col items-center justify-center gap-0.5 min-w-0"
+        >
+          <span className="flex items-center justify-center h-8 w-8">
+            <CircleUserRound className="h-5 w-5 text-[var(--foreground)]" />
+          </span>
+          <span className="text-[11px] text-[var(--foreground)]">Profile</span>
+        </button>
 
         <div className="flex-1 flex items-center justify-center">
           <button
