@@ -2,8 +2,18 @@
 
 import { Fragment } from "react";
 import { Loader2 } from "lucide-react";
-import type { CanvasHotspot } from "./useRestyleWorkspace";
+import type { CanvasHotspot, ChangeFilter } from "./useRestyleWorkspace";
 import { actionIcon, anchorFor, declutter, HotspotLabel, HotspotMarker, HotspotRegion, toBox } from "./hotspot-visuals";
+import { cn } from "@/lib/utils";
+
+// Which marker state a Changes-tab chip filter "lights up" on the photo (see ChangesPanel). "off"
+// has no distinct canvas marker (an off change reverts to the original item), so it matches nothing
+// — that filter simply dims the changed markers, which is the honest signal.
+function matchesFilter(state: CanvasHotspot["state"], filter: ChangeFilter): boolean {
+  if (filter === "pending") return state === "queued";
+  if (filter === "in-room") return state === "placed";
+  return false; // "off" (and any future value): nothing on the canvas represents it
+}
 
 /** The small at-rest marker per state, so the canvas shows WHERE items are without 14 always-on
  *  boxes cluttering it. The full-item highlight (below) is the forgiving tap target + hover cue. */
@@ -51,16 +61,18 @@ function StateMarker({
  * (now on a stronger Gemini tier — see gemini.ts GEMINI_DETECT_MODEL).
  */
 export default function ObjectHotspots({
-  hotspots, activeLabel, onSelect,
+  hotspots, activeLabel, filter = "all", onSelect,
 }: {
   hotspots: CanvasHotspot[];
   activeLabel?: string;
+  filter?: ChangeFilter;
   onSelect: (hotspot: CanvasHotspot, cx: number, cy: number) => void;
 }) {
   const boxes = hotspots.map((h) => toBox(h.box_2d));
   const markers = declutter(boxes.map((b) => anchorFor(b, boxes)));
   // Largest-area first → smallest painted last → smallest on top for both stacking and taps.
   const order = hotspots.map((_, i) => i).sort((a, b) => boxes[b].area - boxes[a].area);
+  const filtering = filter !== "all";
 
   return (
     <div className="absolute inset-0 pointer-events-none">
@@ -69,6 +81,10 @@ export default function ObjectHotspots({
         const b = boxes[i];
         const m = markers[i];
         const isActive = activeLabel?.toLowerCase() === h.label.toLowerCase();
+        // Chip filter: dim markers that don't match, and reveal the matching ones' labels so
+        // tapping a chip "lights up" only those items on the photo.
+        const matches = filtering && matchesFilter(h.state, filter);
+        const dimmed = filtering && !matches;
         const ariaLabel =
           h.state === "confirming" ? `${h.label} (confirming…)`
           : h.state === "queued" ? `${h.label} (queued for a change)`
@@ -82,13 +98,16 @@ export default function ObjectHotspots({
                 The span is centered on the anchor and pointer-events-none so it never blocks a tap;
                 the label flips to the left for markers near the right edge so it doesn't clip. */}
             <span
-              className="absolute pointer-events-none -translate-x-1/2 -translate-y-1/2 flex items-center justify-center"
+              className={cn(
+                "absolute pointer-events-none -translate-x-1/2 -translate-y-1/2 flex items-center justify-center transition-opacity",
+                dimmed && "opacity-25",
+              )}
               style={{ left: `${m.x}%`, top: `${m.y}%` }}
             >
               <StateMarker state={h.state} delay={i * 150} edit={h.edit} />
-              {/* Name label appears only for the tapped/active item — not always-on for every
-                  marker (that crowded a busy room). */}
-              {isActive && <HotspotLabel text={h.label} side={m.x > 55 ? "left" : "right"} />}
+              {/* Name label appears for the tapped/active item, or every matching item under a chip
+                  filter — not always-on for every marker (that crowded a busy room). */}
+              {(matches || isActive) && <HotspotLabel text={h.label} side={m.x > 55 ? "left" : "right"} />}
             </span>
           </Fragment>
         );

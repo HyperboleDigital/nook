@@ -49,6 +49,8 @@ export type CanvasHotspot = {
 // (active, inRender) — see the derivation below for exactly what each means.
 export type RailStatus = "in-room" | "pending" | "turning-off" | "off";
 export type RailItem = { edit: RestyleEdit; status: RailStatus };
+// Canvas-first chip filter for the Changes tab (see ChangesPanel + ObjectHotspots).
+export type ChangeFilter = "all" | "pending" | "in-room" | "off";
 
 // A fetch used to hang for the full length of a slow/failing Unwrangle or SerpApi call (up to
 // the route's own maxDuration) with the optimistic edit sitting there the whole time and NO
@@ -123,6 +125,11 @@ export function useRestyleWorkspace(id: string) {
   // attached to the edit at staging time in stagePhoto/stageProductLink/pickCandidate below,
   // then cleared. Null if the user skipped the location step or hasn't reached it yet.
   const [pendingAddPlacement, setPendingAddPlacement] = useState<{ x: number; y: number; note?: string | null } | null>(null);
+
+  // Which slice of changes the "Changes" tab is filtered to (canvas-first chips). Shared here (not
+  // local to ChangesPanel) because the canvas reads it too: a non-"all" filter dims the markers
+  // that don't match, so tapping a chip "lights up" only the matching items on the photo.
+  const [changeFilter, setChangeFilter] = useState<ChangeFilter>("all");
 
   // Poll an in-flight generate (just kicked off, or resumed from a reload) until the server
   // clears generating_started_at. The render AND the deferred inspo product search both run
@@ -979,6 +986,7 @@ export function useRestyleWorkspace(id: string) {
     titleDraft, setTitleDraft, saveTitle,
     sourcing, openSourcing, openSimilar, closeSourcing, setSourcingLabel, setSourcingView,
     pinRequest, requestPin, cancelPin, setPlacement, startAddFlow, placeAddLocation, skipAddLocation, cancelAddFlow,
+    changeFilter, setChangeFilter,
     searches, runVisualSearchByUrl, runTextSearch, pickCandidate, pickingKey,
     stagePhoto, stageProductLink, stagingLink, stageRemove, stageRefine,
     // handlers

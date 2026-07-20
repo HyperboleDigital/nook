@@ -199,7 +199,7 @@ export default function RestyleCanvas({ ws, fluid = false }: { ws: RestyleWorksp
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={displayUrl} alt={restyle.title ?? "Your room"} className={imgClass} onLoad={onImgLoad} />
             {ws.canvasHotspots.length > 0 && !ws.pinRequest && (
-              <ObjectHotspots hotspots={ws.canvasHotspots} activeLabel={ws.sourcing?.label} onSelect={handleTap} />
+              <ObjectHotspots hotspots={ws.canvasHotspots} activeLabel={ws.sourcing?.label} filter={ws.changeFilter} onSelect={handleTap} />
             )}
             {ws.pinRequest && (
               <PinPlacementLayer label={ws.pinRequest.label}
