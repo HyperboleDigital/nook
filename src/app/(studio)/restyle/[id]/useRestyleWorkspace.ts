@@ -549,6 +549,11 @@ export function useRestyleWorkspace(id: string) {
       placement: null,
     };
     updateEdits([...prevEdits.filter((e) => e.id !== replaceEditId), optimisticEdit]);
+    // Close the sheet immediately — the swap is already queued (the optimistic edit shows on the
+    // canvas + in the Changes list this instant), so keeping the panel open on a laggy/ambiguous
+    // "In use" state just confused people. `setSourcing(null)` (not closeSourcing) so a captured
+    // add-placement survives for finalizeAddPlacement below. A toast confirms once the server lands.
+    setSourcing(null);
     setPickingKey(key); setError(null);
     try {
       const body: Record<string, unknown> = {
@@ -563,9 +568,7 @@ export function useRestyleWorkspace(id: string) {
       const data = await r.json();
       if (!r.ok) throw new Error(data.error ?? "Couldn't fetch that product");
       updateEdits(data.edits, data.current_url);
-      setSourcing((s) => s && s.label === label
-        ? { ...s, stagedEditId: data.added.id, lastStaged: { title: data.added.target_label, retailer: data.added.retailer } }
-        : s);
+      showNotice("Added to your changes — Generate to see it");
       if (data.added.kind === "add") finalizeAddPlacement(data.added);
     } catch (err) {
       updateEdits(prevEdits); // roll back the optimistic edit
@@ -803,6 +806,13 @@ export function useRestyleWorkspace(id: string) {
   // share a file — that's the only real "save to your phone" from mobile Safari. Desktop/Android
   // keep the download link. A `downloadToast` drives the little "Downloading full size…" pill.
   const [downloadToast, setDownloadToast] = useState<string | null>(null);
+  // A short-lived confirmation pill on the canvas — e.g. after picking a product, so closing the
+  // sourcing sheet still leaves a clear "it worked" signal. Auto-clears; a newer notice wins.
+  const [notice, setNotice] = useState<string | null>(null);
+  const showNotice = (msg: string) => {
+    setNotice(msg);
+    setTimeout(() => setNotice((n) => (n === msg ? null : n)), 2600);
+  };
   const downloadImage = async () => {
     const url = restyle?.current_url; // always the active generation — one image, no version nav
     if (!url) return;
@@ -990,7 +1000,7 @@ export function useRestyleWorkspace(id: string) {
     searches, runVisualSearchByUrl, runTextSearch, pickCandidate, pickingKey,
     stagePhoto, stageProductLink, stagingLink, stageRemove, stageRefine,
     // handlers
-    addEdit, toggle, deactivateAll, remove, historyFor, restoreEdit, restoreRender, addCustomItem, removeCustomItem, generate, emptyRoom, stageRoom, downloadImage, downloadToast,
+    addEdit, toggle, deactivateAll, remove, historyFor, restoreEdit, restoreRender, addCustomItem, removeCustomItem, generate, emptyRoom, stageRoom, downloadImage, downloadToast, notice,
     // derived
     edits, activeEdits, stagedItems, displayUrl, viewingOriginal, canGenerate, pendingCount, confirmingCount, atMaxCustom, productEdits, railEdits,
     canvasHotspots,

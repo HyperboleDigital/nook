@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Columns2, Download, Pencil, Plus, Share2, ArrowLeftRight, GalleryVerticalEnd } from "lucide-react";
+import { ArrowLeft, Check, Columns2, Download, Pencil, Plus, Share2, ArrowLeftRight, GalleryVerticalEnd } from "lucide-react";
 import type { CSSProperties } from "react";
 import type { CanvasHotspot, RestyleWorkspace } from "./useRestyleWorkspace";
 import { IconButton, ProgressOverlay, Sheet, ShopSummaryPill, Spinner } from "./ui";
@@ -269,6 +269,18 @@ export default function RestyleCanvas({ ws, fluid = false }: { ws: RestyleWorksp
             <div className="inline-flex items-center gap-2 rounded-full bg-[var(--foreground)] text-white px-4 py-2 text-xs shadow-[var(--shadow-pop)]">
               <Spinner size="xs" className="text-white" />
               {ws.downloadToast}
+            </div>
+          </div>
+        )}
+
+        {/* Confirmation pill — e.g. after picking a product, the sourcing sheet closes and this
+            confirms the change queued (accent so it reads as a success, distinct from the neutral
+            download toast). */}
+        {ws.notice && !ws.downloadToast && (
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 animate-[fade-in_0.2s_ease-out] max-w-[90%]">
+            <div className="inline-flex items-center gap-2 rounded-full bg-[var(--accent)] text-[var(--accent-foreground)] px-4 py-2 text-xs font-medium shadow-[var(--shadow-pop)]">
+              <Check className="h-3.5 w-3.5" />
+              <span className="truncate">{ws.notice}</span>
             </div>
           </div>
         )}

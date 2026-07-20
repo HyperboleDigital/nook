@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { Sparkles, ShoppingCart, ChevronLeft, Lock } from "lucide-react";
+import { Check, Sparkles, ShoppingCart, ChevronLeft, Lock } from "lucide-react";
 import type { RestyleWorkspace } from "./useRestyleWorkspace";
 import type { ShoppingResult } from "@/lib/shopping-search";
 import { Button, SkeletonProductCard, Spinner, StatusBanner, parsePrice } from "./ui";
@@ -153,9 +153,9 @@ function SimilarCard({
         </p>
         {c.price && <p className="text-sm font-bold">{c.price}</p>}
         <div className="flex gap-2 pt-1.5">
-          <Button size="sm" variant={inUse ? "subtle" : "accentSoft"} disabled={!c.thumbnail || picking || inUse} onClick={onTry} className="flex-1">
-            {picking ? <Spinner size="xs" className="text-current" /> : <Sparkles className="h-3.5 w-3.5" />}
-            {inUse ? "In use" : picking ? "Trying…" : "Try on photo"}
+          <Button size="sm" variant="accentSoft" disabled={!c.thumbnail || picking || inUse} onClick={onTry} className="flex-1">
+            {picking ? <Spinner size="xs" className="text-current" /> : inUse ? <Check className="h-3.5 w-3.5" /> : <Sparkles className="h-3.5 w-3.5" />}
+            {inUse ? "In your room" : picking ? "Adding…" : "Try on photo"}
           </Button>
           {(c.productUrl ?? c.alternates?.[0]?.url) && (
             <a href={c.productUrl ?? c.alternates?.[0]?.url ?? undefined} target="_blank" rel="noopener noreferrer">
