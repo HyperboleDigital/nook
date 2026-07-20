@@ -1,259 +1,258 @@
 "use client";
 
-import { Fragment, useEffect, useRef, useState } from "react";
-import type { CSSProperties } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
-import { ExternalLink, Sparkles, ShoppingBag, X } from "lucide-react";
-import { Button, ProductCard, storeName } from "@/app/(studio)/restyle/[id]/ui";
-import { actionIcon, anchorFor, declutter, HotspotLabel, HotspotMarker, HotspotRegion, toBox } from "@/app/(studio)/restyle/[id]/hotspot-visuals";
+import { ArrowLeftRight, Eraser, ExternalLink, Plus, ShoppingBag, Sparkles } from "lucide-react";
+import { Button, storeName } from "@/app/(studio)/restyle/[id]/ui";
+import { actionIcon, anchorFor, declutter, HotspotLabel, HotspotMarker, toBox } from "@/app/(studio)/restyle/[id]/hotspot-visuals";
+import Wordmark from "@/components/Wordmark";
 import type { DetectedObject, RestyleEdit } from "@/types";
 
 export type ShareHotspot = { label: string; box_2d: DetectedObject["box_2d"]; edit: RestyleEdit };
 
 const parsePrice = (p: string | null) => { const n = Number(String(p ?? "").replace(/[^0-9.]/g, "")); return Number.isFinite(n) ? n : 0; };
 
+type Tone = "swap" | "add" | "remove";
+const TONE: Record<Tone, { verb: string; cls: string }> = {
+  swap: { verb: "Swapped", cls: "bg-violet-50 text-violet-700 border-violet-200" },
+  add: { verb: "Added", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+  remove: { verb: "Removed", cls: "bg-red-50 text-red-700 border-red-200" },
+};
+function toneOf(e: RestyleEdit): Tone {
+  return e.kind === "remove" ? "remove" : e.kind === "add" ? "add" : "swap";
+}
+function ChangeIcon({ e, className }: { e: RestyleEdit; className: string }) {
+  if (e.kind === "remove") return <Eraser className={className} />;
+  if (e.kind === "add") return <Plus className={className} />;
+  return <ArrowLeftRight className={className} />;
+}
+
 /**
- * Full-viewport, read-only mirror of the editor's immersive canvas (see `(studio)/restyle/[id]/
- * RestyleCanvas.tsx` for the original) — same measured-pixel-box technique for shrink-wrapping a
- * portrait photo without letterboxing, same highlighted-region hotspots (`HotspotRegion`/
- * `HotspotMarker`/`actionIcon`, shared with the studio's `ObjectHotspots.tsx` via
- * `hotspot-visuals.tsx` so the two can't visually drift apart), but no edit actions: a tap just
- * opens an info/Buy popover, there's no Show similar / toggle / sourcing. `hotspots` is empty
- * whenever nothing has ever been generated (current_url === original_url — see page.tsx), so the
- * "never show placed UI on the unedited photo" rule holds here too.
+ * Public, read-only share view — a swipeable CARD WALKTHROUGH (the "story" direction), not the
+ * editor's live canvas. The client opens a guided sequence: the room BEFORE → the room AFTER (with
+ * markers showing what moved) → one card per change (swapped / added / removed, with a Buy link
+ * when the piece is a real product) → a final "Shop this look" card. `hotspots` is empty whenever
+ * nothing has been generated yet (current_url === original_url — see page.tsx), so the after card
+ * shows no markers on an unedited photo. The before photo (`originalUrl`) is finally shown here —
+ * the previous share page never had it.
  */
 export default function ShareCanvas({
-  imageUrl, width, height, title, hotspots, edits,
+  imageUrl, originalUrl, title, hotspots, edits,
 }: {
   imageUrl: string;
+  originalUrl: string;
   width: number | null;
   height: number | null;
   title: string | null;
   hotspots: ShareHotspot[];
   edits: RestyleEdit[];
 }) {
-  const [openHotspot, setOpenHotspot] = useState<{ label: string; cx: number; cy: number; edit: RestyleEdit } | null>(null);
-  const frameRef = useRef<HTMLDivElement>(null);
-  const [isDesktop, setIsDesktop] = useState(false);
-  const [frameSize, setFrameSize] = useState({ w: 0, h: 0 });
-  // Measured directly off the rendered <img> — more robust than trusting the `width`/`height`
-  // props alone (see RestyleCanvas.tsx's identical comment for why).
-  const [naturalSize, setNaturalSize] = useState<{ w: number; h: number } | null>(null);
-  const onImgLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
-    const t = e.currentTarget;
-    if (t.naturalWidth && t.naturalHeight) setNaturalSize({ w: t.naturalWidth, h: t.naturalHeight });
-  };
-
-  useEffect(() => {
-    const mq = window.matchMedia("(min-width: 768px)");
-    const update = () => setIsDesktop(mq.matches);
-    update();
-    mq.addEventListener("change", update);
-    return () => mq.removeEventListener("change", update);
-  }, []);
-  useEffect(() => {
-    const el = frameRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver((entries) => {
-      const { width: w, height: h } = entries[0].contentRect;
-      setFrameSize({ w, h });
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
-  const natW = naturalSize?.w || width || 0;
-  const natH = naturalSize?.h || height || 0;
-  let imgBoxStyle: CSSProperties | undefined;
-  if (isDesktop && natW && natH && frameSize.w && frameSize.h) {
-    const scale = Math.min(frameSize.w / natW, frameSize.h / natH);
-    const w = natW * scale, h = natH * scale;
-    imgBoxStyle = { position: "absolute", left: (frameSize.w - w) / 2, top: (frameSize.h - h) / 2, width: w, height: h };
-  }
-  const imgWrapClass = imgBoxStyle
-    ? "relative rounded-3xl overflow-hidden shadow-[var(--shadow-pop)]"
-    : "relative block w-full rounded-3xl overflow-hidden shadow-[var(--shadow-pop)]";
-  const imgClass = imgBoxStyle ? "block w-full h-full object-cover" : "block w-full h-auto max-h-[85dvh] object-contain";
-
-  // "Shop this look" is deliberately product-only — a real, buyable item with a resolved
-  // buy_url. A swap/add sourced from a photo or description with nothing resolved yet, or a
-  // removal, is a real change to the room (it still gets a hotspot on the photo — see
-  // renderHotspots below) but isn't something to shop, so it doesn't belong in this list. This
-  // was a deliberate product decision, not an oversight — don't re-add a catch-all "everything
-  // else" section here without checking with the user first.
+  const roomName = title?.trim() || "This room";
+  const changes = edits.filter(
+    (e) => (e.kind === "item" || e.kind === "add" || e.kind === "remove") && e.target_label,
+  );
   const products = edits.filter((e) => e.buy_url);
   const total = products.reduce((s, e) => s + parsePrice(e.product_price), 0);
   const priced = products.filter((e) => e.product_price).length;
+  const hasRender = imageUrl !== originalUrl;
 
-  // With nothing shoppable yet, a "Shop this look" heading over an empty state reads as a
-  // broken promise — the panel led with a CTA nobody could act on. Swap the whole panel for a
-  // real call-to-action instead: no "Shop this look" label at all when there's nothing to shop.
-  const shopPanel = products.length > 0 ? (
-    <div className="bg-[var(--card)] p-4 space-y-3">
-      <div className="flex items-center gap-2">
-        <ShoppingBag className="h-4 w-4 text-[var(--foreground)]" />
-        <p className="text-sm font-semibold">Shop this look</p>
-      </div>
-      <p className="text-[11px] text-[var(--muted-foreground)]">
-        {products.length} item{products.length === 1 ? "" : "s"}
-        {priced > 0 && <> · from <span className="font-semibold text-[var(--foreground)]">${total.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span></>}
-      </p>
-      <div className="space-y-2">
-        {products.map((e) => (
-          <ProductCard key={e.id} image={e.reference_url} title={e.product_title ?? e.target_label ?? "Item"}
-            retailer={storeName(e.buy_url)} price={e.product_price} viewUrl={e.buy_url}>
-            {e.buy_url && (
-              <a href={e.buy_url} target="_blank" rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-[11px] text-[var(--accent)] hover:underline mt-1">
-                View on {storeName(e.buy_url)} <ExternalLink className="h-3 w-3" />
-              </a>
-            )}
-          </ProductCard>
-        ))}
-      </div>
-    </div>
-  ) : (
-    <div className="bg-[var(--card)] p-6 text-center space-y-3">
-      <div className="h-12 w-12 rounded-full bg-[var(--accent-soft)] flex items-center justify-center mx-auto">
-        <Sparkles className="h-5 w-5 text-[var(--accent-soft-foreground)]" />
-      </div>
-      <div className="space-y-1">
-        <p className="text-sm font-semibold">Like what you see?</p>
-        <p className="text-xs text-[var(--muted-foreground)]">
-          Upload a photo of your own room and get a design like this in minutes.
-        </p>
-      </div>
-      <Link href="/restyle/new">
-        <Button variant="primary" className="w-full">Try this design →</Button>
-      </Link>
-      {/* "Try this design" links to a blank /restyle/new — it doesn't actually clone THIS room's
-          specific edits onto yours, so it reads as "try this experience," not "recreate this
-          exact look." This line makes that explicit: it's a fresh start on the viewer's OWN
-          room, not a preset applied to it. */}
-      <p className="text-[11px] text-[var(--muted-foreground)]">
-        Start your own room restyle — completely from scratch.
-      </p>
-    </div>
-  );
-
-  const renderHotspots = () => {
-    const boxes = hotspots.map((h) => toBox(h.box_2d));
-    const markers = declutter(boxes.map((b) => anchorFor(b, boxes)));
-    const order = hotspots.map((_, i) => i).sort((a, b) => boxes[b].area - boxes[a].area);
-    return order.map((i) => {
-      const h = hotspots[i];
-      const b = boxes[i];
-      const m = markers[i];
-      const isActive = openHotspot?.label.toLowerCase() === h.label.toLowerCase();
-      return (
-        <Fragment key={`${h.label}-${i}`}>
-          <HotspotRegion box={b} label={h.label}
-            ariaLabel={`${h.label} (${h.edit.buy_url ? "shop this" : "added"})`}
-            onClick={() => setOpenHotspot({ label: h.label, cx: (b.x0 + b.x1) / 2, cy: (b.y0 + b.y1) / 2, edit: h.edit })} />
-          <span className="absolute pointer-events-none -translate-x-1/2 -translate-y-1/2 flex items-center justify-center"
-            style={{ left: `${m.x}%`, top: `${m.y}%` }}>
-            <HotspotMarker bg="bg-[var(--accent)]/75" icon={actionIcon(h.edit, "h-3.5 w-3.5 text-white")} />
-            {isActive && <HotspotLabel text={h.label} side={m.x > 55 ? "left" : "right"} />}
-          </span>
-        </Fragment>
-      );
-    });
+  // Active-dot tracking for the swipe indicator — index from scroll position (cheap, on scroll).
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [active, setActive] = useState(0);
+  // before + after + one per change + shop-all (the after card only exists once there's a render).
+  const stepCount = (hasRender ? 2 : 1) + changes.length + 1;
+  const onScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const stride = el.clientWidth * 0.9;
+    setActive(Math.max(0, Math.min(stepCount - 1, Math.round(el.scrollLeft / stride))));
   };
 
-  const popover = (widthClass: string, thumbClass: string, halfWidthPx: number) => openHotspot && (
-    <div className={`absolute z-10 ${widthClass} rounded-2xl border border-[var(--border)] bg-white shadow-[var(--shadow-pop)]`}
-      style={{
-        left: `clamp(${halfWidthPx}px, ${openHotspot.cx}%, calc(100% - ${halfWidthPx}px))`,
-        top: openHotspot.cy <= 50 ? `${Math.min(openHotspot.cy + 5, 90)}%` : undefined,
-        bottom: openHotspot.cy > 50 ? `${Math.min(100 - openHotspot.cy + 5, 90)}%` : undefined,
-        transform: "translateX(-50%)",
-      }}>
-      <div className="flex items-start gap-3 p-3">
-        {openHotspot.edit.reference_url ? (
-          /* eslint-disable-next-line @next/next/no-img-element */
-          <img src={openHotspot.edit.reference_url} alt="" className={`${thumbClass} object-cover rounded-xl border border-[var(--border)] shrink-0`} />
-        ) : (
-          <span className={`${thumbClass} rounded-xl bg-[var(--muted)] border border-[var(--border)] shrink-0 flex items-center justify-center text-[var(--muted-foreground)]`}>
-            {actionIcon(openHotspot.edit, "h-4 w-4")}
-          </span>
-        )}
-        <div className="min-w-0 flex-1 space-y-0.5">
-          <p className="text-sm font-semibold capitalize leading-snug">{openHotspot.edit.product_title ?? openHotspot.label}</p>
-          {openHotspot.edit.buy_url ? (
-            <>
-              <p className="text-[11px] text-[var(--muted-foreground)]">
-                {openHotspot.edit.product_price ?? "See price"} · {storeName(openHotspot.edit.buy_url)}
-              </p>
-              <a href={openHotspot.edit.buy_url} target="_blank" rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-[11px] text-[var(--accent)] hover:underline">
-                Buy <ExternalLink className="h-3 w-3" />
-              </a>
-            </>
-          ) : (
-            <p className="text-[11px] text-[var(--muted-foreground)]">
-              {openHotspot.edit.kind === "add" ? "Added to this room" : "Swapped in this room"}
-            </p>
-          )}
-        </div>
-        <button type="button" onClick={() => setOpenHotspot(null)} aria-label="Close"
-          className="relative h-6 w-6 shrink-0 -mt-1 -mr-1 flex items-center justify-center rounded-full hover:bg-[var(--muted)] before:absolute before:-inset-1.5 before:rounded-full before:content-['']">
-          <X className="h-3.5 w-3.5" />
-        </button>
-      </div>
-    </div>
-  );
+  // After-card markers — a reveal, so ALL labels show at once (unlike the editor, which shows a
+  // label only on tap). Non-interactive; the per-change cards carry the shoppable detail.
+  const boxes = hotspots.map((h) => toBox(h.box_2d));
+  const anchors = declutter(boxes.map((b) => anchorFor(b, boxes)));
 
   return (
-    <div className="h-dvh flex flex-col">
-      <header className="h-14 shrink-0 flex items-center justify-between px-4 border-b border-[var(--border)] bg-[var(--card)]">
-        <Link href="/" className="font-bold tracking-tight text-sm">Nook</Link>
+    <div className="h-dvh flex flex-col bg-[var(--background)]">
+      <header className="h-14 shrink-0 flex items-center justify-between px-4">
+        <Link href="/" aria-label="Nook home"><Wordmark className="text-xl" /></Link>
         <Link href="/restyle/new">
           <Button variant="primary" size="sm">Try this design →</Button>
         </Link>
       </header>
 
-      {/* Desktop immersive stage — a REAL docked flex row, same as the editor's RestyleStudio.tsx,
-          not an absolute overlay: a floating panel on top of the stage would sit on top of real
-          hotspots near the right edge (untappable) and, on a landscape photo close to the stage's
-          own aspect ratio, visibly overlap the image with little or no gutter to float in. Docking
-          it as a sibling column means the stage's own measured width naturally excludes the rail. */}
-      <div className="hidden md:flex flex-1 min-h-0">
-        <div ref={frameRef} className="relative flex-1 min-w-0 h-full bg-[var(--muted)] flex items-center justify-center overflow-hidden">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={imageUrl} alt="" aria-hidden className="absolute inset-0 h-full w-full object-cover blur-2xl brightness-50 scale-110" />
-          <div className={imgWrapClass} style={imgBoxStyle}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={imageUrl} alt={title ?? "Room design"} className={imgClass} onLoad={onImgLoad} />
-            {renderHotspots()}
-            {popover("w-64", "h-14 w-14", 128)}
-          </div>
-        </div>
-        <div className="w-[380px] shrink-0 border-l border-[var(--border)] bg-white overflow-y-auto">
-          {title && <p className="px-4 pt-4 text-sm font-semibold">{title}</p>}
-          {shopPanel}
-        </div>
+      <div className="px-4 pb-1 shrink-0">
+        <h1 className="text-xl font-bold tracking-[-0.02em]">{roomName}</h1>
+        <p className="text-xs text-[var(--muted-foreground)]">
+          {hasRender ? "Swipe through the redesign →" : "Reimagined with Nook"}
+        </p>
       </div>
 
-      {/* Mobile — stacked column */}
-      <div className="md:hidden flex-1 overflow-y-auto">
-        <div className="p-3 space-y-3">
-          {title && <h1 className="text-lg font-bold tracking-tight">{title}</h1>}
-          <div className="relative rounded-3xl border border-[var(--border)] bg-[var(--muted)] overflow-hidden">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={imageUrl} alt={title ?? "Room design"} className="block w-full h-auto object-contain" />
-            {renderHotspots()}
-            {popover("w-56 max-w-[80vw]", "h-12 w-12", 112)}
+      <div
+        ref={scrollRef}
+        onScroll={onScroll}
+        className="flex-1 min-h-0 flex gap-3 overflow-x-auto snap-x snap-mandatory px-[5%] py-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
+        {/* BEFORE */}
+        <WalkCard>
+          <CardImage src={originalUrl} label="Before" labelCls="bg-black/55" />
+          <div className="p-4">
+            <p className="text-base font-bold tracking-tight">The room today</p>
+            <p className="text-xs text-[var(--muted-foreground)] mt-1">Where this space started.</p>
           </div>
-          {/* The editor has an equivalent hint below its canvas; the share page's dots had no
-              such affordance — a first-time viewer had no hint the small markers were tappable. */}
-          {hotspots.length > 0 && (
-            <p className="text-[11px] text-[var(--muted-foreground)] text-center">
-              Tap an item to see what changed
-            </p>
+        </WalkCard>
+
+        {/* AFTER (only if something was generated) */}
+        {hasRender && (
+          <WalkCard>
+            <div className="relative">
+              <CardImage src={imageUrl} label={`After · ${changes.length} change${changes.length === 1 ? "" : "s"}`} labelCls="bg-[var(--accent)]" />
+              {hotspots.map((h, i) => {
+                const m = anchors[i];
+                return (
+                  <span key={`${h.label}-${i}`}
+                    className="absolute pointer-events-none -translate-x-1/2 -translate-y-1/2 flex items-center justify-center"
+                    style={{ left: `${m.x}%`, top: `${m.y}%` }}>
+                    <HotspotMarker bg="bg-[var(--accent)]/75" icon={actionIcon(h.edit, "h-3.5 w-3.5 text-white")} />
+                    <HotspotLabel text={h.label} side={m.x > 55 ? "left" : "right"} />
+                  </span>
+                );
+              })}
+            </div>
+            <div className="p-4">
+              <p className="text-base font-bold tracking-tight">Reimagined</p>
+              <p className="text-xs text-[var(--muted-foreground)] mt-1">
+                {changes.length} change{changes.length === 1 ? "" : "s"}
+                {priced > 0 && <> · {priced} shoppable</>}
+              </p>
+            </div>
+          </WalkCard>
+        )}
+
+        {/* ONE CARD PER CHANGE */}
+        {changes.map((e) => {
+          const tone = TONE[toneOf(e)];
+          const name = e.product_title ?? e.target_label ?? "Item";
+          return (
+            <WalkCard key={e.id}>
+              {e.reference_url ? (
+                <CardImage src={e.reference_url} contain />
+              ) : (
+                <div className="h-[150px] bg-[var(--muted)] flex items-center justify-center text-[var(--muted-foreground)]">
+                  <ChangeIcon e={e} className="h-8 w-8" />
+                </div>
+              )}
+              <div className="p-4 flex-1 flex flex-col">
+                <span className={`inline-flex items-center gap-1 self-start rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${tone.cls}`}>
+                  <ChangeIcon e={e} className="h-3 w-3" /> {tone.verb}
+                </span>
+                <p className="text-base font-bold tracking-tight capitalize mt-2 leading-snug">{name}</p>
+                {e.buy_url ? (
+                  <>
+                    <p className="text-sm mt-1">
+                      {e.product_price && <span className="font-bold">{e.product_price}</span>}
+                      {e.product_price && <span className="text-[var(--muted-foreground)]"> · </span>}
+                      <span className="text-[var(--muted-foreground)]">{storeName(e.buy_url)}</span>
+                    </p>
+                    <a href={e.buy_url} target="_blank" rel="noopener noreferrer"
+                      className="mt-auto inline-flex items-center justify-center gap-1.5 rounded-full bg-[var(--accent)] text-[var(--accent-foreground)] text-sm font-semibold px-4 py-2.5">
+                      Buy <ExternalLink className="h-3.5 w-3.5" />
+                    </a>
+                  </>
+                ) : (
+                  <p className="text-xs text-[var(--muted-foreground)] mt-1">
+                    {e.kind === "add" ? "Added to this room" : e.kind === "remove" ? "Removed from this room" : "Swapped into this room"}
+                  </p>
+                )}
+              </div>
+            </WalkCard>
+          );
+        })}
+
+        {/* SHOP ALL / CTA */}
+        <WalkCard>
+          {products.length > 0 ? (
+            <div className="p-4 flex-1 flex flex-col overflow-y-auto">
+              <div className="flex items-center gap-2">
+                <ShoppingBag className="h-4 w-4" />
+                <p className="text-base font-bold tracking-tight">Shop this look</p>
+              </div>
+              <p className="text-[11px] text-[var(--muted-foreground)] mt-1 mb-3">
+                {products.length} item{products.length === 1 ? "" : "s"}
+                {priced > 0 && <> · from <span className="font-semibold text-[var(--foreground)]">${total.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span></>}
+              </p>
+              <div className="space-y-2">
+                {products.map((e) => (
+                  <a key={e.id} href={e.buy_url ?? undefined} target="_blank" rel="noopener noreferrer"
+                    className="flex gap-2.5 items-center rounded-xl border border-[var(--border)] bg-[var(--card)] p-2 shadow-[var(--shadow-soft)]">
+                    {e.reference_url ? (
+                      /* eslint-disable-next-line @next/next/no-img-element */
+                      <img src={e.reference_url} alt="" className="h-11 w-11 rounded-lg object-cover border border-[var(--border)] shrink-0" />
+                    ) : (
+                      <span className="h-11 w-11 rounded-lg bg-[var(--muted)] shrink-0" />
+                    )}
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-xs font-semibold truncate capitalize">{e.product_title ?? e.target_label}</span>
+                      <span className="block text-[11px] text-[var(--muted-foreground)]">
+                        {e.product_price && <span className="font-semibold text-[var(--foreground)]">{e.product_price}</span>} · {storeName(e.buy_url)}
+                      </span>
+                    </span>
+                    <ExternalLink className="h-4 w-4 text-[var(--muted-foreground)] shrink-0" />
+                  </a>
+                ))}
+              </div>
+              <Link href="/restyle/new" className="mt-4">
+                <Button variant="primary" className="w-full">Try this on your room →</Button>
+              </Link>
+            </div>
+          ) : (
+            <div className="p-6 flex-1 flex flex-col items-center justify-center text-center space-y-3">
+              <span className="h-12 w-12 rounded-full bg-[var(--accent-soft)] flex items-center justify-center">
+                <Sparkles className="h-5 w-5 text-[var(--accent-soft-foreground)]" />
+              </span>
+              <div className="space-y-1">
+                <p className="text-sm font-semibold">Like what you see?</p>
+                <p className="text-xs text-[var(--muted-foreground)]">Reimagine your own room in minutes — completely from scratch.</p>
+              </div>
+              <Link href="/restyle/new" className="w-full">
+                <Button variant="primary" className="w-full">Try this design →</Button>
+              </Link>
+            </div>
           )}
-          {shopPanel}
-        </div>
+        </WalkCard>
       </div>
+
+      {/* dots */}
+      <div className="shrink-0 flex justify-center gap-1.5 py-3">
+        {Array.from({ length: stepCount }).map((_, i) => (
+          <span key={i} className={`h-1.5 rounded-full transition-all ${i === active ? "w-4 bg-[var(--accent)]" : "w-1.5 bg-[var(--border)]"}`} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// One walkthrough card — fixed width, scroll-snap centered, tall enough to fill the strip.
+function WalkCard({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="snap-center shrink-0 w-[86%] max-w-[360px] h-full flex flex-col rounded-3xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow-soft)] overflow-hidden">
+      {children}
+    </div>
+  );
+}
+
+// Card hero image with an optional corner badge.
+function CardImage({ src, label, labelCls, contain }: { src: string; label?: string; labelCls?: string; contain?: boolean }) {
+  return (
+    <div className="relative bg-[var(--muted)] shrink-0">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={src} alt="" className={contain ? "block w-full h-[180px] object-contain" : "block w-full h-[240px] object-cover"} />
+      {label && (
+        <span className={`absolute top-3 left-3 text-[10px] font-bold uppercase tracking-wide px-2.5 py-1 rounded-full text-white ${labelCls ?? "bg-black/55"}`}>
+          {label}
+        </span>
+      )}
     </div>
   );
 }

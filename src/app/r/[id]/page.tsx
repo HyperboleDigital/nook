@@ -1,9 +1,30 @@
 import { notFound } from "next/navigation";
+import type { Metadata } from "next";
 import { supabaseAdmin } from "@/lib/supabase";
 import type { DetectedObject, Restyle, RestyleEdit } from "@/types";
 import ShareCanvas, { type ShareHotspot } from "./ShareCanvas";
 
-export const metadata = { title: "Room design — Nook" };
+// Rich link preview (OG/Twitter): texting or posting a share link now unfurls to the actual
+// reimagined room photo + a title, instead of a bare URL. `current_url` is a public Vercel Blob
+// CDN URL, so it works as an absolute og:image. Runs its own lean query (title/urls/size only) —
+// the page component below does the full render/edit lookup separately.
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  const { data } = await supabaseAdmin
+    .from("restyles").select("title, current_url, width, height").eq("id", id).single();
+  const r = data as Pick<Restyle, "title" | "current_url" | "width" | "height"> | null;
+  if (!r?.current_url) return { title: "Room design — Nook" };
+
+  const title = r.title ? `${r.title} — reimagined with Nook` : "A room reimagined with Nook";
+  const description = "See the before & after, then shop every piece in the room.";
+  const image = { url: r.current_url, width: r.width ?? undefined, height: r.height ?? undefined };
+  return {
+    title,
+    description,
+    openGraph: { title, description, type: "website", siteName: "Nook", images: [image] },
+    twitter: { card: "summary_large_image", title, description, images: [r.current_url] },
+  };
+}
 
 // Public, read-only view of a rendered room + everything changed in it — full-viewport, same
 // immersive treatment as the editor (see (studio)/restyle/[id]/RestyleCanvas.tsx), but with no
@@ -71,6 +92,7 @@ export default async function PublicRestylePage({ params }: { params: Promise<{ 
   return (
     <ShareCanvas
       imageUrl={restyle.current_url}
+      originalUrl={restyle.original_url}
       width={restyle.width}
       height={restyle.height}
       title={restyle.title}
